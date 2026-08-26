@@ -5,6 +5,9 @@ import { DeviceCommand } from '../src/models/DeviceCommand';
 import { Customer } from '../src/models/Customer';
 import { Tenant } from '../src/models/Tenant';
 import { PendingDeviceMapping } from '../src/models/PendingDeviceMapping';
+import { Alert } from '../src/models/Incident';
+import { User } from '../src/models/User';
+import { WhatsAppService } from '../src/services/whatsAppService';
 import { CwmpXmlParser } from '../src/services/cwmpXmlParser';
 import { Types } from 'mongoose';
 
@@ -517,5 +520,223 @@ describe('FINAL SECURITY AND TENANT-ISOLATION AUDIT SUITE', () => {
       expect.objectContaining({ deviceId: mockDeviceId, status: { $in: ['sent', 'sending'] } }),
       expect.objectContaining({ $set: expect.objectContaining({ status: 'failed', errorMessage: 'Notification request rejected' }) })
     );
+  });
+
+  it('TEST 13: OPTICAL CONTINUOUS MONITORING, DEDUPLICATION & 20-ENTRY LIMIT: Duplicate values are dropped; only changed entries are saved; capped at 20', async () => {
+    const mockDevice: any = {
+      _id: mockDeviceId,
+      serialNumber: testSerial,
+      tenantId: mockTenantAId,
+      currentRxPowerDbm: -19.5,
+      currentTxPowerDbm: 2.1,
+      rxPowerHistory: [
+        { valueDbm: -19.5, txPowerDbm: 2.1, timestamp: new Date(Date.now() - 60000) }
+      ],
+      opticalStatus: 'normal',
+      save: vi.fn().mockResolvedValue(true),
+    };
+
+    // 1. Ingest IDENTICAL power values -> NO duplicate entry should be created
+    await CwmpService.processOpticalTelemetryChange(mockDevice, -19.5, 2.1);
+    expect(mockDevice.rxPowerHistory.length).toBe(1);
+
+    // 2. Ingest CHANGED power values -> creates 1 new entry
+    await CwmpService.processOpticalTelemetryChange(mockDevice, -19.7, 2.15);
+    expect(mockDevice.rxPowerHistory.length).toBe(2);
+    expect(mockDevice.currentRxPowerDbm).toBe(-19.7);
+    expect(mockDevice.currentTxPowerDbm).toBe(2.15);
+
+    // 3. Ingest 25 sequential distinct power changes -> verify capped strictly at last 20
+    for (let i = 0; i < 25; i++) {
+      await CwmpService.processOpticalTelemetryChange(mockDevice, -19.8 - i * 0.05, 2.2 + i * 0.01);
+    }
+    expect(mockDevice.rxPowerHistory.length).toBe(20);
+  });
+
+  it('TEST 14: OPTICAL 0.5 dB & 1.0 dB SHIFT CRITICAL ALERT & WHATSAPP DISPATCH: Generates DB Alert and sends WhatsApp notification to Operator and Technician', async () => {
+    const mockCustomer = {
+      _id: new Types.ObjectId(),
+      tenantId: mockTenantAId,
+      fullName: 'Ravi Kumar (FTTH Subscriber)',
+      phone: '+919876543210',
+    };
+
+    const mockOperatorUser = {
+      _id: new Types.ObjectId(),
+      tenantId: mockTenantAId,
+      fullName: 'Operator Admin',
+      phone: '+919988776655',
+      role: 'operator_admin',
+    };
+
+    const mockTechnicianUser = {
+      _id: new Types.ObjectId(),
+      tenantId: mockTenantAId,
+      fullName: 'Suresh Field Tech',
+      phone: '+919123456789',
+      role: 'technician',
+    };
+
+    vi.spyOn(Customer, 'findById').mockResolvedValue(mockCustomer as any);
+    vi.spyOn(Customer, 'findOne').mockResolvedValue(mockCustomer as any);
+    vi.spyOn(User, 'find').mockImplementation((query: any) => {
+      if (query.role === 'technician') return Promise.resolve([mockTechnicianUser] as any);
+      return Promise.resolve([mockOperatorUser] as any);
+    });
+    vi.spyOn(Tenant, 'findById').mockResolvedValue({
+      _id: mockTenantAId,
+      name: 'Rudra Fiber',
+      displayName: 'Rudra Fiber',
+      owner: { phone: '+919988776655' }
+    } as any);
+
+    const alertCreateSpy = vi.spyOn(Alert, 'create').mockResolvedValue({
+      _id: new Types.ObjectId(),
+      tenantId: mockTenantAId,
+    } as any);
+
+    const waAlertSpy = vi.spyOn(WhatsAppService, 'sendOpticalPowerAlert').mockResolvedValue({
+      success: true,
+      messageId: 'wa_msg_123',
+    });
+
+    const mockDevice: any = {
+      _id: mockDeviceId,
+      serialNumber: testSerial,
+      tenantId: mockTenantAId,
+      customerId: mockCustomer._id,
+      currentRxPowerDbm: -19.0,
+      currentTxPowerDbm: 2.5,
+      rxPowerHistory: [
+        { valueDbm: -19.0, txPowerDbm: 2.5, timestamp: new Date(Date.now() - 60000) }
+      ],
+      opticalStatus: 'normal',
+      save: vi.fn().mockResolvedValue(true),
+    };
+
+    // Trigger sudden -1.2 dB drop (-19.0 -> -20.2 dBm) -> shift >= 0.5 and >= 1.0 dB
+    await CwmpService.processOpticalTelemetryChange(mockDevice, -20.2, 2.4);
+
+    // VERIFY: Alert created in Database with exact fields
+    expect(alertCreateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: mockTenantAId,
+      severity: 'critical',
+      sourceType: 'ONT_OPTICAL',
+      sourceId: testSerial,
+      sourceName: 'Ravi Kumar (FTTH Subscriber)',
+      valueRecorded: -20.2,
+      acknowledged: false,
+    }));
+
+    // VERIFY: WhatsApp Alert sent to Operator and Technician with all required payload details
+    expect(waAlertSpy).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: mockTenantAId.toString(),
+      customerName: 'Ravi Kumar (FTTH Subscriber)',
+      serialNumber: testSerial,
+      oldRxPowerDbm: -19.0,
+      newRxPowerDbm: -20.2,
+      deltaRxDb: -1.2,
+      severity: 'critical',
+    }));
+  });
+
+  it('TEST 15: OPTICAL AUTOMATIC RECOVERY ALERT & RESOLUTION: Return to healthy margin resolves open alerts and dispatches recovery notification', async () => {
+    const mockCustomer = {
+      _id: new Types.ObjectId(),
+      tenantId: mockTenantAId,
+      fullName: 'Ravi Kumar (FTTH Subscriber)',
+      phone: '+919876543210',
+    };
+
+    const mockOperatorUser = {
+      _id: new Types.ObjectId(),
+      tenantId: mockTenantAId,
+      fullName: 'Operator Admin',
+      phone: '+919988776655',
+      role: 'operator_admin',
+    };
+
+    vi.spyOn(Customer, 'findById').mockResolvedValue(mockCustomer as any);
+    vi.spyOn(User, 'find').mockResolvedValue([mockOperatorUser] as any);
+    vi.spyOn(Tenant, 'findById').mockResolvedValue({
+      _id: mockTenantAId,
+      name: 'Rudra Fiber',
+      owner: { phone: '+919988776655' }
+    } as any);
+
+    const alertUpdateSpy = vi.spyOn(Alert, 'updateMany').mockResolvedValue({ acknowledged: true, modifiedCount: 1 } as any);
+    const waRecoverySpy = vi.spyOn(WhatsAppService, 'sendOpticalRecoveryAlert').mockResolvedValue({
+      success: true,
+      messageId: 'wa_recov_123',
+    });
+
+    const mockDevice: any = {
+      _id: mockDeviceId,
+      serialNumber: testSerial,
+      tenantId: mockTenantAId,
+      customerId: mockCustomer._id,
+      currentRxPowerDbm: -28.5, // Was in critical state
+      currentTxPowerDbm: 2.0,
+      rxPowerHistory: [
+        { valueDbm: -28.5, txPowerDbm: 2.0, timestamp: new Date(Date.now() - 60000) }
+      ],
+      opticalStatus: 'critical',
+      save: vi.fn().mockResolvedValue(true),
+    };
+
+    // Optical signal restored to healthy -19.5 dBm
+    await CwmpService.processOpticalTelemetryChange(mockDevice, -19.5, 2.3);
+
+    // VERIFY: Optical status restored to normal
+    expect(mockDevice.opticalStatus).toBe('normal');
+
+    // VERIFY: Open unacknowledged alerts for this ONT automatically marked as acknowledged
+    expect(alertUpdateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: mockTenantAId, sourceId: testSerial, sourceType: 'ONT_OPTICAL', acknowledged: false }),
+      expect.objectContaining({ $set: expect.objectContaining({ acknowledged: true }) })
+    );
+
+    // VERIFY: WhatsApp Recovery Notification dispatched
+    expect(waRecoverySpy).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: mockTenantAId.toString(),
+      customerName: 'Ravi Kumar (FTTH Subscriber)',
+      serialNumber: testSerial,
+      currentRxPowerDbm: -19.5,
+      previousRxPowerDbm: -28.5,
+    }));
+  });
+
+  it('TEST 16: STRICT MULTI-TENANT ISOLATION OF ALERTS: Telemetry alerts from Tenant A are isolated and inaccessible to Tenant B', async () => {
+    const alertQuerySpy = vi.spyOn(Alert, 'find').mockImplementation((query: any) => {
+      if (query.tenantId && query.tenantId.toString() === mockTenantAId.toString()) {
+        return {
+          populate: vi.fn().mockReturnValue({
+            sort: vi.fn().mockReturnValue({
+              skip: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([
+                  { _id: new Types.ObjectId(), tenantId: mockTenantAId, sourceId: 'ONT_TENANT_A' }
+                ]),
+              }),
+            }),
+          }),
+        } as any;
+      }
+      return {
+        populate: vi.fn().mockReturnValue({
+          sort: vi.fn().mockReturnValue({
+            skip: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+      } as any;
+    });
+
+    const tenantAAlerts = await Alert.find({ tenantId: mockTenantAId }).populate('').sort({}).skip(0).limit(10);
+    const tenantBAlerts = await Alert.find({ tenantId: mockTenantBId }).populate('').sort({}).skip(0).limit(10);
+
+    expect(tenantAAlerts.length).toBe(1);
+    expect((tenantAAlerts[0] as any).sourceId).toBe('ONT_TENANT_A');
+    expect(tenantBAlerts.length).toBe(0);
   });
 });

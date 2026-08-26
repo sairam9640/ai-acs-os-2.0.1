@@ -39,6 +39,8 @@ export interface CwmpInformData {
 import { SupportedParameterCache } from '../models/SupportedParameterCache.js';
 import { CwmpSessionLog } from '../models/CwmpSessionLog.js';
 import { DeviceCommand } from '../models/DeviceCommand.js';
+import { Alert } from '../models/Incident.js';
+import { User } from '../models/User.js';
 
 export interface CwmpHitLog {
   timestamp: Date;
@@ -470,6 +472,218 @@ export class CwmpService {
   }
 
   /**
+   * Continuous Optical Telemetry Ingestion, Deduplication, History (last 20 only), and Alert Engine
+   */
+  static async processOpticalTelemetryChange(
+    device: IDevice,
+    rxPower?: number,
+    txPower?: number,
+    bias?: number,
+    volt?: number,
+    temp?: number,
+    sourcePath?: string
+  ): Promise<void> {
+    if (rxPower === undefined && txPower === undefined) return;
+
+    if (!device.rxPowerHistory) device.rxPowerHistory = [];
+    const lastHist = device.rxPowerHistory.length > 0
+      ? device.rxPowerHistory[device.rxPowerHistory.length - 1]
+      : null;
+
+    const currentRx = rxPower !== undefined ? rxPower : device.currentRxPowerDbm;
+    const currentTx = txPower !== undefined ? txPower : device.currentTxPowerDbm;
+
+    if (currentRx === undefined) return;
+
+    const deltaRx = lastHist ? parseFloat((currentRx - lastHist.valueDbm).toFixed(2)) : 0;
+    const deltaTx = (lastHist?.txPowerDbm !== undefined && currentTx !== undefined)
+      ? parseFloat((currentTx - lastHist.txPowerDbm).toFixed(2))
+      : 0;
+
+    const isRxChanged = !lastHist || Math.abs(currentRx - lastHist.valueDbm) >= 0.01;
+    const isTxChanged = currentTx !== undefined && (!lastHist || lastHist.txPowerDbm === undefined || Math.abs(currentTx - lastHist.txPowerDbm) >= 0.01);
+
+    // 1. DEDUPLICATION: Only record a new history entry when values have changed
+    if (isRxChanged || isTxChanged) {
+      device.rxPowerHistory.push({
+        valueDbm: currentRx,
+        txPowerDbm: currentTx,
+        biasCurrentMa: bias ?? device.biasCurrentMa,
+        voltageV: volt ?? device.opticalVoltageV,
+        temperatureC: temp ?? device.temperatureC,
+        timestamp: new Date(),
+      });
+
+      // 2. LIMIT HISTORY: Retain ONLY the last 20 changes
+      if (device.rxPowerHistory.length > 20) {
+        device.rxPowerHistory = device.rxPowerHistory.slice(-20);
+      }
+
+      device.currentRxPowerDbm = currentRx;
+      if (currentTx !== undefined) device.currentTxPowerDbm = currentTx;
+      device.opticalDelta = deltaRx;
+      device.opticalHealthTrend = deltaRx > 0.3 ? 'improving' : deltaRx < -0.3 ? 'degrading' : 'stable';
+      if (sourcePath) device.opticalTelemetrySourcePath = sourcePath;
+
+      const previousStatus = device.opticalStatus;
+      const newStatus = currentRx < -27.0 ? 'critical' : currentRx < -24.5 ? 'warning' : 'normal';
+      device.opticalStatus = newStatus;
+
+      // 3. 0.5 or 1.0 dB Change Detection & Critical/Warning Alert Generation
+      if (lastHist && (Math.abs(deltaRx) >= 0.5 || currentRx < -27.0)) {
+        const severity = (Math.abs(deltaRx) >= 1.0 || currentRx < -27.0) ? 'critical' : 'warning';
+        
+        // Find associated customer
+        let customer = null;
+        if (device.customerId) {
+          customer = await Customer.findById(device.customerId);
+        } else if (device.tenantId) {
+          customer = await Customer.findOne({ assignedDeviceId: device._id, tenantId: device.tenantId });
+        }
+
+        const customerName = customer?.fullName || 'Unassigned Subscriber';
+
+        // Save Alert in Database with strict tenant isolation
+        const alert = await Alert.create({
+          tenantId: device.tenantId,
+          severity,
+          sourceType: 'ONT_OPTICAL',
+          sourceId: device.serialNumber,
+          sourceName: customerName,
+          message: `Optical power shift of ${deltaRx > 0 ? '+' : ''}${deltaRx} dB detected on ${device.serialNumber} (${customerName}). Old Rx: ${lastHist.valueDbm.toFixed(2)} dBm, New Rx: ${currentRx.toFixed(2)} dBm${currentTx !== undefined ? ` (Tx: ${currentTx.toFixed(2)} dBm)` : ''}.`,
+          valueRecorded: currentRx,
+          thresholdDbm: -27.0,
+          acknowledged: false,
+          firstSeenAt: new Date(),
+          lastSeenAt: new Date(),
+          occurrencesCount: 1,
+        });
+
+        console.log(
+          `[OPTICAL_ALERT_SAVED] Alert ${alert._id} created for ${device.serialNumber} | Delta: ${deltaRx} dB | Severity: ${severity}`
+        );
+
+        // Resolve Assigned Operators & Technicians for WhatsApp Dispatch
+        if (device.tenantId) {
+          const operatorUsers = await User.find({
+            tenantId: device.tenantId,
+            role: { $in: ['operator_admin', 'noc_operator'] },
+            status: 'active',
+          });
+
+          const technicianUsers = await User.find({
+            tenantId: device.tenantId,
+            role: 'technician',
+            status: 'active',
+          });
+
+          const tenant = await Tenant.findById(device.tenantId);
+
+          const recipients: Array<{ phone: string; role: 'operator' | 'technician' | 'admin' }> = [];
+          if (tenant?.owner?.phone) {
+            recipients.push({ phone: tenant.owner.phone, role: 'operator' });
+          }
+          for (const op of operatorUsers) {
+            if (op.phone && !recipients.some(r => r.phone === op.phone)) {
+              recipients.push({ phone: op.phone, role: 'operator' });
+            }
+          }
+          for (const tech of technicianUsers) {
+            if (tech.phone && !recipients.some(r => r.phone === tech.phone)) {
+              recipients.push({ phone: tech.phone, role: 'technician' });
+            }
+          }
+
+          for (const r of recipients) {
+            WhatsAppService.sendOpticalPowerAlert({
+              tenantId: device.tenantId.toString(),
+              recipientPhone: r.phone,
+              recipientRole: r.role,
+              customerName,
+              serialNumber: device.serialNumber,
+              oldRxPowerDbm: lastHist.valueDbm,
+              newRxPowerDbm: currentRx,
+              deltaRxDb: deltaRx,
+              oldTxPowerDbm: lastHist.txPowerDbm,
+              newTxPowerDbm: currentTx,
+              deltaTxDb: deltaTx,
+              timestamp: new Date(),
+              severity,
+            }).catch(err => console.error('[CwmpService] WhatsApp optical alert failed:', err));
+          }
+        }
+      }
+
+      // 4. AUTOMATIC RECOVERY ALERT: When optical power returns to normal range (-10 dBm to -24.5 dBm)
+      const wasDegraded = previousStatus === 'critical' || previousStatus === 'warning' || (lastHist && lastHist.valueDbm < -27.0);
+      const isNowNormal = currentRx >= -24.5 && currentRx <= -10.0;
+
+      if (wasDegraded && isNowNormal) {
+        // Auto-acknowledge previous open optical alerts for this device
+        await Alert.updateMany(
+          {
+            tenantId: device.tenantId,
+            sourceId: device.serialNumber,
+            sourceType: 'ONT_OPTICAL',
+            acknowledged: false,
+          },
+          {
+            $set: {
+              acknowledged: true,
+              acknowledgedAt: new Date(),
+            },
+          }
+        );
+
+        let customer = null;
+        if (device.customerId) {
+          customer = await Customer.findById(device.customerId);
+        } else if (device.tenantId) {
+          customer = await Customer.findOne({ assignedDeviceId: device._id, tenantId: device.tenantId });
+        }
+        const customerName = customer?.fullName || 'Unassigned Subscriber';
+
+        if (device.tenantId) {
+          const operatorUsers = await User.find({
+            tenantId: device.tenantId,
+            role: { $in: ['operator_admin', 'noc_operator'] },
+            status: 'active',
+          });
+          const technicianUsers = await User.find({
+            tenantId: device.tenantId,
+            role: 'technician',
+            status: 'active',
+          });
+          const tenant = await Tenant.findById(device.tenantId);
+
+          const recipients: Array<{ phone: string; role: 'operator' | 'technician' | 'admin' }> = [];
+          if (tenant?.owner?.phone) recipients.push({ phone: tenant.owner.phone, role: 'operator' });
+          for (const op of operatorUsers) {
+            if (op.phone && !recipients.some(r => r.phone === op.phone)) recipients.push({ phone: op.phone, role: 'operator' });
+          }
+          for (const tech of technicianUsers) {
+            if (tech.phone && !recipients.some(r => r.phone === tech.phone)) recipients.push({ phone: tech.phone, role: 'technician' });
+          }
+
+          for (const r of recipients) {
+            WhatsAppService.sendOpticalRecoveryAlert({
+              tenantId: device.tenantId.toString(),
+              recipientPhone: r.phone,
+              recipientRole: r.role,
+              customerName,
+              serialNumber: device.serialNumber,
+              previousRxPowerDbm: lastHist ? lastHist.valueDbm : -28.0,
+              currentRxPowerDbm: currentRx,
+              currentTxPowerDbm: currentTx,
+              timestamp: new Date(),
+            }).catch(err => console.error('[CwmpService] WhatsApp optical recovery alert failed:', err));
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Phase 1: Handles incoming Inform SOAP message from CPE
    */
   static async handleInform(
@@ -641,20 +855,6 @@ export class CwmpService {
         device.lastRawInformXml = xml;
         if (!device.rawParameters) device.rawParameters = {};
 
-        if (rxPower !== undefined) {
-          if (device.currentRxPowerDbm !== undefined) {
-            const delta = parseFloat((rxPower - device.currentRxPowerDbm).toFixed(2));
-            device.opticalDelta = delta;
-            device.opticalHealthTrend = delta > 0.3 ? 'improving' : delta < -0.3 ? 'degrading' : 'stable';
-          }
-          device.currentRxPowerDbm = rxPower;
-          device.opticalStatus = opticalStatus;
-        }
-        if (txPower !== undefined) device.currentTxPowerDbm = txPower;
-        if (informData.opticalBiasCurrent !== undefined) device.biasCurrentMa = informData.opticalBiasCurrent;
-        if (informData.opticalVoltage !== undefined) device.opticalVoltageV = informData.opticalVoltage;
-        if (informData.temperatureC !== undefined) device.temperatureC = informData.temperatureC;
-
         if (informData.wifiSsid24 && device.wifi24) {
           device.wifi24.ssid = informData.wifiSsid24;
           if (informData.wifiPass24) device.wifi24.password = informData.wifiPass24;
@@ -674,11 +874,15 @@ export class CwmpService {
           device.lanHostCount = informData.connectedClients.length;
         }
 
-        if (historyRecord) {
-          if (!device.rxPowerHistory) device.rxPowerHistory = [];
-          device.rxPowerHistory.push(historyRecord);
-          if (device.rxPowerHistory.length > 50) device.rxPowerHistory = device.rxPowerHistory.slice(-50);
-        }
+        // Process Continuous Optical Telemetry, Deduplication, History (20 Limit), and Critical/Recovery Alerts
+        await CwmpService.processOpticalTelemetryChange(
+          device,
+          rxPower,
+          txPower,
+          informData.opticalBiasCurrent,
+          informData.opticalVoltage,
+          informData.temperatureC
+        );
 
         // Device ownership is immutable during CWMP telemetry ingestion (only modified via explicit UI action)
 
@@ -1696,33 +1900,16 @@ ${stringElements}
       const temp = CwmpXmlParser.normalizeTemperature(rawTemp);
       if (temp !== undefined) device.temperatureC = temp;
 
-      // Delta-based Optical Recording: Only record when optical power changes or first reading
-      if (!device.rxPowerHistory) device.rxPowerHistory = [];
-      const lastHist = device.rxPowerHistory[device.rxPowerHistory.length - 1];
-      const rxChanged = !lastHist || Math.abs(lastHist.valueDbm - normalizedRx.normalizedValue) >= 0.1;
-      const txChanged = normalizedTx?.normalizedValue !== undefined && (!lastHist?.txPowerDbm || Math.abs(lastHist.txPowerDbm - normalizedTx.normalizedValue) >= 0.2);
-
-      if (rxChanged || txChanged) {
-        device.rxPowerHistory.push({
-          valueDbm: normalizedRx.normalizedValue,
-          txPowerDbm: normalizedTx?.normalizedValue,
-          biasCurrentMa: bias,
-          voltageV: volt,
-          temperatureC: temp,
-          timestamp: new Date(),
-        });
-        if (device.rxPowerHistory.length > 50) device.rxPowerHistory = device.rxPowerHistory.slice(-50);
-        console.log(
-          `[CWMP ACS] [OPTICAL_DELTA_SAVED] Serial: ${device.serialNumber} | New RX: ${normalizedRx.normalizedValue} dBm (Previous: ${lastHist?.valueDbm ?? 'None'}) | At: ${new Date().toLocaleString()}`
-        );
-
-        // Immediate Operator Alert on Critical Signal Drop (< -27 dBm or sudden > 3 dB drop)
-        if (normalizedRx.normalizedValue < -27.0 || (lastHist && (normalizedRx.normalizedValue - lastHist.valueDbm) <= -3.0)) {
-          console.warn(
-            `[CWMP ACS CRITICAL ALERT] 🚨 Optical Signal Alert for ${device.serialNumber}: ${normalizedRx.normalizedValue} dBm at ${new Date().toLocaleTimeString()}`
-          );
-        }
-      }
+      // Process Continuous Optical Telemetry, Deduplication, History (20 Limit), and Critical/Recovery Alerts
+      await CwmpService.processOpticalTelemetryChange(
+        device,
+        normalizedRx.normalizedValue,
+        normalizedTx?.normalizedValue,
+        bias,
+        volt,
+        temp,
+        activeCandidate
+      );
 
       // Record in cache as SUPPORTED
       if (activeCandidate && session) {

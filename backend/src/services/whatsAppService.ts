@@ -692,5 +692,145 @@ export class WhatsAppService {
 
     return { success: true, messageId };
   }
+
+  /**
+   * Dispatches Critical Optical Shift / Degradation Alert to Operator & Assigned Technician
+   */
+  static async sendOpticalPowerAlert(params: {
+    tenantId: string;
+    recipientPhone: string;
+    recipientRole: 'operator' | 'technician' | 'admin';
+    customerName: string;
+    serialNumber: string;
+    oldRxPowerDbm: number;
+    newRxPowerDbm: number;
+    deltaRxDb: number;
+    oldTxPowerDbm?: number;
+    newTxPowerDbm?: number;
+    deltaTxDb?: number;
+    timestamp: Date;
+    severity?: 'warning' | 'critical';
+  }): Promise<{ success: boolean; messageId: string }> {
+    const tenant = await Tenant.findById(params.tenantId);
+    const tenantName = tenant?.displayName || tenant?.name || 'AI ISP OS';
+    const messageId = `opt_alert_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+    const formattedTime = new Date(params.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+    const rxSign = params.deltaRxDb > 0 ? '+' : '';
+    const isCritical = params.severity === 'critical' || params.newRxPowerDbm < -27.0;
+
+    const alertMessage =
+      `🚨 *${tenantName} — Optical Power Critical Alert*\n\n` +
+      `⚠️ *Significant Optical Signal Change Detected (${isCritical ? 'CRITICAL' : 'WARNING'})*\n\n` +
+      `👤 *Customer Name:* ${params.customerName}\n` +
+      `📟 *ONT Serial Number:* \`${params.serialNumber}\`\n` +
+      `📉 *Previous Power:* ${params.oldRxPowerDbm.toFixed(2)} dBm${params.oldTxPowerDbm !== undefined ? ` (Tx: ${params.oldTxPowerDbm.toFixed(2)} dBm)` : ''}\n` +
+      `📊 *Current Power:* ${params.newRxPowerDbm.toFixed(2)} dBm${params.newTxPowerDbm !== undefined ? ` (Tx: ${params.newTxPowerDbm.toFixed(2)} dBm)` : ''}\n` +
+      `⚡ *Power Difference (Delta):* ${rxSign}${params.deltaRxDb.toFixed(2)} dB\n` +
+      `🕒 *Time Detected:* ${formattedTime} IST\n` +
+      `🎯 *Recipient Role:* ${params.recipientRole.toUpperCase()}\n\n` +
+      `🔧 _AI ACS OS Multi-Tenant Optical Telemetry Engine_`;
+
+    try {
+      const jid = this.formatJid(params.recipientPhone);
+      const session = await this.getSessionConfig();
+      let sentViaSocket = false;
+
+      if (this.sock && session.status === 'CONNECTED') {
+        try {
+          await this.sock.sendMessage(jid, { text: alertMessage });
+          sentViaSocket = true;
+          console.log(`[WhatsAppService] ✓ Dispatched optical shift alert for [${params.serialNumber}] to [${params.recipientPhone}]`);
+        } catch (sockErr: any) {
+          console.warn(`[WhatsAppService] Live WA socket error: ${sockErr.message}`);
+        }
+      }
+
+      await NotificationLog.create({
+        tenantId: tenant?._id,
+        channel: 'WHATSAPP',
+        recipient: {
+          identifier: params.recipientPhone,
+          name: params.customerName || 'Subscriber',
+          type: params.recipientRole === 'technician' ? 'TECHNICIAN' : params.recipientRole === 'operator' ? 'OPERATOR' : 'CUSTOMER',
+        },
+        templateCode: 'OPTICAL_POWER_ALERT',
+        contentRenderedSanitized: alertMessage,
+        status: sentViaSocket ? 'delivered' : 'sent',
+        externalMessageId: messageId,
+        correlationId: messageId,
+      });
+    } catch (err: any) {
+      console.error('[WhatsAppService] Error recording optical alert:', err);
+    }
+
+    return { success: true, messageId };
+  }
+
+  /**
+   * Dispatches Optical Recovery Alert when signal returns to normal margin
+   */
+  static async sendOpticalRecoveryAlert(params: {
+    tenantId: string;
+    recipientPhone: string;
+    recipientRole: 'operator' | 'technician' | 'admin';
+    customerName: string;
+    serialNumber: string;
+    previousRxPowerDbm: number;
+    currentRxPowerDbm: number;
+    currentTxPowerDbm?: number;
+    timestamp: Date;
+  }): Promise<{ success: boolean; messageId: string }> {
+    const tenant = await Tenant.findById(params.tenantId);
+    const tenantName = tenant?.displayName || tenant?.name || 'AI ISP OS';
+    const messageId = `opt_recov_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+    const formattedTime = new Date(params.timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+    const recoveryMessage =
+      `✅ *${tenantName} — Optical Signal Recovered to Normal*\n\n` +
+      `🟢 *Optical Power Margins are now Normal and Stable*\n\n` +
+      `👤 *Customer Name:* ${params.customerName}\n` +
+      `📟 *ONT Serial Number:* \`${params.serialNumber}\`\n` +
+      `📉 *Previous Degraded Power:* ${params.previousRxPowerDbm.toFixed(2)} dBm\n` +
+      `📊 *Current Restored Power:* ${params.currentRxPowerDbm.toFixed(2)} dBm${params.currentTxPowerDbm !== undefined ? ` (Tx: ${params.currentTxPowerDbm.toFixed(2)} dBm)` : ''}\n` +
+      `🕒 *Restored At:* ${formattedTime} IST\n` +
+      `🎯 *Recipient Role:* ${params.recipientRole.toUpperCase()}\n\n` +
+      `🛡️ _AI ACS OS Multi-Tenant Optical Telemetry Engine_`;
+
+    try {
+      const jid = this.formatJid(params.recipientPhone);
+      const session = await this.getSessionConfig();
+      let sentViaSocket = false;
+
+      if (this.sock && session.status === 'CONNECTED') {
+        try {
+          await this.sock.sendMessage(jid, { text: recoveryMessage });
+          sentViaSocket = true;
+          console.log(`[WhatsAppService] ✓ Dispatched optical recovery alert for [${params.serialNumber}] to [${params.recipientPhone}]`);
+        } catch (sockErr: any) {
+          console.warn(`[WhatsAppService] Live WA socket error: ${sockErr.message}`);
+        }
+      }
+
+      await NotificationLog.create({
+        tenantId: tenant?._id,
+        channel: 'WHATSAPP',
+        recipient: {
+          identifier: params.recipientPhone,
+          name: params.customerName || 'Subscriber',
+          type: params.recipientRole === 'technician' ? 'TECHNICIAN' : params.recipientRole === 'operator' ? 'OPERATOR' : 'CUSTOMER',
+        },
+        templateCode: 'OPTICAL_POWER_RECOVERY',
+        contentRenderedSanitized: recoveryMessage,
+        status: sentViaSocket ? 'delivered' : 'sent',
+        externalMessageId: messageId,
+        correlationId: messageId,
+      });
+    } catch (err: any) {
+      console.error('[WhatsAppService] Error recording optical recovery alert:', err);
+    }
+
+    return { success: true, messageId };
+  }
 }
 

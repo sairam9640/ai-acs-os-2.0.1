@@ -3888,6 +3888,123 @@ operatorRouter.get('/incidents', async (req: AuthenticatedRequest, res: Response
   }
 });
 
+/**
+ * 11.1 Optical & Network Alerts Feed with Acknowledgment Status
+ */
+operatorRouter.get('/alerts', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { acknowledged, severity, sourceType, page, limit } = req.query;
+
+    const query: any = { tenantId };
+    if (acknowledged !== undefined && acknowledged !== 'all') {
+      query.acknowledged = acknowledged === 'true';
+    }
+    if (severity && severity !== 'all') {
+      query.severity = severity;
+    }
+    if (sourceType && sourceType !== 'all') {
+      query.sourceType = sourceType;
+    }
+
+    const pageNum = parseInt(String(page || 1), 10);
+    const limitNum = parseInt(String(limit || 50), 10);
+
+    const [alerts, total, unackedCount] = await Promise.all([
+      Alert.find(query)
+        .populate('acknowledgedBy', 'fullName email role')
+        .sort({ lastSeenAt: -1, createdAt: -1 })
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum),
+      Alert.countDocuments(query),
+      Alert.countDocuments({ tenantId, acknowledged: false }),
+    ]);
+
+    return res.json({
+      success: true,
+      alerts,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum) || 1,
+      },
+      unackedCount,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 11.2 Acknowledge Optical / Infrastructure Alert
+ */
+operatorRouter.post('/alerts/:id/ack', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+
+    const alert = await Alert.findOneAndUpdate(
+      { _id: id, tenantId },
+      {
+        $set: {
+          acknowledged: true,
+          acknowledgedBy: req.user!.id,
+          acknowledgedAt: new Date(),
+        },
+      },
+      { new: true }
+    );
+
+    if (!alert) return res.status(404).json({ success: false, error: 'Alert not found in your tenant context' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'ALERT_ACKNOWLEDGED',
+      targetResource: 'Alert',
+      targetId: alert._id.toString(),
+      targetIdentifier: alert.sourceId,
+      correlationId: req.correlationId || `ack_${Date.now()}`,
+    });
+
+    return res.json({ success: true, alert, message: 'Alert acknowledged successfully' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 11.3 Device Optical Power History (Strict 20-Change Limit with Rx/Tx)
+ */
+operatorRouter.get('/devices/:id/optical-history', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+
+    const device = await Device.findOne(getSafeDeviceQuery(id, tenantId));
+    if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
+
+    const history = (device.rxPowerHistory || []).slice(-20);
+
+    return res.json({
+      success: true,
+      serialNumber: device.serialNumber,
+      currentRxPowerDbm: device.currentRxPowerDbm,
+      currentTxPowerDbm: device.currentTxPowerDbm,
+      opticalStatus: device.opticalStatus,
+      opticalDelta: device.opticalDelta,
+      opticalHealthTrend: device.opticalHealthTrend,
+      historyCount: history.length,
+      history,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 operatorRouter.post('/incidents/:id/dispatch-technician', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { technicianUserId, priority, title } = req.body;
