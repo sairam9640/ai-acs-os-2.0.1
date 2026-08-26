@@ -418,8 +418,137 @@ export const DeviceDetail: React.FC = () => {
     setIsRefreshing(false);
   };
 
+  // Async Command Execution & 30-Second Progress Overlay State
+  const [activeCommandId, setActiveCommandId] = useState<string | null>(null);
+  const [isOverlayActive, setIsOverlayActive] = useState(false);
+  const [overlaySecondsLeft, setOverlaySecondsLeft] = useState(30);
+  const [overlayTitle, setOverlayTitle] = useState('Updating device... please wait (up to 30 seconds)');
+  const [pendingToast, setPendingToast] = useState<{ message: string; type: 'info' | 'success' | 'warning' } | null>(null);
+  const [retryingCmdId, setRetryingCmdId] = useState<string | null>(null);
+  const [cancelingCmdId, setCancelingCmdId] = useState<string | null>(null);
+
+  const start30sCommandTracking = (cmdId: string, initialTitle = 'Updating device... please wait (up to 30 seconds)') => {
+    setActiveCommandId(cmdId);
+    setIsOverlayActive(true);
+    setOverlaySecondsLeft(30);
+    setOverlayTitle(initialTitle);
+
+    let secondsRemaining = 30;
+    const countdownTimer = setInterval(() => {
+      secondsRemaining -= 1;
+      setOverlaySecondsLeft(secondsRemaining);
+      if (secondsRemaining <= 0) {
+        clearInterval(countdownTimer);
+        clearInterval(pollTimer);
+        setIsOverlayActive(false);
+        setPendingToast({
+          type: 'info',
+          message: 'Request moved to "Pending Updates". UI is unlocked — ONT will apply configuration upon next contact.',
+        });
+        fetchWorkspace(id);
+      }
+    }, 1000);
+
+    const pollTimer = setInterval(async () => {
+      try {
+        const res = await api.get(`/operator/devices/${id}/commands/${cmdId}`);
+        if (res.success && res.command) {
+          const status = res.command.status;
+          if (status === 'success') {
+            clearInterval(countdownTimer);
+            clearInterval(pollTimer);
+            setIsOverlayActive(false);
+            setPendingToast({
+              type: 'success',
+              message: 'Configuration Updated Successfully! Live parameters refreshed from device.',
+            });
+            setTimeout(() => setPendingToast(null), 6000);
+            await fetchWorkspace(id);
+          } else if (status === 'failed' || status === 'expired' || status === 'canceled') {
+            clearInterval(countdownTimer);
+            clearInterval(pollTimer);
+            setIsOverlayActive(false);
+            setPendingToast({
+              type: 'warning',
+              message: `Configuration update ${status}: ${res.command.errorMessage || 'Operation failed.'}`,
+            });
+            await fetchWorkspace(id);
+          }
+        }
+      } catch (_) {}
+    }, 1500);
+  };
+
+  // Background Sync for Pending Updates
+  useEffect(() => {
+    if (!id || !workspace?.queue) return;
+    const hasPending = workspace.queue.some((cmd: any) => cmd.status === 'pending' || cmd.status === 'sending');
+    if (hasPending) {
+      const bgInterval = setInterval(async () => {
+        try {
+          const res = await api.get(`/operator/devices/${id}/workspace`);
+          if (res.success && res.workspace) {
+            const newlyCompleted = res.workspace.queue?.some(
+              (newCmd: any) => newCmd.status === 'success' && workspace.queue?.some((oldCmd: any) => oldCmd.id === newCmd.id && (oldCmd.status === 'pending' || oldCmd.status === 'sending'))
+            );
+            if (newlyCompleted) {
+              setPendingToast({
+                type: 'success',
+                message: 'Pending configuration update successfully acknowledged by ONT! Parameters refreshed.',
+              });
+              setTimeout(() => setPendingToast(null), 6000);
+            }
+            setWorkspace(res.workspace);
+          }
+        } catch (_) {}
+      }, 5000);
+      return () => clearInterval(bgInterval);
+    }
+  }, [id, workspace?.queue]);
+
+  const handleRetryCommand = async (cmdId: string) => {
+    const isOnline = workspace?.header?.status === 'online';
+    if (!id || !isOnline) return;
+    setRetryingCmdId(cmdId);
+    try {
+      const res = await api.post(`/operator/devices/${id}/commands/${cmdId}/retry`);
+      if (res.success && res.commandId) {
+        start30sCommandTracking(res.commandId, 'Retrying device configuration update (up to 30s)...');
+        await fetchWorkspace(id);
+      } else {
+        setPendingToast({ type: 'warning', message: res.error || 'Failed to retry command.' });
+      }
+    } catch (err: any) {
+      setPendingToast({ type: 'warning', message: `Retry failed: ${err.message}` });
+    } finally {
+      setRetryingCmdId(null);
+    }
+  };
+
+  const handleCancelCommand = async (cmdId: string) => {
+    if (!id) return;
+    setCancelingCmdId(cmdId);
+    try {
+      const res = await api.post(`/operator/devices/${id}/commands/${cmdId}/cancel`);
+      if (res.success) {
+        setPendingToast({ type: 'info', message: 'Command successfully canceled.' });
+        await fetchWorkspace(id);
+      } else {
+        setPendingToast({ type: 'warning', message: res.error || 'Failed to cancel command.' });
+      }
+    } catch (err: any) {
+      setPendingToast({ type: 'warning', message: `Cancel failed: ${err.message}` });
+    } finally {
+      setCancelingCmdId(null);
+    }
+  };
+
   const handleOpenEditConfig = () => {
     if (!workspace) return;
+    if (workspace.header?.status !== 'online') {
+      setPendingToast({ type: 'warning', message: 'Device Offline - configuration changes unavailable' });
+      return;
+    }
     setConfigError(null);
     setConfigSuccess(null);
     setConfigForm({
@@ -441,6 +570,11 @@ export const DeviceDetail: React.FC = () => {
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id) return;
+    const isOnline = workspace?.header?.status === 'online';
+    if (!isOnline) {
+      setConfigError('Device Offline - configuration changes unavailable');
+      return;
+    }
     setConfigSubmitting(true);
     setConfigError(null);
     setConfigSuccess(null);
@@ -470,11 +604,13 @@ export const DeviceDetail: React.FC = () => {
       const res = await api.put(`/operator/devices/${id}/configuration`, payload);
 
       if (res.success) {
-        setConfigSuccess('Parameters successfully dispatched and verified on device parameter tree.');
-        setTimeout(async () => {
-          setIsConfigOpen(false);
-          fetchWorkspace();
-        }, 1200);
+        setIsConfigOpen(false);
+        if (res.commandId) {
+          start30sCommandTracking(res.commandId, 'Updating device configuration... please wait (up to 30 seconds)');
+        } else {
+          setPendingToast({ type: 'success', message: 'Configuration Updated Successfully' });
+          fetchWorkspace(id);
+        }
       } else {
         setConfigError(res.error || 'Failed to apply configuration change.');
       }
@@ -496,7 +632,7 @@ export const DeviceDetail: React.FC = () => {
       });
       if (res.success) {
         setDiagResult(res.diagnostic);
-        fetchWorkspace();
+        fetchWorkspace(id);
       }
     } catch (err: any) {
       setDiagResult({ error: err.message });
@@ -507,17 +643,26 @@ export const DeviceDetail: React.FC = () => {
 
   const handleExecuteAction = async () => {
     if (!id || !actionConfirm) return;
+    const isOnline = workspace?.header?.status === 'online';
+    if (!isOnline) {
+      setActionMessage('Device Offline - configuration changes unavailable');
+      return;
+    }
     setActionExecuting(true);
     setActionMessage(null);
     try {
       const res = await api.post(`/operator/devices/${id}/actions/${actionConfirm.action}`);
       if (res.success) {
-        setActionMessage(res.message);
-        setTimeout(() => {
-          setActionConfirm(null);
-          setActionMessage(null);
-          fetchWorkspace();
-        }, 1800);
+        const actionLabel = actionConfirm.label;
+        setActionConfirm(null);
+        if (res.commandId) {
+          start30sCommandTracking(res.commandId, `Dispatching ${actionLabel}... please wait (up to 30 seconds)`);
+        } else {
+          setPendingToast({ type: 'success', message: res.message || `${actionLabel} dispatched successfully.` });
+          fetchWorkspace(id);
+        }
+      } else {
+        setActionMessage(res.error || 'Failed to execute action.');
       }
     } catch (err: any) {
       setActionMessage(`Error: ${err.message}`);
@@ -1056,6 +1201,9 @@ export const DeviceDetail: React.FC = () => {
     setIsDeleting(false);
   };
 
+  const isOnline = workspace?.header?.status === 'online';
+  const pendingCmdCount = workspace?.queue?.filter((q: any) => q.status === 'pending' || q.status === 'sending').length || 0;
+
   const tabs: { key: TabType; label: string; icon: any }[] = [
     { key: 'analysis', label: 'Overview', icon: Home },
     { key: 'wifi', label: 'Wi-Fi', icon: Wifi },
@@ -1071,7 +1219,7 @@ export const DeviceDetail: React.FC = () => {
     { key: 'discovery', label: 'Discovery', icon: Search },
     { key: 'rpc', label: 'Custom RPCs', icon: Terminal },
     { key: 'audit', label: 'Audit Trails', icon: Shield },
-    { key: 'queue', label: 'Queue', icon: ListOrdered },
+    { key: 'queue', label: pendingCmdCount > 0 ? `Pending Updates (${pendingCmdCount})` : 'Pending Updates', icon: ListOrdered },
   ];
 
   return (
@@ -1099,8 +1247,8 @@ export const DeviceDetail: React.FC = () => {
                 <div>
                   <div className="flex items-center space-x-2.5">
                     <h2 className="text-lg font-bold text-[#0F172A] font-mono tracking-tight">{workspace.header.serialNumber}</h2>
-                    <Badge variant={workspace.header.status === 'online' ? 'success' : 'danger'} dot>
-                      {workspace.header.status === 'online' ? 'ONLINE' : 'OFFLINE'}
+                    <Badge variant={isOnline ? 'success' : 'danger'} dot>
+                      {isOnline ? 'ONLINE' : 'OFFLINE'}
                     </Badge>
                     <Badge variant={workspace.header.protocol.includes('TR-369') ? 'purple' : 'info'}>
                       {workspace.header.protocol}
@@ -1113,19 +1261,48 @@ export const DeviceDetail: React.FC = () => {
               </div>
 
               <div className="flex items-center space-x-2.5 flex-wrap">
-                <Button size="sm" variant="primary" onClick={handleSummonDevice} isLoading={isSummoning} className="bg-amber-600 hover:bg-amber-500 text-white font-bold">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={handleSummonDevice}
+                  isLoading={isSummoning}
+                  disabled={!isOnline}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : undefined}
+                  className="bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50"
+                >
                   <Zap className="w-4 h-4 mr-1.5" />
                   <span>Summon / Live Poll</span>
                 </Button>
-                <Button size="sm" variant="primary" onClick={handleFetchParameters} isLoading={isFetchingParams} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold" title="Fetch all live parameters and optical power from router via TR-069">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={handleFetchParameters}
+                  isLoading={isFetchingParams}
+                  disabled={!isOnline}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : "Fetch all live parameters and optical power from router via TR-069"}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold disabled:opacity-50"
+                >
                   <Cpu className="w-4 h-4 mr-1.5" />
                   <span>Fetch Parameters</span>
                 </Button>
-                <Button size="sm" variant="outline" onClick={handleRefreshTelemetry} isLoading={isRefreshing}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRefreshTelemetry}
+                  isLoading={isRefreshing}
+                  disabled={!isOnline}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : undefined}
+                >
                   <RefreshCw className="w-4 h-4 mr-1.5" />
                   <span>Refresh Telemetry</span>
                 </Button>
-                <Button size="sm" variant="secondary" onClick={handleOpenEditConfig}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleOpenEditConfig}
+                  disabled={!isOnline}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : undefined}
+                >
                   <Edit3 className="w-4 h-4 mr-1.5" />
                   <span>Edit Config</span>
                 </Button>
@@ -1135,6 +1312,45 @@ export const DeviceDetail: React.FC = () => {
                 </Button>
               </div>
             </div>
+
+            {/* Offline Guard Banner */}
+            {!isOnline && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between text-amber-900 text-xs font-semibold shadow-xs animate-fadeIn">
+                <div className="flex items-center space-x-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <p className="font-bold text-amber-950">Device Offline - configuration changes unavailable</p>
+                    <p className="text-[11px] text-amber-700 font-normal mt-0.5">
+                      ONT must be online to execute real-time TR-069 parameter writes, Wi-Fi changes, or reboot commands.
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="warning">ACTIONS DISABLED</Badge>
+              </div>
+            )}
+
+            {/* Pending Notifications & Toasts */}
+            {pendingToast && (
+              <div className={`p-4 rounded-2xl border flex items-center justify-between text-xs font-semibold animate-fadeIn ${
+                pendingToast.type === 'success'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : pendingToast.type === 'warning'
+                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                  : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+              }`}>
+                <div className="flex items-center space-x-2.5">
+                  {pendingToast.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <Info className="w-4 h-4 text-indigo-600 shrink-0" />
+                  )}
+                  <span>{pendingToast.message}</span>
+                </div>
+                <button onClick={() => setPendingToast(null)} className="text-slate-400 hover:text-slate-600 p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
 
             {summonSuccess && (
               <div className="p-3.5 bg-[#ECFDF5] border border-[#A7F3D0] rounded-xl text-xs font-bold text-[#065F46] flex items-center space-x-2 animate-fadeIn">
@@ -1150,7 +1366,7 @@ export const DeviceDetail: React.FC = () => {
               </div>
             )}
 
-            {/* Oktopus-style Coral/Orange Top Horizontal Navigation Tabs */}
+            {/* Top Horizontal Navigation Tabs */}
             <div className="border-b border-[#E2E8F0] flex space-x-4 overflow-x-auto pb-0.5 scrollbar-thin">
               {tabs.map(({ key, label, icon: Icon }) => (
                 <button
@@ -2429,6 +2645,8 @@ export const DeviceDetail: React.FC = () => {
                       <Button
                         size="sm"
                         variant={danger ? 'danger' : 'outline'}
+                        disabled={!isOnline}
+                        title={!isOnline ? "Device Offline - configuration changes unavailable" : undefined}
                         onClick={() => setActionConfirm({ action, label, danger })}
                       >
                         <span>Dispatch {label}</span>
@@ -2742,16 +2960,169 @@ export const DeviceDetail: React.FC = () => {
               </div>
             )}
 
-            {/* TAB CONTENT 14: QUEUE */}
+            {/* TAB CONTENT 14: PENDING UPDATES & COMMAND QUEUE */}
             {activeTab === 'queue' && (
-              <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-sm font-bold text-[#0F172A]">ACS / USP Command Execution Queue</h3>
-                  <Badge variant="neutral">Active Jobs: 0</Badge>
+              <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 space-y-4 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#E2E8F0] pb-4">
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <ListOrdered className="w-5 h-5 text-[#E05638]" />
+                      <h3 className="text-sm font-bold text-[#0F172A]">Asynchronous TR-069 Configuration Updates & Queue</h3>
+                    </div>
+                    <p className="text-xs text-[#64748B] mt-0.5">
+                      Live dispatch tracking, pending acknowledgments, error diagnostics, and audit logs
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Badge variant={pendingCmdCount > 0 ? 'warning' : 'success'}>
+                      {pendingCmdCount > 0 ? `${pendingCmdCount} Pending / In-Flight` : 'All Synced'}
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => fetchWorkspace(id)}
+                      isLoading={isLoading}
+                      title="Check for live CPE acknowledgment"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                      <span>Refresh Status</span>
+                    </Button>
+                  </div>
                 </div>
-                <div className="p-8 bg-[#F8FAFC] rounded-xl text-center text-xs text-[#94A3B8] italic">
-                  Command queue is idle. All dispatched TR-069/TR-369 operations completed.
-                </div>
+
+                {workspace.queue && workspace.queue.length > 0 ? (
+                  <div className="space-y-3.5">
+                    {workspace.queue.map((cmd: any) => {
+                      const isPending = cmd.status === 'pending';
+                      const isSending = cmd.status === 'sending';
+                      const isSuccess = cmd.status === 'success';
+                      const isFailed = cmd.status === 'failed';
+                      const isExpired = cmd.status === 'expired';
+                      const isCanceled = cmd.status === 'canceled' || cmd.status === 'cancelled';
+
+                      let badgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
+                      let badgeLabel = cmd.status ? cmd.status.toUpperCase() : 'UNKNOWN';
+                      if (isPending) {
+                        badgeClass = 'bg-amber-50 text-amber-800 border-amber-300 animate-pulse';
+                        badgeLabel = 'PENDING (WAITING FOR ONT)';
+                      } else if (isSending) {
+                        badgeClass = 'bg-blue-50 text-blue-800 border-blue-300 animate-pulse';
+                        badgeLabel = 'SENDING (DISPATCHED)';
+                      } else if (isSuccess) {
+                        badgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-300';
+                        badgeLabel = 'SUCCESS / APPLIED';
+                      } else if (isFailed) {
+                        badgeClass = 'bg-rose-50 text-rose-800 border-rose-300';
+                        badgeLabel = 'FAILED / REJECTED';
+                      } else if (isExpired) {
+                        badgeClass = 'bg-amber-100 text-amber-900 border-amber-400';
+                        badgeLabel = 'EXPIRED (> 15 MINS)';
+                      } else if (isCanceled) {
+                        badgeClass = 'bg-slate-100 text-slate-600 border-slate-300';
+                        badgeLabel = 'CANCELED';
+                      }
+
+                      return (
+                        <div
+                          key={cmd._id || cmd.id}
+                          className="p-4 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] space-y-3 transition hover:border-[#CBD5E1]"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div className="flex items-center space-x-2.5">
+                              <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${badgeClass} flex items-center space-x-1.5`}>
+                                {isPending && <Clock className="w-3 h-3 animate-spin" />}
+                                {isSending && <Zap className="w-3 h-3 text-blue-600" />}
+                                {isSuccess && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                                {isFailed && <AlertCircle className="w-3 h-3 text-rose-600" />}
+                                <span>{badgeLabel}</span>
+                              </span>
+                              <span className="text-xs font-bold font-mono text-[#0F172A]">{cmd.action}</span>
+                            </div>
+
+                            <div className="flex items-center space-x-2">
+                              {/* Retry button for failed/expired/canceled */}
+                              {(isFailed || isExpired || isCanceled) && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={!isOnline || retryingCmdId === (cmd._id || cmd.id)}
+                                  isLoading={retryingCmdId === (cmd._id || cmd.id)}
+                                  title={!isOnline ? 'Device Offline - configuration changes unavailable' : 'Re-queue this command'}
+                                  onClick={() => handleRetryCommand(cmd._id || cmd.id)}
+                                  className="text-xs font-semibold text-slate-700"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                                  <span>Retry</span>
+                                </Button>
+                              )}
+
+                              {/* Cancel button for pending/sending */}
+                              {(isPending || isSending) && (
+                                <Button
+                                  size="sm"
+                                  variant="danger"
+                                  disabled={cancelingCmdId === (cmd._id || cmd.id)}
+                                  isLoading={cancelingCmdId === (cmd._id || cmd.id)}
+                                  onClick={() => handleCancelCommand(cmd._id || cmd.id)}
+                                  className="text-xs"
+                                >
+                                  <X className="w-3.5 h-3.5 mr-1" />
+                                  <span>Cancel Job</span>
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Error Callout */}
+                          {cmd.errorMessage && (
+                            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-900 font-medium flex items-start space-x-2">
+                              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                              <div>
+                                <span className="font-bold">Error Reason: </span>
+                                <span>{cmd.errorMessage}</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Command Payload Summary */}
+                          {cmd.parameters && (
+                            <div className="p-3 bg-white border border-[#E2E8F0] rounded-lg text-xs font-mono text-[#334155] space-y-1">
+                              <span className="text-[10px] uppercase font-bold text-[#64748B] block font-sans">Parameters Dispatched:</span>
+                              {cmd.parameters.wifi24?.ssid && <p>• 2.4G SSID: <span className="font-bold text-[#0F172A]">{cmd.parameters.wifi24.ssid}</span></p>}
+                              {cmd.parameters.wifi5g?.ssid && <p>• 5G SSID: <span className="font-bold text-[#0F172A]">{cmd.parameters.wifi5g.ssid}</span></p>}
+                              {cmd.parameters.wan?.pppoeUsername && <p>• PPPoE Username: <span className="font-bold text-[#1677FF]">{cmd.parameters.wan.pppoeUsername}</span></p>}
+                              {cmd.parameters.wan?.vlanId && <p>• VLAN ID: <span className="font-bold text-[#047857]">{cmd.parameters.wan.vlanId}</span></p>}
+                              {cmd.parameters.action && <p>• Action: <span className="font-bold text-[#6D28D9]">{cmd.parameters.action}</span></p>}
+                              {cmd.parameters.tr069ParamValues && (
+                                <p className="text-[11px] text-[#64748B]">
+                                  • TR-069 Paths: [{cmd.parameters.tr069ParamValues.length} variables queued]
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Audit & Execution Timing */}
+                          <div className="flex flex-wrap items-center justify-between text-[11px] text-[#64748B] font-mono pt-1">
+                            <div className="flex items-center space-x-3">
+                              <span>Queued: {cmd.queuedAt ? new Date(cmd.queuedAt).toLocaleString() : 'N/A'}</span>
+                              {cmd.completedAt && <span>Completed: {new Date(cmd.completedAt).toLocaleString()}</span>}
+                            </div>
+                            <div className="text-right">
+                              <span>Operator: {cmd.requestedBy?.email || 'admin'}</span>
+                              {cmd.correlationId && <span className="ml-2 text-slate-400">({cmd.correlationId})</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="py-12 bg-[#F8FAFC] rounded-2xl border border-dashed border-[#CBD5E1] text-center space-y-2">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                    <p className="text-sm font-semibold text-[#0F172A]">Command Queue is Idle</p>
+                    <p className="text-xs text-[#64748B]">All dispatched TR-069 configuration changes and RPCs have completed successfully.</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2977,6 +3348,48 @@ export const DeviceDetail: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Full-Screen 30-Second Progress Overlay */}
+      {isOverlayActive && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-200 text-center space-y-6">
+            <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-4 border-slate-100 border-t-[#E05638] animate-spin" />
+              <span className="text-2xl font-extrabold font-mono text-slate-800">{overlaySecondsLeft}s</span>
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-base font-bold text-slate-900">{overlayTitle}</h3>
+              <p className="text-xs text-slate-500">
+                Dispatched TR-069 SetParameterValues to physical ONT. Waiting for hardware acknowledgment.
+              </p>
+            </div>
+            <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200 text-[11px] text-amber-800 font-medium text-left space-y-1">
+              <div className="flex items-center space-x-1.5 font-bold text-amber-950">
+                <Clock className="w-3.5 h-3.5" />
+                <span>Non-Blocking Flow Guarantee</span>
+              </div>
+              <p>
+                If ONT does not ack within {overlaySecondsLeft}s, this overlay will automatically dismiss and move to <span className="font-bold text-amber-900">Pending Updates</span> without blocking your UI.
+              </p>
+            </div>
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setIsOverlayActive(false);
+                  setPendingToast({
+                    type: 'info',
+                    message: 'Request moved to "Pending Updates". You can continue other work while ONT synchronizes.',
+                  });
+                }}
+              >
+                <span>Continue in Background</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Shell>
   );
 };

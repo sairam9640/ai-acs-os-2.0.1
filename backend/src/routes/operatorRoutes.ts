@@ -571,6 +571,16 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
     const device = await Device.findOne({ _id: id, tenantId });
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
+    // 1. ONLINE / OFFLINE ENFORCEMENT:
+    // Only online ONTs can accept real-time configuration changes
+    if (device.status !== 'online') {
+      return res.status(400).json({
+        success: false,
+        error: 'Device Offline - configuration changes unavailable',
+        code: 'DEVICE_OFFLINE',
+      });
+    }
+
     const auditChanges: Record<string, { old: any; new: any }> = {};
 
     // Build TR-069 Parameter Values for GenieACS NBI
@@ -687,9 +697,28 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
       }
     }
 
+    // Deduplication: Supersede any existing pending commands for this device
+    await DeviceCommand.updateMany(
+      {
+        deviceId: device._id,
+        tenantId,
+        action: 'SET_WIFI_CONFIG',
+        status: { $in: ['pending', 'queued'] },
+      },
+      {
+        $set: {
+          status: 'canceled',
+          errorMessage: 'SUPERSEDED: Superseded by a newer configuration save.',
+          completedAt: new Date(),
+        },
+      }
+    );
+
+    let commandId: any = null;
+
     // Queue native TR-069 DeviceCommand in MongoDB
     if (tr069ParamValues.length > 0) {
-      await DeviceCommand.create({
+      const createdCmd = await DeviceCommand.create({
         tenantId,
         deviceId: device._id,
         customerId: device.customerId,
@@ -698,17 +727,18 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
           wifi24,
           wifi5g,
           wan,
-          tr069ParamValues
+          tr069ParamValues,
         },
-        status: 'queued',
+        status: 'pending',
         requestedBy: {
           userId: req.user!.id,
           role: req.user!.role,
-          email: req.user!.email
+          email: req.user!.email,
         },
         queuedAt: new Date(),
-        correlationId: req.correlationId || `cmd_${Date.now()}`
+        correlationId: req.correlationId || `cmd_${Date.now()}`,
       });
+      commandId = createdCmd._id;
     }
 
     device.pendingConfig = {
@@ -716,7 +746,7 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
       queuedAt: new Date(),
       wifi24,
       wifi5g,
-      wan
+      wan,
     };
 
     await device.save();
@@ -737,9 +767,227 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
     return res.json({
       success: true,
       status: 'PENDING_PUSH',
+      commandId,
       message: 'Configuration successfully queued in Native TR-069 CWMP Engine. Dispatched directly to physical ONT.',
       pendingConfig: device.pendingConfig,
       updatedFields: Object.keys(auditChanges),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 8.0.2.3 Query Device Commands (Pending Updates & History)
+ */
+operatorRouter.get('/devices/:id/commands', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+    const device = await Device.findOne(getSafeDeviceQuery(id, tenantId));
+    if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
+
+    const rawCommands = await DeviceCommand.find({
+      deviceId: device._id,
+      tenantId,
+    }).sort({ queuedAt: -1 }).limit(50);
+
+    const commands = rawCommands.map((cmd) => {
+      let normalizedStatus: string = cmd.status;
+      if (cmd.status === 'sent' || cmd.status === 'dispatching') normalizedStatus = 'sending';
+      else if (cmd.status === 'timed_out') normalizedStatus = 'expired';
+      else if (cmd.status === 'cancelled') normalizedStatus = 'canceled';
+      else if (cmd.status === 'queued') normalizedStatus = 'pending';
+
+      return {
+        _id: cmd._id,
+        id: cmd._id,
+        action: cmd.action,
+        status: normalizedStatus,
+        parameters: cmd.parameters,
+        queuedAt: cmd.queuedAt || (cmd as any).createdAt,
+        sentAt: cmd.sentAt,
+        completedAt: cmd.completedAt,
+        errorMessage: cmd.errorMessage,
+        requestedBy: cmd.requestedBy,
+        correlationId: cmd.correlationId,
+      };
+    });
+
+    return res.json({ success: true, commands });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 8.0.2.4 Query Single Device Command Status (30s Polling)
+ */
+operatorRouter.get('/devices/:id/commands/:commandId', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id, commandId } = req.params;
+    const device = await Device.findOne(getSafeDeviceQuery(id, tenantId));
+    if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
+
+    const cmd = await DeviceCommand.findOne({
+      _id: commandId,
+      deviceId: device._id,
+      tenantId,
+    });
+    if (!cmd) return res.status(404).json({ success: false, error: 'Command not found' });
+
+    let normalizedStatus: string = cmd.status;
+    if (cmd.status === 'sent' || cmd.status === 'dispatching') normalizedStatus = 'sending';
+    else if (cmd.status === 'timed_out') normalizedStatus = 'expired';
+    else if (cmd.status === 'cancelled') normalizedStatus = 'canceled';
+    else if (cmd.status === 'queued') normalizedStatus = 'pending';
+
+    return res.json({
+      success: true,
+      command: {
+        _id: cmd._id,
+        id: cmd._id,
+        action: cmd.action,
+        status: normalizedStatus,
+        parameters: cmd.parameters,
+        queuedAt: cmd.queuedAt || (cmd as any).createdAt,
+        sentAt: cmd.sentAt,
+        completedAt: cmd.completedAt,
+        errorMessage: cmd.errorMessage,
+        requestedBy: cmd.requestedBy,
+        correlationId: cmd.correlationId,
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 8.0.2.5 Retry Failed / Expired Command
+ */
+operatorRouter.post('/devices/:id/commands/:commandId/retry', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id, commandId } = req.params;
+    const device = await Device.findOne(getSafeDeviceQuery(id, tenantId));
+    if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
+
+    if (device.status !== 'online') {
+      return res.status(400).json({
+        success: false,
+        error: 'Device Offline - configuration changes unavailable',
+        code: 'DEVICE_OFFLINE',
+      });
+    }
+
+    const oldCmd = await DeviceCommand.findOne({
+      _id: commandId,
+      deviceId: device._id,
+      tenantId,
+    });
+    if (!oldCmd) return res.status(404).json({ success: false, error: 'Command not found' });
+
+    // Cancel any existing pending command for same device/action to prevent duplicates
+    await DeviceCommand.updateMany(
+      {
+        deviceId: device._id,
+        tenantId,
+        action: oldCmd.action,
+        status: { $in: ['pending', 'queued'] },
+      },
+      {
+        $set: {
+          status: 'canceled',
+          errorMessage: 'SUPERSEDED: Replaced by manual command retry.',
+          completedAt: new Date(),
+        },
+      }
+    );
+
+    const newCmd = await DeviceCommand.create({
+      tenantId,
+      deviceId: device._id,
+      customerId: device.customerId,
+      action: oldCmd.action,
+      parameters: oldCmd.parameters,
+      status: 'pending',
+      requestedBy: {
+        userId: req.user!.id,
+        role: req.user!.role,
+        email: req.user!.email,
+      },
+      queuedAt: new Date(),
+      correlationId: `retry_${Date.now()}`,
+    });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'DEVICE_COMMAND_RETRY',
+      targetResource: 'DeviceCommand',
+      targetId: newCmd._id.toString(),
+      targetIdentifier: device.serialNumber,
+      afterState: { retriedFrom: oldCmd._id, action: oldCmd.action },
+      correlationId: newCmd.correlationId,
+    });
+
+    return res.json({
+      success: true,
+      message: `Command [${oldCmd.action}] re-queued for CPE execution.`,
+      commandId: newCmd._id,
+      command: newCmd,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 8.0.2.6 Cancel Pending Command
+ */
+operatorRouter.post('/devices/:id/commands/:commandId/cancel', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id, commandId } = req.params;
+    const device = await Device.findOne(getSafeDeviceQuery(id, tenantId));
+    if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
+
+    const cmd = await DeviceCommand.findOne({
+      _id: commandId,
+      deviceId: device._id,
+      tenantId,
+    });
+    if (!cmd) return res.status(404).json({ success: false, error: 'Command not found' });
+
+    if (cmd.status === 'success' || cmd.status === 'failed') {
+      return res.status(400).json({ success: false, error: `Cannot cancel a command that is already ${cmd.status}.` });
+    }
+
+    cmd.status = 'canceled';
+    cmd.errorMessage = 'Manually canceled by operator.';
+    cmd.completedAt = new Date();
+    await cmd.save();
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'DEVICE_COMMAND_CANCELED',
+      targetResource: 'DeviceCommand',
+      targetId: cmd._id.toString(),
+      targetIdentifier: device.serialNumber,
+      afterState: { canceledCommandId: cmd._id, action: cmd.action },
+      correlationId: `cancel_${Date.now()}`,
+    });
+
+    return res.json({
+      success: true,
+      message: `Command [${cmd.action}] successfully canceled.`,
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -3081,7 +3329,27 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
           { name: 'Reboot', protocol: 'TR-069/USP', description: 'Dispatch graceful CPE device reboot RPC', permission: 'DEVICE_ADMIN' },
           { name: 'FactoryReset', protocol: 'TR-069', description: 'Restore ONT firmware parameters to factory defaults', permission: 'DEVICE_SUPERADMIN' },
         ],
-        queue: [],
+        queue: (await DeviceCommand.find({ deviceId: device._id, tenantId }).sort({ queuedAt: -1 }).limit(30)).map((cmd) => {
+          let normalizedStatus: string = cmd.status;
+          if (cmd.status === 'sent' || cmd.status === 'dispatching') normalizedStatus = 'sending';
+          else if (cmd.status === 'timed_out') normalizedStatus = 'expired';
+          else if (cmd.status === 'cancelled') normalizedStatus = 'canceled';
+          else if (cmd.status === 'queued') normalizedStatus = 'pending';
+
+          return {
+            _id: cmd._id,
+            id: cmd._id,
+            action: cmd.action,
+            status: normalizedStatus,
+            parameters: cmd.parameters,
+            queuedAt: cmd.queuedAt || (cmd as any).createdAt,
+            sentAt: cmd.sentAt,
+            completedAt: cmd.completedAt,
+            errorMessage: cmd.errorMessage,
+            requestedBy: cmd.requestedBy,
+            correlationId: cmd.correlationId,
+          };
+        }),
       },
     });
   } catch (error: any) {
@@ -3142,6 +3410,57 @@ operatorRouter.post('/devices/:id/actions/:action', async (req: AuthenticatedReq
     const device = await Device.findOne(getSafeDeviceQuery(id, tenantId));
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
+    // ONLINE / OFFLINE ENFORCEMENT
+    if (device.status !== 'online') {
+      return res.status(400).json({
+        success: false,
+        error: 'Device Offline - configuration changes unavailable',
+        code: 'DEVICE_OFFLINE',
+      });
+    }
+
+    let commandAction: any = 'REBOOT_DEVICE';
+    if (action.toLowerCase() === 'reset' || action.toLowerCase() === 'factory_reset') {
+      commandAction = 'FACTORY_RESET';
+    } else if (action.toLowerCase() === 'reboot') {
+      commandAction = 'REBOOT_DEVICE';
+    } else if (action.toLowerCase() === 'sync' || action.toLowerCase() === 'refresh') {
+      commandAction = 'RUN_DIAGNOSTICS';
+    }
+
+    // Deduplication: Cancel existing pending commands for same device/action
+    await DeviceCommand.updateMany(
+      {
+        deviceId: device._id,
+        tenantId,
+        action: commandAction,
+        status: { $in: ['pending', 'queued'] },
+      },
+      {
+        $set: {
+          status: 'canceled',
+          errorMessage: `SUPERSEDED: Cancelled in favor of newer ${action} action.`,
+          completedAt: new Date(),
+        },
+      }
+    );
+
+    const cmd = await DeviceCommand.create({
+      tenantId,
+      deviceId: device._id,
+      customerId: device.customerId,
+      action: commandAction,
+      parameters: { action },
+      status: 'pending',
+      requestedBy: {
+        userId: req.user!.id,
+        role: req.user!.role,
+        email: req.user!.email,
+      },
+      queuedAt: new Date(),
+      correlationId: req.correlationId || `act_${Date.now()}`,
+    });
+
     await recordAuditLog({
       tenantId,
       actorId: req.user!.id,
@@ -3151,11 +3470,12 @@ operatorRouter.post('/devices/:id/actions/:action', async (req: AuthenticatedReq
       targetResource: 'Device',
       targetId: device._id.toString(),
       targetIdentifier: device.serialNumber,
-      correlationId: req.correlationId || `act_${Date.now()}`,
+      correlationId: cmd.correlationId,
     });
 
     return res.json({
       success: true,
+      commandId: cmd._id,
       message: `Action [${action.toUpperCase()}] queued and dispatched to CPE via ${device.protocol || 'TR-069'}.`,
       action,
       executedAt: new Date(),

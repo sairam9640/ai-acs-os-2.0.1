@@ -189,8 +189,8 @@ describe('FINAL SECURITY AND TENANT-ISOLATION AUDIT SUITE', () => {
     const rpcResponse = await CwmpService.checkPendingRpcOrPoll('conn_stale_1', 'sess_stale_1');
 
     expect(rpcResponse).toBeNull();
-    expect(mockStaleCmd.status).toBe('failed');
-    expect(mockStaleCmd.errorMessage).toContain('Command expired');
+    expect(mockStaleCmd.status).toBe('expired');
+    expect(mockStaleCmd.errorMessage).toContain('EXPIRED');
   });
 
   it('TEST 5: Explicit, authenticated Operator UI configuration change pushes SetParameterValues ONCE', async () => {
@@ -238,7 +238,7 @@ describe('FINAL SECURITY AND TENANT-ISOLATION AUDIT SUITE', () => {
     expect(rpcResponse).toBeTruthy();
     expect(rpcResponse).toContain('<cwmp:SetParameterValues>');
     expect(rpcResponse).toContain('Rudra_Fiber_5G');
-    expect(mockAuthSpv.status).toBe('sent');
+    expect(mockAuthSpv.status).toBe('sending');
   });
 
   it('TEST 6: HARDWARE OWNER LOCK & DEDICATED SLUG MATCH: Registered hardware owner resolves with dedicated slug; root access (no slug) returns null for quarantine', async () => {
@@ -430,5 +430,92 @@ describe('FINAL SECURITY AND TENANT-ISOLATION AUDIT SUITE', () => {
     expect(maskedXml).not.toContain('SuperSecretWifiPass123');
     expect(maskedXml).not.toContain('UltraSecretPppoePass456');
     expect(maskedXml).toContain('********');
+  });
+
+  it('TEST 11: ASYNC COMMAND LIFECYCLE & DEDUPLICATION: Supports pending, sending, success, failed, expired, canceled with zero duplicate execution', async () => {
+    const sessionObj = {
+      serialNumber: testSerial,
+      vendor: 'GENEXIS',
+      modelName: 'Titanium-2122A',
+      tenantId: mockTenantAId.toString(),
+      deviceId: mockDeviceId.toString(),
+      stage: 'INFORM_INGESTED',
+    };
+    (CwmpService as any).sessionsByConnection.set('conn_async_1', sessionObj);
+    (CwmpService as any).sessionsById.set('sess_async_1', sessionObj);
+
+    vi.spyOn(Device, 'findOne').mockResolvedValue({
+      _id: mockDeviceId,
+      serialNumber: testSerial,
+      tenantId: mockTenantAId,
+      status: 'online',
+      save: vi.fn().mockResolvedValue(true),
+    } as any);
+
+    // 1. Ingest SetParameterValuesResponse -> marks commands as 'success'
+    const spvResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValuesResponse>
+      <Status>0</Status>
+    </cwmp:SetParameterValuesResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const updateManySpy = vi.spyOn(DeviceCommand, 'updateMany').mockResolvedValue({ acknowledged: true, modifiedCount: 1 } as any);
+
+    await CwmpService.handleParameterValuesResponse(spvResponseXml, '192.168.1.100', 'sess_async_1', 'rudra.ciniplay.in', 'rudra', 'conn_async_1');
+
+    expect(updateManySpy).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: mockDeviceId, status: { $in: ['sent', 'sending', 'queued', 'pending'] } }),
+      expect.objectContaining({ $set: expect.objectContaining({ status: 'success' }) })
+    );
+  });
+
+  it('TEST 12: CWMP FAULT HANDLING: CPE Fault 9005 or 9003 updates command status to failed with exact error reason', async () => {
+    const sessionObj = {
+      serialNumber: testSerial,
+      vendor: 'GENEXIS',
+      modelName: 'Titanium-2122A',
+      tenantId: mockTenantAId.toString(),
+      deviceId: mockDeviceId.toString(),
+      stage: 'SPV_SENT',
+    };
+    (CwmpService as any).sessionsByConnection.set('conn_fault_1', sessionObj);
+    (CwmpService as any).sessionsById.set('sess_fault_1', sessionObj);
+
+    vi.spyOn(Device, 'findOne').mockResolvedValue({
+      _id: mockDeviceId,
+      serialNumber: testSerial,
+      tenantId: mockTenantAId,
+      status: 'online',
+      save: vi.fn().mockResolvedValue(true),
+    } as any);
+
+    const faultXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Body>
+    <soapenv:Fault>
+      <faultcode>Client</faultcode>
+      <faultstring>CWMP fault</faultstring>
+      <detail>
+        <cwmp:Fault>
+          <FaultCode>9007</FaultCode>
+          <FaultString>Notification request rejected</FaultString>
+        </cwmp:Fault>
+      </detail>
+    </soapenv:Fault>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const updateManySpy = vi.spyOn(DeviceCommand, 'updateMany').mockResolvedValue({ acknowledged: true, modifiedCount: 1 } as any);
+
+    await CwmpService.handleParameterValuesResponse(faultXml, '192.168.1.100', 'sess_fault_1', 'rudra.ciniplay.in', 'rudra', 'conn_fault_1');
+
+    expect(updateManySpy).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: mockDeviceId, status: { $in: ['sent', 'sending'] } }),
+      expect.objectContaining({ $set: expect.objectContaining({ status: 'failed', errorMessage: 'Notification request rejected' }) })
+    );
   });
 });

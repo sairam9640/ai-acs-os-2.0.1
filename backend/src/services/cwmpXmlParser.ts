@@ -76,7 +76,9 @@ export class CwmpXmlParser {
       this.extractTag(xml, 'Code')
     );
 
-    const cwmpFaultStringMatch = xml.match(/<(?:[a-zA-Z0-9_-]+:)?FaultString[^>]*>([^<]+)<\/(?:[a-zA-Z0-9_-]+:)?FaultString>/i);
+    // Prioritize specific CWMP FaultString from detail/cwmp:Fault over outer SOAP faultstring
+    const detailFaultMatch = xml.match(/<detail[\s\S]*?<(?:[a-zA-Z0-9_-]+:)?FaultString[^>]*>([^<]+)<\/(?:[a-zA-Z0-9_-]+:)?FaultString>[\s\S]*?<\/detail>/i);
+    const cwmpFaultStringMatch = detailFaultMatch || xml.match(/<(?:[a-zA-Z0-9_-]+:)?FaultString[^>]*>([^<]+)<\/(?:[a-zA-Z0-9_-]+:)?FaultString>/);
     const faultString = cwmpFaultStringMatch ? decodeXmlEntities(cwmpFaultStringMatch[1]) : (
       this.extractTag(xml, 'FaultString') ||
       this.extractTag(xml, 'faultstring') ||

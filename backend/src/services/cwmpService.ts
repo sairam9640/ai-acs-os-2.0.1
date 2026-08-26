@@ -942,11 +942,11 @@ export class CwmpService {
           const cmdAction = (pendingCmd as any).action || (pendingCmd as any).rpcMethod || (pendingCmd as any).commandType || '';
           
           // STRICT SECURITY GUARD 1: Prohibit stale commands (> 15 mins) from executing unexpectedly
-          const commandAgeMs = Date.now() - new Date(pendingCmd.queuedAt || (pendingCmd as any).createdAt).getTime();
-          if (commandAgeMs > 15 * 60 * 1000) {
-            console.warn(`[EMERGENCY GLOBAL GUARD] 🛑 Dropped stale command ${pendingCmd._id} (${cmdAction}) for ${session.serialNumber} (Age: ${Math.round(commandAgeMs / 1000)}s)`);
-            pendingCmd.status = 'failed';
-            pendingCmd.errorMessage = 'BLOCKED_BY_EMERGENCY_GLOBAL_GUARD: Command expired / timed out.';
+          const cmdAgeSeconds = (Date.now() - new Date(pendingCmd.queuedAt || (pendingCmd as any).createdAt).getTime()) / 1000;
+          if (cmdAgeSeconds > 900) {
+            console.error(`[EMERGENCY GLOBAL GUARD] 🛑 Dropped stale command ${pendingCmd._id} (${cmdAction}) for ${session.serialNumber} (Age: ${Math.round(cmdAgeSeconds)}s)`);
+            pendingCmd.status = 'expired';
+            pendingCmd.errorMessage = `EXPIRED: Command dropped because it remained uncollected for ${Math.round(cmdAgeSeconds)}s (> 15 mins).`;
             await pendingCmd.save();
             return null;
           }
@@ -962,7 +962,7 @@ export class CwmpService {
               return null;
             }
 
-            pendingCmd.status = 'sent';
+            pendingCmd.status = 'sending';
             pendingCmd.sentAt = new Date();
             await pendingCmd.save();
             const rebootXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -985,7 +985,7 @@ export class CwmpService {
               return null;
             }
 
-            pendingCmd.status = 'sent';
+            pendingCmd.status = 'sending';
             pendingCmd.sentAt = new Date();
             await pendingCmd.save();
             const resetXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -1004,7 +1004,7 @@ export class CwmpService {
             cmdAction === 'CUSTOM_RPC' ||
             (pendingCmd as any).commandType === 'SUMMON_LIVE_POLL'
           ) {
-            pendingCmd.status = 'sent';
+            pendingCmd.status = 'sending';
             pendingCmd.sentAt = new Date();
             await pendingCmd.save();
 
@@ -1034,7 +1034,7 @@ ${stringElements}
           // STRICT SECURITY GUARD 4: Parameter changes require verified operator request
           const rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues || [];
           if (rawParams.length > 0) {
-            pendingCmd.status = 'sent';
+            pendingCmd.status = 'sending';
             pendingCmd.sentAt = new Date();
             await pendingCmd.save();
             const normalizedParams = rawParams.map((p: any) => {
@@ -1353,7 +1353,7 @@ ${stringElements}
     if (xml.includes('SetParameterValuesResponse')) {
       console.log(`[Native CWMP IN] CPE successfully acknowledged SetParameterValues for ${device.serialNumber}`);
       await DeviceCommand.updateMany(
-        { deviceId: device._id, status: 'sent' },
+        { deviceId: device._id, status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
         { $set: { status: 'success', completedAt: new Date() } }
       );
       if (device.pendingConfig) {
@@ -1368,7 +1368,7 @@ ${stringElements}
     if (xml.includes('RebootResponse')) {
       console.log(`[Native CWMP IN] CPE acknowledged Reboot command for ${device.serialNumber}`);
       await DeviceCommand.updateMany(
-        { deviceId: device._id, action: 'REBOOT_DEVICE', status: 'sent' },
+        { deviceId: device._id, action: 'REBOOT_DEVICE', status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
         { $set: { status: 'success', completedAt: new Date() } }
       );
       return null;
@@ -1389,11 +1389,23 @@ ${stringElements}
       timestamp: new Date(),
     }).catch(() => {});
 
-    // Handle SOAP Fault (e.g. Fault 9002 / 9005 during Baseline or Optical Discovery)
+    // Handle SOAP Fault (e.g. Fault 9002 / 9003 / 9005 during SPV or GPV)
     if (fault?.isFault) {
       console.warn(
         `[CWMP ACS] CPE returned SOAP Fault ${fault.faultCode}: ${fault.faultString} during stage ${session?.stage}`
       );
+
+      // If SPV failed, mark command as failed with exact fault error reason
+      await DeviceCommand.updateMany(
+        { deviceId: device._id, status: { $in: ['sent', 'sending'] } },
+        { $set: { status: 'failed', errorMessage: fault.faultString || `CWMP Fault ${fault.faultCode}`, completedAt: new Date() } }
+      );
+      if (device.pendingConfig) {
+        device.pendingConfig.status = 'FAILED';
+        device.pendingConfig.failedAt = new Date();
+        device.pendingConfig.errorMessage = fault.faultString || `CWMP Fault ${fault.faultCode}`;
+      }
+      await device.save();
 
       // If Baseline GPV failed, do not abort the session: fallback to GetParameterNames discovery
       if (session?.stage === 'BASELINE_SENT') {

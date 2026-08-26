@@ -16,13 +16,16 @@ export type CommandStatus =
   | 'authorized'
   | 'queued'
   | 'dispatching'
+  | 'sending'
   | 'sent'
   | 'acknowledged'
   | 'verifying'
   | 'verified'
   | 'success'
   | 'failed'
+  | 'expired'
   | 'timed_out'
+  | 'canceled'
   | 'cancelled'
   | 'rolled_back';
 
@@ -87,17 +90,20 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
         'authorized',
         'queued',
         'dispatching',
+        'sending',
         'sent',
         'acknowledged',
         'verifying',
         'verified',
         'success',
         'failed',
+        'expired',
         'timed_out',
+        'canceled',
         'cancelled',
         'rolled_back',
       ],
-      default: 'queued',
+      default: 'pending',
       index: true,
     },
     requestedBy: {
