@@ -1,15 +1,28 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 export interface ICustomerServicePlan {
-  planId: string;
+  planId?: string;
   name: string;
+  price?: number;
   downloadSpeedMbps: number;
   uploadSpeedMbps: number;
   monthlyFee: number;
   dataLimitGb: number; // 0 = unlimited
   currentCycleUsageGb: number;
   billingStatus: 'paid' | 'overdue' | 'grace_period';
+  startDate?: Date;
+  endDate?: Date;
   renewalDate: Date;
+  status?: 'active' | 'expiring_soon' | 'expired' | 'grace_period' | 'suspended';
+  lastPaymentDate?: Date;
+  lastPaymentAmount?: number;
+  paymentReference?: string;
+  notificationHistory?: Array<{
+    eventType: string;
+    eventKey: string;
+    emittedAt: Date;
+    recipientPhone: string;
+  }>;
 }
 
 export interface ICustomerWanConfig {
@@ -121,6 +134,7 @@ const CustomerSchema = new Schema<ICustomer>(
     servicePlan: {
       planId: { type: String, default: 'plan_100m' },
       name: { type: String, default: 'SuperFast 100 Mbps Unlimited' },
+      price: { type: Number, default: 699 },
       downloadSpeedMbps: { type: Number, default: 100 },
       uploadSpeedMbps: { type: Number, default: 100 },
       monthlyFee: { type: Number, default: 699 },
@@ -131,7 +145,25 @@ const CustomerSchema = new Schema<ICustomer>(
         enum: ['paid', 'overdue', 'grace_period'],
         default: 'paid',
       },
+      startDate: { type: Date, default: () => new Date() },
+      endDate: { type: Date, default: () => new Date(Date.now() + 30 * 86400000) },
       renewalDate: { type: Date, default: () => new Date(Date.now() + 30 * 86400000) },
+      status: {
+        type: String,
+        enum: ['active', 'expiring_soon', 'expired', 'grace_period', 'suspended'],
+        default: 'active',
+      },
+      lastPaymentDate: { type: Date },
+      lastPaymentAmount: { type: Number },
+      paymentReference: { type: String },
+      notificationHistory: [
+        {
+          eventType: { type: String },
+          eventKey: { type: String },
+          emittedAt: { type: Date, default: () => new Date() },
+          recipientPhone: { type: String },
+        },
+      ],
     },
     wanConfig: {
       connectionType: { type: String, default: 'PPPoE' },

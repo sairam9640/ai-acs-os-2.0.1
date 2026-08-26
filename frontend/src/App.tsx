@@ -32,6 +32,7 @@ import { InventoryManagement } from './pages/operator/InventoryManagement.js';
 import { AutomationRules } from './pages/operator/AutomationRules.js';
 import { OperatorReports } from './pages/operator/OperatorReports.js';
 import { OperatorSettings } from './pages/operator/OperatorSettings.js';
+import { PlanManagement } from './pages/operator/PlanManagement.js';
 
 // Technician Pages
 import { TechnicianLogin } from './pages/technician/TechnicianLogin.js';
@@ -303,6 +304,14 @@ export function App() {
             element={
               <ProtectedRoute allowedRoles={['operator_admin', 'noc_operator']} portalType="operator">
                 <FiberGIS />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/operator/plans"
+            element={
+              <ProtectedRoute allowedRoles={['operator_admin', 'noc_operator']} portalType="operator">
+                <PlanManagement />
               </ProtectedRoute>
             }
           />

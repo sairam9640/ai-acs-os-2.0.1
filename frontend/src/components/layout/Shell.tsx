@@ -26,6 +26,7 @@ import {
   Eye,
   ArrowLeft,
   Sparkles,
+  CalendarClock,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { Button } from '../ui/Button.js';
@@ -69,6 +70,7 @@ export const Shell: React.FC<ShellProps> = ({
     { label: 'Pending Map ONTs', path: '/operator/pending-mappings', icon: Sparkles },
     { label: 'OLT & PON Ports', path: '/operator/network', icon: Server },
     { label: 'Fiber GIS Map', path: '/operator/gis', icon: MapPin },
+    { label: 'Plan & Expiry Hub', path: '/operator/plans', icon: CalendarClock },
     { label: 'Approvals Gate', path: '/operator/approvals', icon: CheckSquare },
     { label: 'Hardware Inventory', path: '/operator/inventory', icon: Package },
     { label: 'Automation Rules', path: '/operator/automation', icon: Zap },

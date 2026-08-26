@@ -47,6 +47,10 @@ import { OperationsCenterService } from '../services/operationsCenterService.js'
 import { BillingEngineService } from '../services/billingEngineService.js';
 import { WorkOrderService } from '../services/workOrderService.js';
 import { WhatsAppService } from '../services/whatsAppService.js';
+import { CustomerPlan } from '../models/CustomerPlan.js';
+import { PlanNotificationTemplate, DEFAULT_PLAN_TEMPLATES, PlanNotificationEventType } from '../models/PlanNotificationTemplate.js';
+import { CustomerPlanService } from '../services/customerPlanService.js';
+import { PlanNotificationService } from '../services/planNotificationService.js';
 
 export const operatorRouter = Router();
 
@@ -4465,6 +4469,299 @@ operatorRouter.post('/gis/fault-impact', async (req: AuthenticatedRequest, res: 
     return res.json({ success: true, impact });
   } catch (error: any) {
     return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 10.2 Plan Management & Expiring Subscriptions Hub (1d / 3d / 7d Views, Notification Events & Templates)
+ */
+
+// 1. Plan Catalog CRUD
+operatorRouter.get('/plans/catalog', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const plans = await CustomerPlan.find({ tenantId }).sort({ price: 1, createdAt: -1 });
+    return res.json({ success: true, plans });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/plans/catalog', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { name, code, price, currency, billingCycleDays, downloadSpeedMbps, uploadSpeedMbps, dataLimitGb, description, isActive } = req.body;
+
+    if (!name || !code || price === undefined) {
+      return res.status(400).json({ success: false, error: 'Plan Name, Code, and Price are required' });
+    }
+
+    const plan = await CustomerPlan.create({
+      tenantId,
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+      price: Number(price),
+      currency: currency || 'INR',
+      billingCycleDays: Number(billingCycleDays || 30),
+      downloadSpeedMbps: Number(downloadSpeedMbps || 100),
+      uploadSpeedMbps: Number(uploadSpeedMbps || 100),
+      dataLimitGb: Number(dataLimitGb || 0),
+      description: description || '',
+      isActive: isActive !== undefined ? Boolean(isActive) : true,
+    });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'PLAN_CATALOG_CREATED',
+      targetResource: 'CustomerPlan',
+      targetId: plan._id.toString(),
+      targetIdentifier: plan.code,
+      correlationId: req.correlationId || `plan_create_${Date.now()}`,
+    });
+
+    return res.status(201).json({ success: true, plan, message: 'Broadband plan added to catalog successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.put('/plans/catalog/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+    const { name, code, price, currency, billingCycleDays, downloadSpeedMbps, uploadSpeedMbps, dataLimitGb, description, isActive } = req.body;
+
+    const plan = await CustomerPlan.findOneAndUpdate(
+      { _id: id, tenantId },
+      {
+        $set: {
+          name: name?.trim(),
+          code: code?.trim()?.toUpperCase(),
+          price: price !== undefined ? Number(price) : undefined,
+          currency,
+          billingCycleDays: billingCycleDays !== undefined ? Number(billingCycleDays) : undefined,
+          downloadSpeedMbps: downloadSpeedMbps !== undefined ? Number(downloadSpeedMbps) : undefined,
+          uploadSpeedMbps: uploadSpeedMbps !== undefined ? Number(uploadSpeedMbps) : undefined,
+          dataLimitGb: dataLimitGb !== undefined ? Number(dataLimitGb) : undefined,
+          description,
+          isActive,
+        },
+      },
+      { new: true }
+    );
+
+    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'PLAN_CATALOG_UPDATED',
+      targetResource: 'CustomerPlan',
+      targetId: plan._id.toString(),
+      targetIdentifier: plan.code,
+      correlationId: req.correlationId || `plan_upd_${Date.now()}`,
+    });
+
+    return res.json({ success: true, plan, message: 'Plan updated successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.delete('/plans/catalog/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+
+    const plan = await CustomerPlan.findOneAndDelete({ _id: id, tenantId });
+    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'PLAN_CATALOG_DELETED',
+      targetResource: 'CustomerPlan',
+      targetId: plan._id.toString(),
+      targetIdentifier: plan.code,
+      correlationId: req.correlationId || `plan_del_${Date.now()}`,
+    });
+
+    return res.json({ success: true, message: 'Plan removed from catalog successfully' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 2. Expiring Plans & Subscriptions View (1d, 3d, 7d, expired, all)
+operatorRouter.get('/plans/expiring', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { window = 'all', search } = req.query;
+    const summary = await CustomerPlanService.getExpiringPlans(
+      req.tenantId!,
+      window as any,
+      search ? String(search) : undefined
+    );
+    return res.json({ success: true, summary });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 3. Customer Plan Activation (Assign Plan + Emit PLAN_ACTIVATED)
+operatorRouter.post('/customers/:id/plan/activate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { planId, planName, price, billingCycleDays, downloadSpeedMbps, uploadSpeedMbps, dataLimitGb } = req.body;
+    const result = await CustomerPlanService.activateCustomerPlan({
+      tenantId: req.tenantId!,
+      customerId: req.params.id,
+      planId,
+      planName,
+      price,
+      billingCycleDays,
+      downloadSpeedMbps,
+      uploadSpeedMbps,
+      dataLimitGb,
+      actor: {
+        id: req.user!.id,
+        email: req.user!.email,
+        role: req.user!.role,
+      },
+    });
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// 4. Customer Plan Renewal (Extend Validity + Record Payment + Emit PLAN_RENEWED & PAYMENT_RECEIVED)
+operatorRouter.post('/customers/:id/plan/renew', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { planId, billingCycleDays, paymentAmount, paymentReference, paymentMode } = req.body;
+    const result = await CustomerPlanService.renewCustomerPlan({
+      tenantId: req.tenantId!,
+      customerId: req.params.id,
+      planId,
+      billingCycleDays,
+      paymentAmount,
+      paymentReference,
+      paymentMode,
+      actor: {
+        id: req.user!.id,
+        email: req.user!.email,
+        role: req.user!.role,
+      },
+    });
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// 5. Explicit Notification Retrigger (Bypasses Duplicate Prevention + Full Audit Log)
+operatorRouter.post('/customers/:id/plan/retrigger-notification', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { eventType } = req.body;
+    if (!eventType) {
+      return res.status(400).json({ success: false, error: 'eventType is required (e.g. PLAN_ACTIVATED, PLAN_RENEWED, PLAN_EXPIRING_7D, PLAN_EXPIRING_3D, PLAN_EXPIRING_1D, PLAN_EXPIRED, PAYMENT_RECEIVED)' });
+    }
+
+    const result = await CustomerPlanService.retriggerNotification({
+      tenantId: req.tenantId!,
+      customerId: req.params.id,
+      eventType: eventType as PlanNotificationEventType,
+      actor: {
+        id: req.user!.id,
+        email: req.user!.email,
+        role: req.user!.role,
+      },
+    });
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// 6. Customizable WhatsApp Notification Templates
+operatorRouter.get('/plans/templates', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    let templates = await PlanNotificationTemplate.find({ tenantId });
+
+    // Seed defaults if empty
+    if (templates.length === 0) {
+      const defaultEntries = Object.entries(DEFAULT_PLAN_TEMPLATES).map(([eventType, t]) => ({
+        tenantId,
+        eventType,
+        title: t.title,
+        templateText: t.template,
+        isEnabled: true,
+      }));
+      templates = (await PlanNotificationTemplate.insertMany(defaultEntries as any)) as any;
+    }
+
+    return res.json({ success: true, templates, defaultTokens: [
+      '{customer_name}', '{customer_id}', '{account_number}', '{mobile_number}',
+      '{plan_name}', '{price}', '{expiry_date}', '{remaining_days}', '{operator_name}', '{tenant_id}'
+    ] });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.put('/plans/templates/:eventType', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { eventType } = req.params;
+    const { title, templateText, isEnabled } = req.body;
+
+    if (!templateText) {
+      return res.status(400).json({ success: false, error: 'templateText is required' });
+    }
+
+    const template = await PlanNotificationTemplate.findOneAndUpdate(
+      { tenantId, eventType },
+      {
+        $set: {
+          title: title || DEFAULT_PLAN_TEMPLATES[eventType as PlanNotificationEventType]?.title || eventType,
+          templateText,
+          isEnabled: isEnabled !== undefined ? Boolean(isEnabled) : true,
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'PLAN_NOTIFICATION_TEMPLATE_UPDATED',
+      targetResource: 'PlanNotificationTemplate',
+      targetId: template._id.toString(),
+      targetIdentifier: eventType,
+      correlationId: `tmpl_upd_${Date.now()}`,
+    });
+
+    return res.json({ success: true, template, message: 'Notification template updated successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// 7. Automated Expiry Scanner Trigger
+operatorRouter.post('/plans/cron/check-expiries', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const scanResult = await CustomerPlanService.runAutomatedExpiryScanner(req.tenantId);
+    return res.json({ success: true, scanResult, message: 'Expiry scan and event dispatch completed.' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

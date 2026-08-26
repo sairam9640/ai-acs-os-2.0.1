@@ -753,6 +753,77 @@ class ApiService {
     });
   }
 
+  // Plan Management & Expiring Subscriptions
+  async getPlanCatalog() {
+    return this.request('/operator/plans/catalog');
+  }
+
+  async createPlanCatalog(payload: any) {
+    return this.request('/operator/plans/catalog', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updatePlanCatalog(id: string, payload: any) {
+    return this.request(`/operator/plans/catalog/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deletePlanCatalog(id: string) {
+    return this.request(`/operator/plans/catalog/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getExpiringPlans(window = 'all', search?: string) {
+    const params = new URLSearchParams();
+    if (window) params.append('window', window);
+    if (search) params.append('search', search);
+    const q = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/operator/plans/expiring${q}`);
+  }
+
+  async activateCustomerPlan(customerId: string, payload: any) {
+    return this.request(`/operator/customers/${customerId}/plan/activate`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async renewCustomerPlan(customerId: string, payload: any) {
+    return this.request(`/operator/customers/${customerId}/plan/renew`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async retriggerPlanNotification(customerId: string, eventType: string) {
+    return this.request(`/operator/customers/${customerId}/plan/retrigger-notification`, {
+      method: 'POST',
+      body: JSON.stringify({ eventType }),
+    });
+  }
+
+  async getPlanNotificationTemplates() {
+    return this.request('/operator/plans/templates');
+  }
+
+  async updatePlanNotificationTemplate(eventType: string, payload: any) {
+    return this.request(`/operator/plans/templates/${eventType}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async triggerPlanExpiryCheck() {
+    return this.request('/operator/plans/cron/check-expiries', {
+      method: 'POST',
+    });
+  }
+
   async getIncidents() {
     return this.request('/operator/incidents');
   }
