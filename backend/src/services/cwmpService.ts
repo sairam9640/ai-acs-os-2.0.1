@@ -1,0 +1,1885 @@
+import { Device, IDevice, IRxPowerRecord, IConnectedClient } from '../models/Device.js';
+import { Customer } from '../models/Customer.js';
+import { Tenant, ITenant } from '../models/Tenant.js';
+import { PendingDeviceMapping } from '../models/PendingDeviceMapping.js';
+import { WhatsAppService } from './whatsAppService.js';
+import { CwmpVendorProfiles, CpeVendor } from './cwmpVendorProfiles.js';
+import { CwmpXmlParser } from './cwmpXmlParser.js';
+
+export interface CwmpInformData {
+  manufacturer?: string;
+  oui?: string;
+  productClass?: string;
+  serialNumber?: string;
+  softwareVersion?: string;
+  hardwareVersion?: string;
+  macAddress?: string;
+  connectionRequestUrl?: string;
+  wanIp?: string;
+  pppoeUsername?: string;
+  opticalRxPower?: number;
+  opticalTxPower?: number;
+  opticalBiasCurrent?: number;
+  opticalVoltage?: number;
+  temperatureC?: number;
+  cpuUsagePercent?: number;
+  memoryUsagePercent?: number;
+  wifiSsid24?: string;
+  wifiPass24?: string;
+  wifiSsid5g?: string;
+  wifiPass5g?: string;
+  vlanId?: number;
+  wanConnectionStatus?: string;
+  lanHostCount?: number;
+  connectedClients?: IConnectedClient[];
+  events?: string[];
+  rawXml?: string;
+}
+
+import { SupportedParameterCache } from '../models/SupportedParameterCache.js';
+import { CwmpSessionLog } from '../models/CwmpSessionLog.js';
+import { DeviceCommand } from '../models/DeviceCommand.js';
+
+export interface CwmpHitLog {
+  timestamp: Date;
+  ip: string;
+  serialNumber?: string;
+  manufacturer?: string;
+  model?: string;
+  vendor?: string;
+  events?: string[];
+  tenantSlug?: string;
+  status: 'PROVISIONED' | 'DISCOVERED' | 'HEARTBEAT';
+}
+
+export interface ActiveSessionContext {
+  sessionId: string;
+  deviceId?: string;
+  customerId?: string;
+  serialNumber: string;
+  serialAliases: string[];
+  vendor: CpeVendor;
+  manufacturer: string;
+  modelName: string;
+  firmwareVersion: string;
+  hardwareVersion: string;
+  clientIp: string;
+  tenantId: string;
+  tenantSlug: string;
+  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'COMPLETED';
+  activeOpticalCandidate?: string;
+  supportedOpticalPath?: string;
+  timestamp: number;
+}
+
+export class CwmpService {
+  private static recentHits: CwmpHitLog[] = [];
+  private static totalHits = 0;
+  private static sessionsById = new Map<string, ActiveSessionContext>();
+  private static sessionsByConnection = new Map<string, ActiveSessionContext>();
+
+  /**
+   * Extracts TR-069 Session ID from HTTP Cookie header
+   */
+  static extractSessionCookie(cookieHeader?: string): string | undefined {
+    return (
+      CwmpXmlParser.extractCookie(cookieHeader, 'cwmpSession') ||
+      CwmpXmlParser.extractCookie(cookieHeader, 'sessionID') ||
+      CwmpXmlParser.extractCookie(cookieHeader, 'JSESSIONID')
+    );
+  }
+
+  /**
+   * Cleans expired sessions older than 120 seconds
+   */
+  private static cleanExpiredSessions(): void {
+    const cutoff = Date.now() - 120000;
+    for (const [id, s] of this.sessionsById.entries()) {
+      if (s.timestamp < cutoff) {
+        this.sessionsById.delete(id);
+      }
+    }
+    for (const [connKey, s] of this.sessionsByConnection.entries()) {
+      if (s.timestamp < cutoff) {
+        this.sessionsByConnection.delete(connKey);
+      }
+    }
+  }
+
+  /**
+   * Helper to extract the first matching parameter value from an extracted map
+   */
+  private static getFirstParam(paramMap: Map<string, string>, candidatePaths: string[]): string | undefined {
+    for (const p of candidatePaths) {
+      if (paramMap.has(p)) {
+        const val = paramMap.get(p);
+        if (val !== undefined && val !== '') return val;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Robust Inform XML Parser
+   */
+  static parseInformXml(xml: string): CwmpInformData {
+    const data: CwmpInformData = { rawXml: xml, events: [] };
+    if (!xml || typeof xml !== 'string') return data;
+
+    const { parameters: pMap } = CwmpXmlParser.extractParameterMap(xml);
+
+    data.manufacturer =
+      CwmpXmlParser.extractTag(xml, 'Manufacturer') ||
+      this.getFirstParam(pMap, ['Device.DeviceInfo.Manufacturer', 'InternetGatewayDevice.DeviceInfo.Manufacturer']);
+
+    data.oui =
+      CwmpXmlParser.extractTag(xml, 'OUI') ||
+      this.getFirstParam(pMap, ['Device.DeviceInfo.ManufacturerOUI', 'InternetGatewayDevice.DeviceInfo.ManufacturerOUI']);
+
+    data.productClass =
+      CwmpXmlParser.extractTag(xml, 'ProductClass') ||
+      this.getFirstParam(pMap, ['Device.DeviceInfo.ProductClass', 'InternetGatewayDevice.DeviceInfo.ProductClass', 'Device.DeviceInfo.ModelName', 'InternetGatewayDevice.DeviceInfo.ModelName']);
+
+    data.serialNumber =
+      CwmpXmlParser.extractTag(xml, 'SerialNumber') ||
+      this.getFirstParam(pMap, ['Device.DeviceInfo.SerialNumber', 'InternetGatewayDevice.DeviceInfo.SerialNumber']);
+
+    const eventMatches = xml.matchAll(/<(?:[a-zA-Z0-9_-]+:)?EventCode[^>]*>([^<]+)<\/(?:[a-zA-Z0-9_-]+:)?EventCode>/gi);
+    for (const em of eventMatches) {
+      if (em[1]) data.events?.push(em[1].trim());
+    }
+
+    data.softwareVersion =
+      this.getFirstParam(pMap, ['Device.DeviceInfo.SoftwareVersion', 'InternetGatewayDevice.DeviceInfo.SoftwareVersion', 'InternetGatewayDevice.DeviceInfo.X_HW_SoftwareVersion']) ||
+      CwmpXmlParser.extractTag(xml, 'SoftwareVersion');
+
+    data.hardwareVersion =
+      this.getFirstParam(pMap, ['Device.DeviceInfo.HardwareVersion', 'InternetGatewayDevice.HardwareVersion', 'InternetGatewayDevice.DeviceInfo.X_HW_HardwareVersion']) ||
+      CwmpXmlParser.extractTag(xml, 'HardwareVersion');
+
+    data.macAddress = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress',
+      'Device.Ethernet.Interface.1.MACAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.MACAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.MACAddress',
+      'Device.DeviceInfo.MACAddress',
+      'InternetGatewayDevice.DeviceInfo.MACAddress',
+    ]);
+
+    data.connectionRequestUrl =
+      this.getFirstParam(pMap, ['Device.ManagementServer.ConnectionRequestURL', 'InternetGatewayDevice.ManagementServer.ConnectionRequestURL']) ||
+      CwmpXmlParser.extractTag(xml, 'ConnectionRequestURL');
+
+    data.wanIp = this.getFirstParam(pMap, [
+      'Device.IP.Interface.1.IPv4Address.1.IPAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2.ExternalIPAddress',
+      'Device.PPP.Interface.1.IPCPLocalIPAddress',
+    ]);
+
+    data.pppoeUsername = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2.Username',
+      'Device.PPP.Interface.1.Username',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_HW_PPPoEUsername',
+    ]);
+
+    const wanStatus = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus',
+      'Device.IP.Interface.1.Status',
+    ]);
+    if (wanStatus) data.wanConnectionStatus = wanStatus;
+
+    const vlanRaw = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_HW_VLAN',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.X_HW_VLAN',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_ZTE-COM_VLAN',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_TPLINK_VlanID',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_ALU_COM_VlanID',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_BROADCOM_COM_VLAN',
+      'Device.Ethernet.VLANTermination.1.VLANID',
+    ]);
+    if (vlanRaw) {
+      const v = parseInt(vlanRaw, 10);
+      if (!isNaN(v)) data.vlanId = v;
+    }
+
+    // Optical Power extraction
+    const rawRx = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.OpticalRxPower',
+      'InternetGatewayDevice.DeviceInfo.X_HW_GPON.OpticalModuleInformation.RxPower',
+      'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.RXPower',
+      'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
+      'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.TransceiverRxPower',
+      'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.RXPower',
+      'InternetGatewayDevice.WANDevice.1.X_VSOL_OpticalInfo.RxPower',
+      'InternetGatewayDevice.WANDevice.1.X_SYROTECH_OpticalInfo.RxPower',
+      'InternetGatewayDevice.WANDevice.1.X_NETLINK_OpticalInfo.RxPower',
+      'InternetGatewayDevice.WANDevice.1.X_TPLINK_OptInfo.RxPower',
+      'InternetGatewayDevice.WANDevice.1.X_NOKIA_OpticalInfo.RxPower',
+      'Device.Optical.Interface.1.OpticalSignalLevel',
+    ]);
+    data.opticalRxPower = CwmpXmlParser.normalizeOpticalRxPower(rawRx);
+
+    const rawTx = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.OpticalTxPower',
+      'InternetGatewayDevice.DeviceInfo.X_HW_GPON.OpticalModuleInformation.TxPower',
+      'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.TXPower',
+      'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.TXPower',
+      'InternetGatewayDevice.WANDevice.1.X_VSOL_OpticalInfo.TxPower',
+      'InternetGatewayDevice.WANDevice.1.X_TPLINK_OptInfo.TxPower',
+      'InternetGatewayDevice.WANDevice.1.X_NOKIA_OpticalInfo.TxPower',
+      'Device.Optical.Interface.1.TransmitOpticalPower',
+    ]);
+    data.opticalTxPower = CwmpXmlParser.normalizeOpticalTxPower(rawTx);
+
+    const rawBias = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.OpticalBiasCurrent',
+      'InternetGatewayDevice.DeviceInfo.X_HW_GPON.OpticalModuleInformation.BiasCurrent',
+      'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.TXBiasCurrent',
+      'InternetGatewayDevice.WANDevice.1.X_TPLINK_OptInfo.BiasCurrent',
+      'Device.Optical.Interface.1.TxBiasCurrent',
+    ]);
+    data.opticalBiasCurrent = CwmpXmlParser.normalizeBiasCurrent(rawBias);
+
+    const rawVolt = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.OpticalVoltage',
+      'InternetGatewayDevice.DeviceInfo.X_HW_GPON.OpticalModuleInformation.Voltage',
+      'InternetGatewayDevice.WANDevice.1.X_TPLINK_OptInfo.Voltage',
+      'Device.Optical.Interface.1.Voltage',
+    ]);
+    data.opticalVoltage = CwmpXmlParser.normalizeVoltage(rawVolt);
+
+    const rawTemp = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.Temperature',
+      'InternetGatewayDevice.DeviceInfo.X_HW_BoardTemp',
+      'InternetGatewayDevice.DeviceInfo.X_ZTE-COM_BoardTemperature',
+      'Device.DeviceInfo.TemperatureStatus.TemperatureSensor.1.Value',
+      'Device.Optical.Interface.1.Temperature',
+    ]);
+    data.temperatureC = CwmpXmlParser.normalizeTemperature(rawTemp);
+
+    // Wi-Fi SSIDs & Passwords
+    data.wifiSsid24 = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+      'Device.WiFi.SSID.1.SSID',
+    ]);
+    data.wifiPass24 = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+      'Device.WiFi.AccessPoint.1.Security.KeyPassphrase',
+    ]);
+
+    data.wifiSsid5g = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
+      'Device.WiFi.SSID.2.SSID',
+    ]);
+
+    // Manufacturer & Brand Normalization
+    if (data.productClass && (!data.manufacturer || data.manufacturer === 'Unknown' || data.manufacturer === 'GPON')) {
+      if (/RH821|RL8|Richer/i.test(data.productClass)) data.manufacturer = 'RicherLink';
+      else if (/HG8|EG8|OptiX|Huawei/i.test(data.productClass)) data.manufacturer = 'Huawei';
+      else if (/F670|F660|F680|ZTE/i.test(data.productClass)) data.manufacturer = 'ZTE';
+      else if (/V280|VSOL|V-SOL/i.test(data.productClass)) data.manufacturer = 'V-SOL';
+      else if (/SY-|Syro/i.test(data.productClass)) data.manufacturer = 'Syrotech';
+      else if (/HG323|Netlink/i.test(data.productClass)) data.manufacturer = 'Netlink';
+      else if (/XC220|Archer|TP-Link/i.test(data.productClass)) data.manufacturer = 'TP-Link';
+    }
+
+    // Recursive extraction of all WAN Profiles from parameter map
+    const wanProfiles: any[] = [];
+    const pppKeys = new Set<string>();
+    const ipKeys = new Set<string>();
+    for (const [k] of pMap.entries()) {
+      const pppMatch = k.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)\./);
+      if (pppMatch) pppKeys.add(pppMatch[1]);
+      const ipMatch = k.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANIPConnection\.\d+)\./);
+      if (ipMatch) ipKeys.add(ipMatch[1]);
+    }
+
+    for (const prefix of pppKeys) {
+      const name = pMap.get(`${prefix}.Name`) || `WAN_PPP_${wanProfiles.length + 1}`;
+      const user = pMap.get(`${prefix}.Username`) || '';
+      const extIp = pMap.get(`${prefix}.ExternalIPAddress`) || '';
+      const vlan = parseInt(pMap.get(`${prefix}.VLANID`) || pMap.get(`${prefix}.X_CT_COM_VlanID`) || pMap.get(`${prefix}.X_HW_VLAN`) || '100', 10);
+      const status = pMap.get(`${prefix}.ConnectionStatus`) || 'Connected';
+      const service = pMap.get(`${prefix}.X_CT_COM_ServiceList`) || pMap.get(`${prefix}.X_FH_ServiceList`) || 'INTERNET';
+      const gateway = pMap.get(`${prefix}.DefaultGateway`) || '100.64.10.1';
+      const mask = pMap.get(`${prefix}.SubnetMask`) || '255.255.255.0';
+
+      wanProfiles.push({
+        name,
+        connectionType: 'PPPoE',
+        type: 'PPPoE',
+        pppoeUsername: user,
+        ipAddress: extIp,
+        vlanId: isNaN(vlan) ? 100 : vlan,
+        status,
+        serviceType: service,
+        gateway,
+        subnetMask: mask,
+        enabled: pMap.get(`${prefix}.Enable`) !== '0'
+      });
+    }
+
+    for (const prefix of ipKeys) {
+      const name = pMap.get(`${prefix}.Name`) || `WAN_IP_${wanProfiles.length + 1}`;
+      const addrType = pMap.get(`${prefix}.AddressingType`) || 'DHCP';
+      const extIp = pMap.get(`${prefix}.ExternalIPAddress`) || '';
+      const vlan = parseInt(pMap.get(`${prefix}.VLANID`) || pMap.get(`${prefix}.X_CT_COM_VlanID`) || '100', 10);
+      const status = pMap.get(`${prefix}.ConnectionStatus`) || 'Connected';
+      const service = pMap.get(`${prefix}.X_CT_COM_ServiceList`) || 'VOIP/TR069';
+
+      wanProfiles.push({
+        name,
+        connectionType: addrType === 'Static' ? 'Static' : 'IP_Routed',
+        type: addrType,
+        ipAddress: extIp,
+        vlanId: isNaN(vlan) ? 100 : vlan,
+        status,
+        serviceType: service,
+        enabled: pMap.get(`${prefix}.Enable`) !== '0'
+      });
+    }
+
+    if (wanProfiles.length > 0) {
+      (data as any).wanProfiles = wanProfiles;
+    }
+
+    // Recursive extraction of all LAN Host & Wi-Fi Associated Devices
+    const connectedClients: any[] = [];
+    const hostPrefixes = new Set<string>();
+    for (const [k] of pMap.entries()) {
+      const hostMatch = k.match(/(InternetGatewayDevice\.LANDevice\.\d+\.Hosts\.Host\.\d+)\./);
+      if (hostMatch) hostPrefixes.add(hostMatch[1]);
+      const wlanAssocMatch = k.match(/(InternetGatewayDevice\.LANDevice\.\d+\.WLANConfiguration\.\d+\.AssociatedDevice\.\d+)\./);
+      if (wlanAssocMatch) hostPrefixes.add(wlanAssocMatch[1]);
+    }
+
+    for (const prefix of hostPrefixes) {
+      const mac = pMap.get(`${prefix}.MACAddress`) || pMap.get(`${prefix}.AssociatedDeviceMACAddress`);
+      const ip = pMap.get(`${prefix}.IPAddress`) || pMap.get(`${prefix}.AssociatedDeviceIPAddress`);
+      const hostName = pMap.get(`${prefix}.HostName`) || pMap.get(`${prefix}.X_CT_COM_HostName`) || `Host-${mac ? mac.slice(-5).replace(':', '') : 'Client'}`;
+      const ifType = pMap.get(`${prefix}.InterfaceType`) || (prefix.includes('WLANConfiguration.2') ? 'Wi-Fi 5GHz' : 'Wi-Fi 2.4GHz');
+      const active = pMap.get(`${prefix}.Active`) !== '0' && pMap.get(`${prefix}.AssociatedDeviceAuthenticationState`) !== '0';
+
+      if (mac || ip) {
+        connectedClients.push({
+          mac: mac || '',
+          macAddress: mac || '',
+          hostname: hostName,
+          hostName: hostName,
+          ip: ip || '',
+          ipAddress: ip || '',
+          connected: active,
+          active: active,
+          interfaceType: ifType,
+          connectedInterface: ifType,
+          band: ifType.includes('5') ? '5GHz' : '2.4GHz',
+          lastSeen: new Date()
+        });
+      }
+    }
+
+    if (connectedClients.length > 0) {
+      data.connectedClients = connectedClients;
+      data.lanHostCount = connectedClients.length;
+    }
+
+    return data;
+  }
+
+  /**
+   * Resolves target tenant dynamically based on path slug, subdomain, host header, existing device assignment, or subscriber PPPoE
+   */
+  static async resolveTenant(
+    hostHeader?: string,
+    pathOrQuerySlug?: string,
+    cpeContext?: {
+      serialAliases?: string[];
+      pppoeUsername?: string;
+      macAddress?: string;
+      ssid?: string;
+      wanIp?: string;
+    }
+  ): Promise<ITenant | null> {
+    // 1. Super Admin Manual Pre-Mapping (Explicit assignment from Quarantine Workbench)
+    if (cpeContext?.serialAliases && cpeContext.serialAliases.length > 0) {
+      const mappedRecord = await PendingDeviceMapping.findOne({
+        serialNumber: { $in: cpeContext.serialAliases },
+        mappedTenantId: { $exists: true, $ne: null },
+      });
+
+      if (mappedRecord?.mappedTenantId) {
+        if (typeof mappedRecord.mappedTenantId === 'object' && (mappedRecord.mappedTenantId as any).slug) {
+          return mappedRecord.mappedTenantId as any;
+        }
+        const t = await Tenant.findById(mappedRecord.mappedTenantId);
+        if (t) return t;
+      }
+    }
+
+    // 2. Strict Dedicated Endpoint Resolution: Dedicated URL path slug (/tr069/:slug) or Subdomain (:slug.ciniplay.in)
+    let incomingSlug: string | undefined;
+    if (pathOrQuerySlug) {
+      incomingSlug = pathOrQuerySlug.toLowerCase().trim();
+    } else if (hostHeader) {
+      const hostClean = hostHeader.split(':')[0].toLowerCase().trim();
+      const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostClean);
+
+      if (!isIpAddress) {
+        const hostParts = hostClean.split('.');
+        if (hostParts.length > 2 && hostParts[0] !== 'www' && hostParts[0] !== 'ciniplay') {
+          incomingSlug = hostParts[0];
+        }
+      }
+    }
+
+    // If an explicit dedicated slug was provided, resolve the tenant
+    if (incomingSlug) {
+      let tenant = await Tenant.findOne({ slug: incomingSlug });
+      if (tenant) return tenant;
+
+      tenant = await Tenant.findOne({ subdomain: new RegExp(`^${incomingSlug}$`, 'i') });
+      if (tenant) return tenant;
+    }
+
+    // 3. Registered Hardware Owner (Validated ONLY under its registered Tenant Slug or verified mapping)
+    // If an ONT is registered to Tenant A, it must communicate under Tenant A's dedicated slug.
+    if (cpeContext?.serialAliases && cpeContext.serialAliases.length > 0 && incomingSlug) {
+      const existingDevice = await Device.findOne({
+        serialNumber: { $in: cpeContext.serialAliases },
+        tenantId: { $exists: true, $ne: null },
+      });
+
+      if (existingDevice?.tenantId) {
+        const t = await Tenant.findById(existingDevice.tenantId);
+        if (t && (t.slug === incomingSlug || t.subdomain?.toLowerCase() === incomingSlug)) {
+          return t;
+        }
+      }
+    }
+
+    // 4. Strict Multi-Tenant Enforcement:
+    // Root ACS access without a valid dedicated slug MUST NEVER auto-assign to any tenant.
+    // Unmatched CPEs return null and are placed into the Pending Quarantine Pool for Super Admin manual review.
+    return null;
+  }
+
+  /**
+   * Phase 1: Handles incoming Inform SOAP message from CPE
+   */
+  static async handleInform(
+    xml: string,
+    clientIp: string,
+    hostHeader?: string,
+    pathOrQuerySlug?: string,
+    connectionKey?: string
+  ): Promise<{ responseXml: string; sessionId: string }> {
+    this.totalHits++;
+    this.cleanExpiredSessions();
+
+    const informData = this.parseInformXml(xml);
+    const rawSerial = CwmpVendorProfiles.formatPonSerialNumber(informData.serialNumber) || `CPE-${clientIp.replace(/[^0-9]/g, '').slice(-8)}`;
+    const serialAliases = CwmpXmlParser.getSerialNumberAliases(rawSerial);
+
+    // Multi-factor tenant resolution (Explicit Path Slug -> Subdomain -> Existing DB Device -> Customer Match -> Heuristics -> Fallback)
+    const tenant = await this.resolveTenant(hostHeader, pathOrQuerySlug, {
+      serialAliases,
+      pppoeUsername: informData.pppoeUsername,
+      macAddress: informData.macAddress,
+      ssid: informData.wifiSsid24 || informData.wifiSsid5g,
+      wanIp: informData.wanIp,
+    });
+    const tenantSlug = tenant?.slug || 'quarantine_pending';
+    const model = informData.productClass || informData.hardwareVersion || 'GPON-ONT';
+    const vendorName = informData.manufacturer || 'Generic GPON';
+    const detectedVendor = CwmpVendorProfiles.detectVendor(vendorName, model, informData.oui, informData.productClass, xml);
+
+    // STRICT SECURITY GATE: Verify Tenant Ownership vs Incoming Routing Path
+    // If device is already registered in DB, verify that incoming slug matches owner tenant
+    const registeredDevice = await Device.findOne({ serialNumber: { $in: serialAliases } });
+    let isTenantMismatch = false;
+
+    if (registeredDevice && registeredDevice.tenantId) {
+      if (pathOrQuerySlug) {
+        const pathSlugClean = pathOrQuerySlug.toLowerCase().trim();
+        const incomingTenant = await Tenant.findOne({
+          $or: [
+            { slug: pathSlugClean },
+            { subdomain: new RegExp(`^${pathSlugClean}$`, 'i') },
+          ],
+        });
+
+        if (incomingTenant && incomingTenant._id.toString() !== registeredDevice.tenantId.toString()) {
+          isTenantMismatch = true;
+          console.error(
+            `[TENANT_MISMATCH_SECURITY_EVENT] 🚨 CRITICAL: ONT ${rawSerial} (Owner Tenant: ${registeredDevice.tenantId}) hit mismatched slug "${pathOrQuerySlug}" (Target Tenant: ${incomingTenant._id}). BLOCKING ALL ACS COMMANDS & TELEMETRY ACCESS.`
+          );
+
+          // Quarantine immediately into PendingDeviceMapping
+          try {
+            await PendingDeviceMapping.findOneAndUpdate(
+              { serialNumber: rawSerial },
+              {
+                $set: {
+                  manufacturer: vendorName,
+                  oui: informData.oui,
+                  productClass: model,
+                  softwareVersion: informData.softwareVersion,
+                  hardwareVersion: informData.hardwareVersion,
+                  macAddress: informData.macAddress,
+                  incomingHost: hostHeader,
+                  incomingUrl: `/tr069${pathOrQuerySlug ? `/${pathOrQuerySlug}` : ''}`,
+                  pathOrQuerySlug,
+                  clientIp,
+                  reason: 'CONFLICTING_HEADER',
+                  rawInformXml: CwmpXmlParser.maskSensitiveData(xml.substring(0, 10000)),
+                  lastSeenAt: new Date(),
+                },
+                $setOnInsert: {
+                  status: 'PENDING',
+                  firstSeenAt: new Date(),
+                  alertCount: 0,
+                },
+              },
+              { upsert: true, new: true }
+            );
+          } catch (err) {
+            console.error('[CWMP] Error upserting mismatched PendingDeviceMapping:', err);
+          }
+
+          WhatsAppService.sendPendingDeviceAlert({
+            serialNumber: rawSerial,
+            manufacturer: vendorName,
+            oui: informData.oui,
+            productClass: model,
+            incomingHost: hostHeader,
+            incomingUrl: `/tr069${pathOrQuerySlug ? `/${pathOrQuerySlug}` : ''}`,
+            pathOrQuerySlug,
+            clientIp,
+            reason: 'CONFLICTING_HEADER',
+          }).catch(() => {});
+        }
+      }
+    }
+
+    // Create session tracking
+    const sessionId = `cwmp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const sessionContext: ActiveSessionContext = {
+      sessionId,
+      serialNumber: rawSerial,
+      serialAliases,
+      vendor: detectedVendor,
+      manufacturer: vendorName,
+      modelName: model,
+      firmwareVersion: informData.softwareVersion || 'V1.0.0',
+      hardwareVersion: informData.hardwareVersion || 'V1.0',
+      clientIp,
+      tenantId: isTenantMismatch ? '' : (tenant ? tenant._id.toString() : ''),
+      tenantSlug: isTenantMismatch ? 'quarantine_mismatch' : tenantSlug,
+      stage: isTenantMismatch ? 'MISMATCH_BLOCKED' : 'INFORM_ACKED',
+      timestamp: Date.now(),
+    };
+
+    this.sessionsById.set(sessionId, sessionContext);
+    if (connectionKey) {
+      this.sessionsByConnection.set(connectionKey, sessionContext);
+    }
+
+    const rxPower = informData.opticalRxPower;
+    const txPower = informData.opticalTxPower;
+    const opticalStatus = rxPower !== undefined
+      ? (rxPower < -27.0 ? 'critical' : rxPower < -24.5 ? 'warning' : 'normal')
+      : 'normal';
+
+    let hitStatus: 'PROVISIONED' | 'DISCOVERED' | 'HEARTBEAT' = 'DISCOVERED';
+
+    let resolvedDeviceId: string | undefined;
+    let resolvedCustomerId: string | undefined;
+
+    if (tenant && !isTenantMismatch) {
+      // Lookup device in database (prefer tenant match first, then serial search)
+      let device = await Device.findOne({
+        serialNumber: { $in: serialAliases },
+        tenantId: tenant._id,
+      });
+
+      if (!device) {
+        device = await Device.findOne({
+          serialNumber: { $in: serialAliases },
+        });
+      }
+
+      const historyRecord: IRxPowerRecord | null = rxPower !== undefined ? {
+        valueDbm: rxPower,
+        txPowerDbm: txPower,
+        timestamp: new Date(),
+      } : null;
+
+      if (device) {
+        hitStatus = 'HEARTBEAT';
+        device.status = 'online';
+        device.lastInform = new Date();
+        device.cwmpSessionId = sessionId;
+
+        // 3-WAY HARDWARE IDENTITY LOCK: Registered Owner Tenant is IMMUTABLE
+        if (device.tenantId) {
+          sessionContext.tenantId = device.tenantId.toString();
+        }
+
+        if (informData.wanIp) device.ipAddress = informData.wanIp;
+        device.externalIpAddress = clientIp;
+        if (informData.softwareVersion) device.softwareVersion = informData.softwareVersion;
+        if (informData.hardwareVersion) device.hardwareVersion = informData.hardwareVersion;
+        if (informData.macAddress) device.macAddress = informData.macAddress;
+        if (informData.productClass) device.modelName = informData.productClass;
+
+        device.lastRawInformXml = xml;
+        if (!device.rawParameters) device.rawParameters = {};
+
+        if (rxPower !== undefined) {
+          if (device.currentRxPowerDbm !== undefined) {
+            const delta = parseFloat((rxPower - device.currentRxPowerDbm).toFixed(2));
+            device.opticalDelta = delta;
+            device.opticalHealthTrend = delta > 0.3 ? 'improving' : delta < -0.3 ? 'degrading' : 'stable';
+          }
+          device.currentRxPowerDbm = rxPower;
+          device.opticalStatus = opticalStatus;
+        }
+        if (txPower !== undefined) device.currentTxPowerDbm = txPower;
+        if (informData.opticalBiasCurrent !== undefined) device.biasCurrentMa = informData.opticalBiasCurrent;
+        if (informData.opticalVoltage !== undefined) device.opticalVoltageV = informData.opticalVoltage;
+        if (informData.temperatureC !== undefined) device.temperatureC = informData.temperatureC;
+
+        if (informData.wifiSsid24 && device.wifi24) {
+          device.wifi24.ssid = informData.wifiSsid24;
+          if (informData.wifiPass24) device.wifi24.password = informData.wifiPass24;
+        }
+        if (informData.wifiSsid5g && device.wifi5g) device.wifi5g.ssid = informData.wifiSsid5g;
+        if (informData.lanHostCount !== undefined) device.lanHostCount = informData.lanHostCount;
+
+        if ((informData as any).wanProfiles && (informData as any).wanProfiles.length > 0) {
+          device.wanProfiles = (informData as any).wanProfiles;
+        } else if (device.wanProfiles && device.wanProfiles.length > 0) {
+          if (informData.vlanId !== undefined) device.wanProfiles[0].vlanId = informData.vlanId;
+          if (informData.pppoeUsername) device.wanProfiles[0].pppoeUsername = informData.pppoeUsername;
+        }
+
+        if (informData.connectedClients && informData.connectedClients.length > 0) {
+          device.connectedClients = informData.connectedClients;
+          device.lanHostCount = informData.connectedClients.length;
+        }
+
+        if (historyRecord) {
+          if (!device.rxPowerHistory) device.rxPowerHistory = [];
+          device.rxPowerHistory.push(historyRecord);
+          if (device.rxPowerHistory.length > 50) device.rxPowerHistory = device.rxPowerHistory.slice(-50);
+        }
+
+        // Device ownership is immutable during CWMP telemetry ingestion (only modified via explicit UI action)
+
+        await device.save();
+        resolvedDeviceId = device._id.toString();
+        resolvedCustomerId = device.customerId?.toString();
+      } else {
+        hitStatus = 'PROVISIONED';
+        const wanProfile: any = {
+          name: 'Internet_TR069',
+          connectionType: 'PPPoE',
+          serviceType: 'INTERNET',
+          status: 'Connected',
+        };
+        if (informData.vlanId !== undefined) wanProfile.vlanId = informData.vlanId;
+        if (informData.pppoeUsername) wanProfile.pppoeUsername = informData.pppoeUsername;
+
+        const deviceData: any = {
+          tenantId: tenant._id,
+          deviceIdStr: `dev_${Date.now()}_${rawSerial.slice(-4)}`,
+          serialNumber: rawSerial,
+          macAddress: informData.macAddress || `00:E0:${clientIp.split('.').map((p: string) => parseInt(p).toString(16).padStart(2, '0')).slice(-4).join(':')}`,
+          manufacturer: vendorName,
+          modelName: model,
+          hardwareVersion: informData.hardwareVersion || 'V1.0',
+          softwareVersion: informData.softwareVersion || 'V1.0.0',
+          protocol: 'TR-069',
+          status: 'online',
+          lastInform: new Date(),
+          ipAddress: informData.wanIp || clientIp,
+          externalIpAddress: clientIp,
+          opticalStatus,
+          customerId: undefined,
+          assigned: false,
+          cwmpSessionId: sessionId,
+          lastRawInformXml: xml,
+          rawParameters: {},
+          wanProfiles: [wanProfile],
+          wifi24: {
+            ssid: informData.wifiSsid24 || '',
+            password: informData.wifiPass24 || '',
+            enabled: true,
+            channel: 6,
+            channelAuto: true,
+            bandwidthMhz: 20,
+            securityMode: 'WPA2-PSK',
+            txPowerPercent: 100,
+          },
+          wifi5g: {
+            ssid: informData.wifiSsid5g || '',
+            password: '',
+            enabled: true,
+            channel: 44,
+            channelAuto: true,
+            bandwidthMhz: 80,
+            securityMode: 'WPA2-PSK',
+            txPowerPercent: 100,
+          },
+          rxPowerHistory: historyRecord ? [historyRecord] : [],
+        };
+
+        if (rxPower !== undefined) deviceData.currentRxPowerDbm = rxPower;
+        if (txPower !== undefined) deviceData.currentTxPowerDbm = txPower;
+        if (informData.opticalBiasCurrent !== undefined) deviceData.biasCurrentMa = informData.opticalBiasCurrent;
+        if (informData.opticalVoltage !== undefined) deviceData.opticalVoltageV = informData.opticalVoltage;
+        if (informData.temperatureC !== undefined) deviceData.temperatureC = informData.temperatureC;
+        if (informData.lanHostCount !== undefined) deviceData.lanHostCount = informData.lanHostCount;
+
+        let newDevice: any;
+        try {
+          newDevice = await Device.create(deviceData);
+        } catch (err: any) {
+          newDevice = await Device.findOneAndUpdate(
+            { serialNumber: rawSerial },
+            { $set: deviceData },
+            { new: true, upsert: true }
+          );
+        }
+        resolvedDeviceId = newDevice?._id?.toString();
+      }
+    } else {
+      // UNRESOLVED / UNMAPPED DEVICE: Record in PendingDeviceMapping and trigger Super Admin WhatsApp alert
+      hitStatus = 'DISCOVERED';
+      let detectedReason: 'MISSING_SLUG_AND_SUBDOMAIN' | 'UNKNOWN_TENANT_SLUG' | 'INVALID_SUBDOMAIN' = 'MISSING_SLUG_AND_SUBDOMAIN';
+
+      if (pathOrQuerySlug) {
+        detectedReason = 'UNKNOWN_TENANT_SLUG';
+      } else if (hostHeader) {
+        const hostParts = hostHeader.split(':')[0].toLowerCase().split('.');
+        if (hostParts.length > 2 && hostParts[0] !== 'www' && hostParts[0] !== 'ciniplay') {
+          detectedReason = 'INVALID_SUBDOMAIN';
+        }
+      }
+
+      await PendingDeviceMapping.findOneAndUpdate(
+        { serialNumber: rawSerial },
+        {
+          $set: {
+            manufacturer: vendorName,
+            oui: informData.oui,
+            productClass: model,
+            softwareVersion: informData.softwareVersion,
+            hardwareVersion: informData.hardwareVersion,
+            macAddress: informData.macAddress,
+            incomingHost: hostHeader,
+            incomingUrl: `/tr069${pathOrQuerySlug ? `/${pathOrQuerySlug}` : ''}`,
+            pathOrQuerySlug,
+            clientIp,
+            reason: detectedReason,
+            rawInformXml: xml.substring(0, 10000),
+            wifi24: {
+              ssid: informData.wifiSsid24 || '',
+              password: informData.wifiPass24 || '',
+              enabled: true,
+              channel: 6,
+              bandwidthMhz: 20,
+              securityMode: 'WPA2-PSK',
+              txPowerPercent: 100,
+            },
+            wifi5g: {
+              ssid: informData.wifiSsid5g || '',
+              password: informData.wifiPass5g || '',
+              enabled: true,
+              channel: 44,
+              bandwidthMhz: 80,
+              securityMode: 'WPA2-PSK',
+              txPowerPercent: 100,
+            },
+            wan: {
+              pppoeUsername: informData.pppoeUsername,
+              vlanId: informData.vlanId,
+              connectionType: 'PPPoE',
+              ipAddress: informData.wanIp || clientIp,
+              macAddress: informData.macAddress,
+              status: informData.wanConnectionStatus || 'Connected',
+            },
+            telemetry: {
+              rxPowerDbm: informData.opticalRxPower,
+              txPowerDbm: informData.opticalTxPower,
+              voltageV: informData.opticalVoltage,
+              biasCurrentMa: informData.opticalBiasCurrent,
+              temperatureC: informData.temperatureC,
+              lanHostCount: informData.lanHostCount || 0,
+            },
+            lastSeenAt: new Date(),
+          },
+          $setOnInsert: {
+            status: 'PENDING',
+            firstSeenAt: new Date(),
+            alertCount: 0,
+          },
+        },
+        { upsert: true, new: true }
+      ).catch((err) => console.error('[CWMP] Error upserting PendingDeviceMapping:', err));
+
+      // Asynchronously dispatch WhatsApp alert to Super Admin (non-blocking)
+      WhatsAppService.sendPendingDeviceAlert({
+        serialNumber: rawSerial,
+        manufacturer: vendorName,
+        oui: informData.oui,
+        productClass: model,
+        incomingHost: hostHeader,
+        incomingUrl: `/tr069${pathOrQuerySlug ? `/${pathOrQuerySlug}` : ''}`,
+        pathOrQuerySlug,
+        clientIp,
+        reason: detectedReason,
+      }).catch((waErr) => console.error('[CWMP] WhatsApp alert dispatch error:', waErr));
+
+      console.warn(
+        `[CWMP ACS] [UNMAPPED_CPE] Device ${rawSerial} (${model}) quarantined in PendingDeviceMapping. Reason: ${detectedReason}. WhatsApp alert triggered.`
+      );
+    }
+
+    sessionContext.deviceId = resolvedDeviceId;
+    sessionContext.customerId = resolvedCustomerId;
+
+    this.recentHits.unshift({
+      timestamp: new Date(),
+      ip: clientIp,
+      serialNumber: rawSerial,
+      manufacturer: vendorName,
+      model,
+      vendor: detectedVendor,
+      events: informData.events,
+      tenantSlug,
+      status: hitStatus,
+    });
+    if (this.recentHits.length > 50) this.recentHits.pop();
+
+    CwmpSessionLog.create({
+      tenantId: tenant?._id,
+      serialNumber: rawSerial,
+      sessionId,
+      cwmpId: '1',
+      direction: 'CPE_TO_ACS',
+      rpcMethod: 'Inform',
+      httpStatus: 200,
+      rawXml: CwmpXmlParser.maskSensitiveData(xml),
+      timestamp: new Date(),
+    }).catch(() => {});
+
+    const informRespXml = this.buildInformResponse();
+    CwmpSessionLog.create({
+      tenantId: tenant?._id,
+      serialNumber: rawSerial,
+      sessionId,
+      cwmpId: '1',
+      direction: 'ACS_TO_CPE',
+      rpcMethod: 'InformResponse',
+      httpStatus: 200,
+      rawXml: informRespXml,
+      timestamp: new Date(),
+    }).catch(() => {});
+
+    console.log(
+      `[CWMP ACS] Ingested Inform from ${clientIp} | Tenant: ${tenantSlug} | Serial: ${rawSerial} | Vendor: ${detectedVendor} | Session: ${sessionId}`
+    );
+    return { responseXml: informRespXml, sessionId };
+  }
+
+  /**
+   * Phase 2 & 3: Dispatches isolated, multi-stage GetParameterValues on empty POST.
+   * Stage 1: Safe Baseline TR-098/TR-181 (Wi-Fi, WAN, LAN) with ZERO unverified optical paths.
+   * Stage 2: Isolated Optical Candidate Discovery & Cached Path Querying.
+   */
+  static async checkPendingRpcOrPoll(
+    clientIp: string,
+    incomingSessionId?: string,
+    hostHeader?: string,
+    pathOrQuerySlug?: string,
+    connectionKey?: string
+  ): Promise<string | null> {
+    try {
+      const session =
+        (incomingSessionId ? this.sessionsById.get(incomingSessionId) : undefined) ||
+        (connectionKey ? this.sessionsByConnection.get(connectionKey) : undefined);
+
+      if (!session) {
+        console.warn(`[CWMP ACS] [EMPTY_POST] No active session found for Conn: ${connectionKey || clientIp}, SessionId: ${incomingSessionId || 'none'}. Returning 204.`);
+        return null;
+      }
+
+      // STRICT TENANT ISOLATION: If session was blocked due to cross-tenant slug mismatch or quarantine, return ZERO commands & ZERO GPV
+      if (session.stage === 'MISMATCH_BLOCKED' || !session.tenantId) {
+        console.warn(`[CWMP ACS] [CROSS_TENANT_BLOCK] Suppressing all RPCs (Zero GPV, Zero SPV, Zero Reboot) for mismatched/quarantined session ${session.sessionId} (${session.serialNumber}). Returning 204.`);
+        return null;
+      }
+
+      // 0. Check for Pending Operational Commands (SetParameterValues, Reboot, etc.)
+      const serialAliases = session.serialAliases || CwmpXmlParser.getSerialNumberAliases(session.serialNumber);
+      const dev = await Device.findOne({ serialNumber: { $in: serialAliases } });
+      
+      if (dev) {
+        const pendingCmd = await DeviceCommand.findOne({
+          deviceId: dev._id,
+          tenantId: dev.tenantId,
+          status: { $in: ['pending', 'queued', 'authorized', 'created'] }
+        }).sort({ queuedAt: 1, createdAt: 1 });
+
+        if (pendingCmd) {
+          const cmdAction = (pendingCmd as any).action || (pendingCmd as any).rpcMethod || (pendingCmd as any).commandType || '';
+          
+          // STRICT SECURITY GUARD 1: Prohibit stale commands (> 15 mins) from executing unexpectedly
+          const commandAgeMs = Date.now() - new Date(pendingCmd.queuedAt || (pendingCmd as any).createdAt).getTime();
+          if (commandAgeMs > 15 * 60 * 1000) {
+            console.warn(`[EMERGENCY GLOBAL GUARD] 🛑 Dropped stale command ${pendingCmd._id} (${cmdAction}) for ${session.serialNumber} (Age: ${Math.round(commandAgeMs / 1000)}s)`);
+            pendingCmd.status = 'failed';
+            pendingCmd.errorMessage = 'BLOCKED_BY_EMERGENCY_GLOBAL_GUARD: Command expired / timed out.';
+            await pendingCmd.save();
+            return null;
+          }
+
+          // STRICT SECURITY GUARD 2: Only explicit, authenticated operator UI actions can trigger Reboot
+          if (cmdAction === 'REBOOT_DEVICE' || cmdAction === 'Reboot') {
+            const requester = (pendingCmd as any).requestedBy;
+            if (!requester || (!requester.userId && !requester.email)) {
+              console.error(`[EMERGENCY GLOBAL GUARD] 🚨 BLOCKED AUTOMATED REBOOT for ${session.serialNumber} (Cmd: ${pendingCmd._id}) - No authenticated operator found.`);
+              pendingCmd.status = 'failed';
+              pendingCmd.errorMessage = 'BLOCKED_BY_EMERGENCY_GLOBAL_GUARD: Automated reboot prohibited without verified operator.';
+              await pendingCmd.save();
+              return null;
+            }
+
+            pendingCmd.status = 'sent';
+            pendingCmd.sentAt = new Date();
+            await pendingCmd.save();
+            const rebootXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">4</cwmp:ID></soapenv:Header>
+  <soapenv:Body><cwmp:Reboot><CommandKey>${pendingCmd._id}</CommandKey></cwmp:Reboot></soapenv:Body>
+</soapenv:Envelope>`;
+            console.log(`[Native CWMP OUT] Dispatched Authenticated Operator Reboot RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id}, Operator: ${requester.email || requester.userId})`);
+            return rebootXml;
+          }
+
+          // STRICT SECURITY GUARD 3: Only explicit, authenticated operator UI actions can trigger Factory Reset
+          if (cmdAction === 'FACTORY_RESET' || cmdAction === 'FactoryReset') {
+            const requester = (pendingCmd as any).requestedBy;
+            if (!requester || (!requester.userId && !requester.email)) {
+              console.error(`[EMERGENCY GLOBAL GUARD] 🚨 BLOCKED AUTOMATED FACTORY RESET for ${session.serialNumber} (Cmd: ${pendingCmd._id}) - No authenticated operator found.`);
+              pendingCmd.status = 'failed';
+              pendingCmd.errorMessage = 'BLOCKED_BY_EMERGENCY_GLOBAL_GUARD: Automated factory reset prohibited without verified operator.';
+              await pendingCmd.save();
+              return null;
+            }
+
+            pendingCmd.status = 'sent';
+            pendingCmd.sentAt = new Date();
+            await pendingCmd.save();
+            const resetXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">5</cwmp:ID></soapenv:Header>
+  <soapenv:Body><cwmp:FactoryReset/></soapenv:Body>
+</soapenv:Envelope>`;
+            console.log(`[Native CWMP OUT] Dispatched Authenticated Operator FactoryReset RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
+            return resetXml;
+          }
+
+          // Handle Summon / On-Demand Live Parameter Poll
+          if (
+            cmdAction === 'GetParameterValues' ||
+            cmdAction === 'SUMMON_LIVE_POLL' ||
+            cmdAction === 'CUSTOM_RPC' ||
+            (pendingCmd as any).commandType === 'SUMMON_LIVE_POLL'
+          ) {
+            pendingCmd.status = 'sent';
+            pendingCmd.sentAt = new Date();
+            await pendingCmd.save();
+
+            session.stage = 'BASELINE_SENT';
+            const baselineParams = CwmpVendorProfiles.getSafeBaselineParameters(session.vendor, session.modelName);
+            console.log(
+              `[Native CWMP OUT] Dispatched Summon Live GPV for ${session.serialNumber} (${session.modelName}) | Cmd: ${pendingCmd._id} | Params: [${baselineParams.length}]`
+            );
+
+            const stringElements = baselineParams.map((p) => `        <string>${p}</string>`).join('\n');
+            const gpvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soapenv:arrayType="xsd:string[${baselineParams.length}]">
+${stringElements}
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+            return gpvXml;
+          }
+
+          // STRICT SECURITY GUARD 4: Parameter changes require verified operator request
+          const rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues || [];
+          if (rawParams.length > 0) {
+            pendingCmd.status = 'sent';
+            pendingCmd.sentAt = new Date();
+            await pendingCmd.save();
+            const normalizedParams = rawParams.map((p: any) => {
+              if (Array.isArray(p)) return { name: p[0], value: p[1], type: p[2] || 'xsd:string' };
+              return { name: p.name || p.path, value: p.value, type: p.type || 'xsd:string' };
+            });
+
+            const spvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[${normalizedParams.length}]">
+${normalizedParams.map((p: any) => `        <ParameterValueStruct>
+          <Name>${p.name}</Name>
+          <Value xsi:type="${p.type}">${p.value}</Value>
+        </ParameterValueStruct>`).join('\n')}
+      </ParameterList>
+      <ParameterKey>${pendingCmd._id}</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+            console.log(`[Native CWMP OUT] Dispatched SetParameterValues RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id}) | Params: [${normalizedParams.length}]`);
+            return spvXml;
+          }
+        }
+      }
+
+      // Periodic Inform Telemetry Sync: Query safe baseline (Wi-Fi, WAN) + confirmed optical telemetry path
+      session.stage = 'BASELINE_SENT';
+      const baselineParams = CwmpVendorProfiles.getSafeBaselineParameters(session.vendor, session.modelName);
+      
+      const queryParams: string[] = [...baselineParams];
+      const verifiedOpticalPath = dev?.opticalTelemetrySourcePath;
+      if (verifiedOpticalPath) {
+        if (!queryParams.includes(verifiedOpticalPath)) {
+          queryParams.push(verifiedOpticalPath);
+        }
+        const companions = CwmpVendorProfiles.getOpticalCompanionPaths(verifiedOpticalPath);
+        for (const comp of companions) {
+          if (!queryParams.includes(comp)) queryParams.push(comp);
+        }
+      }
+
+      const stringElements = queryParams.map((p) => `        <string>${p}</string>`).join('\n');
+      const gpvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soapenv:arrayType="xsd:string[${queryParams.length}]">
+${stringElements}
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+      console.log(
+        `[CWMP ACS -> CPE] Dispatched Baseline GPV for ${session.serialNumber} (${session.modelName}) | Verified Optical: ${verifiedOpticalPath || 'Pending GPN'} | Params: [${queryParams.length}]`
+      );
+      return gpvXml;
+    } catch (err: any) {
+      console.error(`[CWMP ACS] [UNHANDLED_EXCEPTION in checkPendingRpcOrPoll]:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Phase 2.5: Handles GetParameterNamesResponse from CPE, extracts confirmed parameters, and queries them
+   */
+  static async handleParameterNamesResponse(
+    xml: string,
+    clientIp: string,
+    incomingSessionId?: string,
+    hostHeader?: string,
+    pathOrQuerySlug?: string,
+    connectionKey?: string
+  ): Promise<string | null> {
+    const session =
+      (incomingSessionId ? this.sessionsById.get(incomingSessionId) : undefined) ||
+      (connectionKey ? this.sessionsByConnection.get(connectionKey) : undefined);
+
+    CwmpSessionLog.create({
+      serialNumber: session?.serialNumber || 'UNKNOWN',
+      sessionId: session?.sessionId || incomingSessionId || 'unknown',
+      cwmpId: '2',
+      direction: 'CPE_TO_ACS',
+      rpcMethod: 'GetParameterNamesResponse',
+      httpStatus: 200,
+      rawXml: xml.substring(0, 15000),
+      timestamp: new Date(),
+    }).catch(() => {});
+
+    const detailedNames = CwmpXmlParser.extractParameterInfoListDetailed(xml);
+    const names = detailedNames.map((d) => d.name);
+    console.log(
+      `[CWMP ACS] Ingested GetParameterNamesResponse from ${connectionKey || clientIp} | Serial: ${session?.serialNumber} | Discovered Total Names: [${names.length}]`
+    );
+
+    if (names.length === 0) {
+      console.warn(`[CWMP ACS] Zero names returned by GPN from ${connectionKey || clientIp}. Falling back to safe baseline.`);
+      return null;
+    }
+
+    // Determine data model
+    const hasTr181 = names.some((n) => n.startsWith('Device.'));
+    const hasTr098 = names.some((n) => n.startsWith('InternetGatewayDevice.'));
+    const detectedDataModel = hasTr181 && hasTr098 ? 'HYBRID' : hasTr181 ? 'TR-181' : 'TR-098';
+
+    // Asynchronously batch cache supported parameter paths with classification
+    if (session) {
+      const cacheUpdates = detailedNames.map((item) => ({
+        updateOne: {
+          filter: {
+            vendor: session.vendor,
+            modelName: session.modelName,
+            parameterPath: item.name,
+          },
+          update: {
+            $set: {
+              status: 'SUPPORTED' as const,
+              manufacturer: session.manufacturer,
+              firmwareVersion: session.firmwareVersion,
+              dataModel: detectedDataModel,
+              category: CwmpVendorProfiles.classifyParameter(item.name),
+              writable: item.writable,
+              lastCheckedAt: new Date(),
+              lastVerified: new Date(),
+              lastSeen: new Date(),
+            },
+            $setOnInsert: { firstSeen: new Date() },
+          },
+          upsert: true,
+        },
+      }));
+      SupportedParameterCache.bulkWrite(cacheUpdates).catch(() => {});
+    }
+
+    // 1. Identify confirmed 2.4 GHz & 5 GHz Wi-Fi parameters (TR-098 & TR-181)
+    const wifiSsid = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.1\.SSID$|Device\.WiFi\.SSID\.1\.SSID$/i.test(n));
+    const wifiKey = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.1\..*KeyPassphrase$|Device\.WiFi\.AccessPoint\.1\.Security\.KeyPassphrase$/i.test(n));
+    const wifiChan = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.1\.Channel$|Device\.WiFi\.Radio\.1\.Channel$/i.test(n));
+    const wifiBeacon = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.1\.BeaconType$|Device\.WiFi\.AccessPoint\.1\.Security\.ModeEnabled$/i.test(n));
+
+    const wifi5gSsid = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.(2|5)\.SSID$|Device\.WiFi\.SSID\.2\.SSID$/i.test(n));
+    const wifi5gKey = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.(2|5)\..*KeyPassphrase$|Device\.WiFi\.AccessPoint\.2\.Security\.KeyPassphrase$/i.test(n));
+    const wifi5gChan = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.(2|5)\.Channel$|Device\.WiFi\.Radio\.2\.Channel$/i.test(n));
+    const wifi5gBeacon = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.(2|5)\.BeaconType$|Device\.WiFi\.AccessPoint\.2\.Security\.ModeEnabled$/i.test(n));
+
+    // 2. Identify confirmed WAN parameters (TR-098 & TR-181)
+    const wanUser = names.find((n) => /WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\.Username$|Device\.PPP\.Interface\.\d+\.Username$/i.test(n));
+    const wanIp = names.find((n) => /WANDevice\.\d+\.WANConnectionDevice\.\d+\.(WANPPPConnection|WANIPConnection)\.\d+\.ExternalIPAddress$|Device\.IP\.Interface\.\d+\..*IPAddress$/i.test(n));
+    const wanStatus = names.find((n) => /WANDevice\.\d+\.WANConnectionDevice\.\d+\.(WANPPPConnection|WANIPConnection)\.\d+\.ConnectionStatus$|Device\.PPP\.Interface\.\d+\.ConnectionStatus$/i.test(n));
+    const wanVlan = names.find((n) => /WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\.(X_HW_VLAN|X_CT-COM_VlanID|X_ZTE-COM_VLAN)$|Device\.Ethernet\.VLANTermination\.\d+\.VLANID$/i.test(n));
+    const lanHosts = names.find((n) => /LANDevice\.\d+\.Hosts\.HostNumberOfEntries$|Device\.Hosts\.HostNumberOfEntries$/i.test(n));
+
+    // 3. Identify confirmed Optical / PON telemetry parameters
+    const opticalRxCandidates = names.filter((n) =>
+      /rxpower|rx_power|opticalsignallevel|receivepower|rxdba|opt_rx/i.test(n) &&
+      !/ping|traceroute|wlan|wifi|beacon/i.test(n) && !n.endsWith('.')
+    );
+    const opticalTxCandidates = names.filter((n) =>
+      /txpower|tx_power|transmitopticalpower|opt_tx/i.test(n) &&
+      !/ping|traceroute|wlan|wifi|beacon/i.test(n) && !n.endsWith('.')
+    );
+    const opticalCompanionCandidates = names.filter((n) =>
+      /(epon|gpon|pon|optical).*(bias|volt|temp)/i.test(n) &&
+      !/ping|traceroute|wlan|wifi/i.test(n) && !n.endsWith('.')
+    );
+
+    console.log(
+      `[CWMP ACS] Discovered Optical Telemetry on ${session?.serialNumber}: [RX: ${opticalRxCandidates.length}] [TX: ${opticalTxCandidates.length}] [Companions: ${opticalCompanionCandidates.length}]`,
+      { rx: opticalRxCandidates, tx: opticalTxCandidates }
+    );
+
+    // Build the query parameter list strictly from parameters that EXIST on the CPE
+    const confirmedParams: string[] = [];
+    if (wifiSsid) confirmedParams.push(wifiSsid);
+    if (wifiKey) confirmedParams.push(wifiKey);
+    if (wifiChan) confirmedParams.push(wifiChan);
+    if (wifiBeacon) confirmedParams.push(wifiBeacon);
+
+    if (wifi5gSsid) confirmedParams.push(wifi5gSsid);
+    if (wifi5gKey) confirmedParams.push(wifi5gKey);
+    if (wifi5gChan) confirmedParams.push(wifi5gChan);
+    if (wifi5gBeacon) confirmedParams.push(wifi5gBeacon);
+
+    if (wanUser) confirmedParams.push(wanUser);
+    if (wanIp) confirmedParams.push(wanIp);
+    if (wanStatus) confirmedParams.push(wanStatus);
+    if (wanVlan) confirmedParams.push(wanVlan);
+    if (lanHosts) confirmedParams.push(lanHosts);
+
+    // Priority 1: All discovered Optical RX paths
+    for (const optRx of opticalRxCandidates) {
+      if (!confirmedParams.includes(optRx)) confirmedParams.push(optRx);
+    }
+    // Priority 2: All discovered Optical TX paths
+    for (const optTx of opticalTxCandidates) {
+      if (!confirmedParams.includes(optTx)) confirmedParams.push(optTx);
+    }
+    // Priority 3: Companions (Voltage, Temperature, Bias Current)
+    for (const comp of opticalCompanionCandidates) {
+      if (confirmedParams.length < 32 && !confirmedParams.includes(comp)) confirmedParams.push(comp);
+    }
+
+    // Priority 4: Discovered LAN Host details & Associated Wi-Fi Devices
+    const hostParams = names.filter((n) =>
+      /(LANDevice\.\d+\.Hosts\.Host\.\d+\.(IPAddress|MACAddress|HostName|Active|InterfaceType)|LANDevice\.\d+\.WLANConfiguration\.\d+\.AssociatedDevice\.\d+\.(AssociatedDeviceMACAddress|AssociatedDeviceIPAddress)|Device\.Hosts\.Host\.\d+\.(IPAddress|PhysAddress|HostName|Active))/i.test(n) &&
+      !n.endsWith('.')
+    );
+    for (const hp of hostParams) {
+      if (confirmedParams.length < 48 && !confirmedParams.includes(hp)) confirmedParams.push(hp);
+    }
+
+    if (session && confirmedParams.length > 0) {
+      session.stage = 'OPTICAL_SENT';
+
+      if (opticalRxCandidates.length > 0) {
+        session.activeOpticalCandidate = opticalRxCandidates[0];
+      }
+
+      console.log(
+        `[CWMP ACS -> CPE] Dispatched Confirmed GPV for ${session.serialNumber} | Params: [${confirmedParams.length}] -> ${confirmedParams.join(', ')}`
+      );
+
+      const stringElements = confirmedParams.map((p) => `        <string>${p}</string>`).join('\n');
+      const gpvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soapenv:arrayType="xsd:string[${confirmedParams.length}]">
+${stringElements}
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+      CwmpSessionLog.create({
+        serialNumber: session.serialNumber,
+        sessionId: session.sessionId,
+        cwmpId: '3',
+        direction: 'ACS_TO_CPE',
+        rpcMethod: 'GetParameterValues',
+        httpStatus: 200,
+        rawXml: CwmpXmlParser.maskSensitiveData(gpvXml),
+        timestamp: new Date(),
+      }).catch(() => {});
+
+      return gpvXml;
+    }
+
+    return null;
+  }
+
+  /**
+   * Phase 3: Handles GetParameterValuesResponse, isolates Fault 9005, and saves to MongoDB
+   */
+  static async handleParameterValuesResponse(
+    xml: string,
+    clientIp: string,
+    incomingSessionId?: string,
+    hostHeader?: string,
+    pathOrQuerySlug?: string,
+    connectionKey?: string
+  ): Promise<string | null> {
+    const { parameters: pMap, rawMap, fault } = CwmpXmlParser.extractParameterMap(xml);
+
+    const session =
+      (incomingSessionId ? this.sessionsById.get(incomingSessionId) : undefined) ||
+      (connectionKey ? this.sessionsByConnection.get(connectionKey) : undefined);
+
+    if (!session) {
+      console.warn(`[CWMP ACS] [GPV_REJECTED] No matching active session for Conn: ${connectionKey || clientIp}, SessionId: ${incomingSessionId || 'none'}. Rejecting write to prevent cross-device contamination.`);
+      return null;
+    }
+
+    const tenant = session?.tenantId
+      ? { _id: session.tenantId }
+      : await this.resolveTenant(hostHeader, pathOrQuerySlug);
+    if (!tenant) return null;
+
+    const serialAliases = session?.serialAliases || CwmpXmlParser.getSerialNumberAliases(session?.serialNumber);
+
+    let device: any = null;
+    if (session?.deviceId) {
+      device = await Device.findOne({
+        _id: session.deviceId,
+        ...(tenant?._id ? { tenantId: tenant._id } : {}),
+      });
+    }
+
+    if (!device && serialAliases.length > 0) {
+      device = await Device.findOne({
+        serialNumber: { $in: serialAliases },
+        ...(tenant?._id ? { tenantId: tenant._id } : {}),
+      });
+    }
+
+    if (!device) {
+      console.warn(`[CWMP ACS] Device not found in DB for IP ${clientIp} / Serial ${session?.serialNumber}`);
+      return null;
+    }
+
+    console.log(`[CWMP ACS] Inbound Response XML for ${device.serialNumber} (Stage: ${session?.stage}):\n${xml.substring(0, 1000)}`);
+    device.lastRawGetParameterValuesResponseXml = xml;
+    if (!device.rawParameters) device.rawParameters = {};
+    Object.assign(device.rawParameters, rawMap);
+
+    // Handle SetParameterValuesResponse from CPE
+    if (xml.includes('SetParameterValuesResponse')) {
+      console.log(`[Native CWMP IN] CPE successfully acknowledged SetParameterValues for ${device.serialNumber}`);
+      await DeviceCommand.updateMany(
+        { deviceId: device._id, status: 'sent' },
+        { $set: { status: 'success', completedAt: new Date() } }
+      );
+      if (device.pendingConfig) {
+        device.pendingConfig.status = 'APPLIED';
+        device.pendingConfig.appliedAt = new Date();
+      }
+      await device.save();
+      return null;
+    }
+
+    // Handle RebootResponse from CPE
+    if (xml.includes('RebootResponse')) {
+      console.log(`[Native CWMP IN] CPE acknowledged Reboot command for ${device.serialNumber}`);
+      await DeviceCommand.updateMany(
+        { deviceId: device._id, action: 'REBOOT_DEVICE', status: 'sent' },
+        { $set: { status: 'success', completedAt: new Date() } }
+      );
+      return null;
+    }
+
+    CwmpSessionLog.create({
+      tenantId: tenant?._id,
+      deviceId: device?._id,
+      serialNumber: device.serialNumber,
+      sessionId: session?.sessionId || incomingSessionId || 'unknown',
+      cwmpId: '3',
+      direction: 'CPE_TO_ACS',
+      rpcMethod: fault?.isFault ? 'Fault' : 'GetParameterValuesResponse',
+      httpStatus: 200,
+      rawXml: CwmpXmlParser.maskSensitiveData(xml),
+      faultCode: fault?.faultCode,
+      faultString: fault?.faultString,
+      timestamp: new Date(),
+    }).catch(() => {});
+
+    // Handle SOAP Fault (e.g. Fault 9002 / 9005 during Baseline or Optical Discovery)
+    if (fault?.isFault) {
+      console.warn(
+        `[CWMP ACS] CPE returned SOAP Fault ${fault.faultCode}: ${fault.faultString} during stage ${session?.stage}`
+      );
+
+      // If Baseline GPV failed, do not abort the session: fallback to GetParameterNames discovery
+      if (session?.stage === 'BASELINE_SENT') {
+        console.warn(
+          `[CWMP ACS] Baseline GPV batch rejected with Fault ${fault.faultCode} on ${session.serialNumber} (${session.modelName}). Dispatching GPN discovery fallback.`
+        );
+        session.stage = 'GPN_SENT';
+        device.lastParameterSyncStatus = `FAULT_${fault.faultCode}_DISCOVERY_FALLBACK`;
+        await device.save();
+
+        const isTr181 = session.vendor === 'TR181_STANDARD';
+        const gpnPath = isTr181 ? 'Device.Optical.' : 'InternetGatewayDevice.WANDevice.1.';
+        const gpnXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterNames>
+      <ParameterPath>${gpnPath}</ParameterPath>
+      <NextLevel>0</NextLevel>
+    </cwmp:GetParameterNames>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+        return gpnXml;
+      }
+
+      if (session?.stage === 'OPTICAL_SENT' && session.activeOpticalCandidate) {
+        await SupportedParameterCache.findOneAndUpdate(
+          {
+            vendor: session.vendor,
+            modelName: session.modelName,
+            parameterPath: session.activeOpticalCandidate,
+          },
+          {
+            $set: {
+              status: 'UNSUPPORTED',
+              manufacturer: session.manufacturer,
+              firmwareVersion: session.firmwareVersion,
+              lastCheckedAt: new Date(),
+              lastErrorCode: fault.faultCode,
+              lastRawFault: fault.faultString || 'CWMP Fault 9005',
+            },
+          },
+          { upsert: true }
+        );
+
+        device.lastParameterSyncStatus = 'FAULT_9005_OPTICAL';
+        await device.save();
+        console.log(
+          `[CWMP ACS] Cached parameter as UNSUPPORTED: ${session.activeOpticalCandidate}. Baseline Wi-Fi/WAN data remains preserved.`
+        );
+      }
+      return null;
+    }
+
+    // SUCCESSFUL RESPONSE: Extract all returned Wi-Fi, WAN, LAN, and Optical parameters
+    const ssid24 = this.getFirstParam(pMap, ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', 'Device.WiFi.SSID.1.SSID']);
+    const pass24 = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
+      'Device.WiFi.AccessPoint.1.Security.KeyPassphrase',
+    ]);
+    const chan24 = this.getFirstParam(pMap, ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel', 'Device.WiFi.Radio.1.Channel']);
+    const beacon24 = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+      'Device.WiFi.AccessPoint.1.Security.ModeEnabled',
+    ]);
+
+    const ssid5g = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.3.SSID',
+      'Device.WiFi.SSID.2.SSID',
+    ]);
+    const pass5g = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase',
+      'Device.WiFi.AccessPoint.2.Security.KeyPassphrase',
+    ]);
+    const chan5g = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel',
+      'Device.WiFi.Radio.2.Channel',
+    ]);
+    const beacon5g = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.BeaconType',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.BeaconType',
+      'Device.WiFi.AccessPoint.2.Security.ModeEnabled',
+    ]);
+
+    const pppoeUser = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2.Username',
+      'Device.PPP.Interface.1.Username',
+    ]);
+    const pppStatus = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
+      'Device.PPP.Interface.1.ConnectionStatus',
+    ]);
+    const pppIp = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
+      'Device.IP.Interface.1.IPv4Address.1.IPAddress',
+    ]);
+    const rawVlan = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_HW_VLAN',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_CT-COM_VlanID',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_ZTE-COM_VLAN',
+      'Device.Ethernet.VLANTermination.1.VLANID',
+    ]);
+    const rawHosts = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
+      'Device.Hosts.HostNumberOfEntries',
+    ]);
+
+    if (device.wifi24) {
+      if (ssid24) device.wifi24.ssid = ssid24;
+      if (pass24) device.wifi24.password = pass24;
+      if (chan24) {
+        const c = parseInt(chan24, 10);
+        if (!isNaN(c)) device.wifi24.channel = c;
+      }
+      if (beacon24) device.wifi24.securityMode = beacon24;
+    }
+
+    if (device.wifi5g) {
+      if (ssid5g) device.wifi5g.ssid = ssid5g;
+      if (pass5g) device.wifi5g.password = pass5g;
+      if (chan5g) {
+        const c = parseInt(chan5g, 10);
+        if (!isNaN(c)) device.wifi5g.channel = c;
+      }
+      if (beacon5g) device.wifi5g.securityMode = beacon5g;
+    }
+
+    if (device.wanProfiles && device.wanProfiles.length > 0) {
+      if (pppoeUser) device.wanProfiles[0].pppoeUsername = pppoeUser;
+      if (pppStatus) device.wanProfiles[0].status = (pppStatus === 'Connected' ? 'Connected' : 'Connecting');
+      if (pppIp) device.wanProfiles[0].ipAddress = pppIp;
+      if (rawVlan) {
+        const v = parseInt(rawVlan, 10);
+        if (!isNaN(v)) device.wanProfiles[0].vlanId = v;
+      }
+    }
+    if (rawHosts) {
+      const h = parseInt(rawHosts, 10);
+      if (!isNaN(h)) device.lanHostCount = h;
+    }
+
+    // Parse Connected LAN / Wi-Fi Clients from pMap
+    const clientMap: Map<string, any> = new Map();
+    for (const [key, val] of pMap.entries()) {
+      if (!val || val === '' || val === '0.0.0.0' || val === '00:00:00:00:00:00') continue;
+      const hostMatch = key.match(/(?:LANDevice\.\d+\.Hosts\.Host|Device\.Hosts\.Host)\.(\d+)\.(MACAddress|PhysAddress|IPAddress|HostName|Active|InterfaceType)/i);
+      if (hostMatch) {
+        const idx = hostMatch[1];
+        const field = hostMatch[2].toLowerCase();
+        if (!clientMap.has(idx)) {
+          clientMap.set(idx, {
+            mac: '',
+            ip: '',
+            hostname: '',
+            interfaceType: '2.4GHz',
+            connected: true,
+            isBlocked: false,
+            lastSeen: new Date(),
+          });
+        }
+        const c = clientMap.get(idx);
+        if (field === 'macaddress' || field === 'physaddress') c.mac = val.toUpperCase();
+        if (field === 'ipaddress') c.ip = val;
+        if (field === 'hostname') c.hostname = val;
+        if (field === 'interfacetype') {
+          c.interfaceType = /5g/i.test(val) ? '5GHz' : /ethernet|eth/i.test(val) ? 'Ethernet' : '2.4GHz';
+        }
+        if (field === 'active') c.connected = val === '1' || val.toLowerCase() === 'true';
+      }
+    }
+    const parsedClients = Array.from(clientMap.values()).filter((c: any) => c.mac || c.ip);
+    if (parsedClients.length > 0) {
+      device.connectedClients = parsedClients.map((c: any) => ({
+        ...c,
+        hostname: c.hostname || (c.mac ? `Host (${c.mac.slice(-5)})` : 'Connected Device'),
+      }));
+    }
+
+    device.lastParameterSyncStatus = 'PARTIAL_SUCCESS';
+
+    // 2. Optical Telemetry Extraction (Dynamic Multi-Vendor Scanning)
+    let activeCandidate = session?.activeOpticalCandidate;
+    let rxValRaw: string | undefined = activeCandidate ? pMap.get(activeCandidate) : undefined;
+
+    // If activeCandidate was not in pMap or returned empty, scan all keys in pMap for Optical RX
+    if (!rxValRaw) {
+      for (const [k, v] of pMap.entries()) {
+        if (
+          /rxpower|rx_power|opticalsignallevel|receivepower|rxdba|opt_rx/i.test(k) &&
+          !/ping|traceroute|wlan|wifi|beacon|transmit/i.test(k) &&
+          v !== undefined && v !== '' && v !== '0' && v !== '-40.0' && v !== 'N/A'
+        ) {
+          activeCandidate = k;
+          rxValRaw = v;
+          break;
+        }
+      }
+    }
+
+    const vendor = session?.vendor || 'CHINA_TELECOM';
+    const normalizedRx = rxValRaw ? CwmpVendorProfiles.normalizeOpticalRx(vendor, activeCandidate || '', rxValRaw) : null;
+
+    if (normalizedRx && normalizedRx.isReliable) {
+      device.currentRxPowerDbm = normalizedRx.normalizedValue;
+      device.opticalTelemetrySourcePath = activeCandidate;
+      device.opticalStatus =
+        normalizedRx.normalizedValue < -27.0 ? 'critical' :
+        normalizedRx.normalizedValue < -24.5 ? 'warning' : 'normal';
+
+      // Dynamically find TX Power from pMap
+      let rawTx = this.getFirstParam(pMap, [
+        'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.OpticalTxPower',
+        'InternetGatewayDevice.DeviceInfo.X_HW_GPON.OpticalModuleInformation.TxPower',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.TXPower',
+        'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.TXPower',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.TXPower',
+        'InternetGatewayDevice.WANDevice.1.X_CMCC_EponInterfaceConfig.TXPower',
+        'InternetGatewayDevice.WANDevice.1.WANGponInterfaceConfig.TXPower',
+        'InternetGatewayDevice.WANDevice.1.WANEponInterfaceConfig.TXPower',
+        'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.TXPower',
+        'InternetGatewayDevice.WANDevice.1.X_VSOL_OpticalInfo.TxPower',
+        'Device.Optical.Interface.1.TransmitOpticalPower',
+      ]);
+      if (!rawTx) {
+        for (const [k, v] of pMap.entries()) {
+          if (
+            /txpower|tx_power|transmitopticalpower|opt_tx/i.test(k) &&
+            !/ping|traceroute|wlan|wifi/i.test(k) &&
+            v !== undefined && v !== '' && v !== '0' && v !== 'N/A'
+          ) {
+            rawTx = v;
+            break;
+          }
+        }
+      }
+      const normalizedTx = CwmpVendorProfiles.normalizeOpticalTx(vendor, '', rawTx);
+      if (normalizedTx) device.currentTxPowerDbm = normalizedTx.normalizedValue;
+
+      const rawBias = this.getFirstParam(pMap, [
+        'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.OpticalBiasCurrent',
+        'InternetGatewayDevice.DeviceInfo.X_HW_GPON.OpticalModuleInformation.BiasCurrent',
+        'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.TXBiasCurrent',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.BiasCurrent',
+        'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.BiasCurrent',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.BiasCurrent',
+        'InternetGatewayDevice.WANDevice.1.X_CMCC_EponInterfaceConfig.BiasCurrent',
+        'Device.Optical.Interface.1.TxBiasCurrent',
+      ]);
+      const bias = CwmpXmlParser.normalizeBiasCurrent(rawBias);
+      if (bias !== undefined) device.biasCurrentMa = bias;
+
+      const rawVolt = this.getFirstParam(pMap, [
+        'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.OpticalVoltage',
+        'InternetGatewayDevice.DeviceInfo.X_HW_GPON.OpticalModuleInformation.Voltage',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.Voltage',
+        'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.Voltage',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.SupplyVoltage',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.SupplyVottage',
+        'InternetGatewayDevice.WANDevice.1.X_CMCC_EponInterfaceConfig.SupplyVoltage',
+        'InternetGatewayDevice.WANDevice.1.X_CMCC_EponInterfaceConfig.SupplyVottage',
+        'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.SupplyVoltage',
+        'Device.Optical.Interface.1.Voltage',
+      ]);
+      const volt = CwmpXmlParser.normalizeVoltage(rawVolt);
+      if (volt !== undefined) device.opticalVoltageV = volt;
+
+      const rawTemp = this.getFirstParam(pMap, [
+        'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.Temperature',
+        'InternetGatewayDevice.DeviceInfo.X_HW_BoardTemp',
+        'InternetGatewayDevice.DeviceInfo.X_ZTE-COM_BoardTemperature',
+        'InternetGatewayDevice.DeviceInfo.Temperature',
+        'InternetGatewayDevice.WANDevice.1.X_GponInterfaceConfig.Temperature',
+        'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.TransceiverTemperature',
+        'InternetGatewayDevice.WANDevice.1.X_CMCC_EponInterfaceConfig.TransceiverTemperature',
+        'Device.DeviceInfo.TemperatureStatus.TemperatureSensor.1.Value',
+        'Device.Optical.Interface.1.Temperature',
+      ]);
+      const temp = CwmpXmlParser.normalizeTemperature(rawTemp);
+      if (temp !== undefined) device.temperatureC = temp;
+
+      // Delta-based Optical Recording: Only record when optical power changes or first reading
+      if (!device.rxPowerHistory) device.rxPowerHistory = [];
+      const lastHist = device.rxPowerHistory[device.rxPowerHistory.length - 1];
+      const rxChanged = !lastHist || Math.abs(lastHist.valueDbm - normalizedRx.normalizedValue) >= 0.1;
+      const txChanged = normalizedTx?.normalizedValue !== undefined && (!lastHist?.txPowerDbm || Math.abs(lastHist.txPowerDbm - normalizedTx.normalizedValue) >= 0.2);
+
+      if (rxChanged || txChanged) {
+        device.rxPowerHistory.push({
+          valueDbm: normalizedRx.normalizedValue,
+          txPowerDbm: normalizedTx?.normalizedValue,
+          biasCurrentMa: bias,
+          voltageV: volt,
+          temperatureC: temp,
+          timestamp: new Date(),
+        });
+        if (device.rxPowerHistory.length > 50) device.rxPowerHistory = device.rxPowerHistory.slice(-50);
+        console.log(
+          `[CWMP ACS] [OPTICAL_DELTA_SAVED] Serial: ${device.serialNumber} | New RX: ${normalizedRx.normalizedValue} dBm (Previous: ${lastHist?.valueDbm ?? 'None'}) | At: ${new Date().toLocaleString()}`
+        );
+
+        // Immediate Operator Alert on Critical Signal Drop (< -27 dBm or sudden > 3 dB drop)
+        if (normalizedRx.normalizedValue < -27.0 || (lastHist && (normalizedRx.normalizedValue - lastHist.valueDbm) <= -3.0)) {
+          console.warn(
+            `[CWMP ACS CRITICAL ALERT] 🚨 Optical Signal Alert for ${device.serialNumber}: ${normalizedRx.normalizedValue} dBm at ${new Date().toLocaleTimeString()}`
+          );
+        }
+      }
+
+      // Record in cache as SUPPORTED
+      if (activeCandidate && session) {
+        await SupportedParameterCache.findOneAndUpdate(
+          {
+            vendor: session.vendor,
+            modelName: session.modelName,
+            parameterPath: activeCandidate,
+          },
+          {
+            $set: {
+              status: 'SUPPORTED',
+              manufacturer: session.manufacturer,
+              firmwareVersion: session.firmwareVersion,
+              lastCheckedAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+      }
+
+      device.lastParameterSyncStatus = 'SUCCESS';
+    }
+
+    // IMMUTABLE HARDWARE LOCK: If device already has a registered owner tenantId, never re-bind automatically
+    if (!device.tenantId) {
+      const resolvedTenant = await this.resolveTenant(hostHeader, pathOrQuerySlug, {
+        serialAliases,
+        wanIp: pppIp || device.ipAddress,
+      });
+
+      if (resolvedTenant) {
+        device.tenantId = resolvedTenant._id;
+        if (session) {
+          session.tenantId = resolvedTenant._id.toString();
+          session.tenantSlug = resolvedTenant.slug;
+        }
+      }
+    }
+
+    device.lastInform = new Date();
+    device.lastParameterSyncAt = new Date();
+    device.status = 'online';
+    await device.save();
+
+    console.log(
+      `[CWMP ACS] Ingested Live GPV Response for ${device.serialNumber} | SSID: ${device.wifi24?.ssid ?? 'N/A'} | Rx: ${device.currentRxPowerDbm ?? 'N/A'} dBm | Status: ${device.lastParameterSyncStatus}`
+    );
+
+    return null;
+  }
+
+  static buildInformResponse(): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:InformResponse>
+      <MaxEnvelopes>1</MaxEnvelopes>
+    </cwmp:InformResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+  }
+
+  static getStats(tenantSlug?: string) {
+    const hits = tenantSlug && tenantSlug !== 'default'
+      ? this.recentHits.filter((h) => h.tenantSlug === tenantSlug)
+      : this.recentHits;
+    const isFirst = !tenantSlug || tenantSlug === 'rudra' || tenantSlug === 'g';
+    const cwmpUrl = isFirst ? 'http://ciniplay.in:7547' : `http://${tenantSlug}.ciniplay.in:7547`;
+    return {
+      success: true,
+      cwmpUrl,
+      totalHits: this.totalHits,
+      activeListeningPort: 7547,
+      authCredentials: {
+        username: process.env.CWMP_CONN_REQ_USER || 'acs_user',
+        password: process.env.CWMP_CONN_REQ_PASS ? 'configured' : 'unconfigured',
+        informIntervalSeconds: 300,
+      },
+      recentHits: hits,
+      serverStatus: 'LISTENING',
+    };
+  }
+
+  /**
+   * Automatically reconciles all pending/unassigned CPEs into the active Fleet Inventory
+   */
+  static async syncAllPendingDevicesToFleet(): Promise<number> {
+    try {
+      const pendingItems = await PendingDeviceMapping.find({
+        $or: [{ status: 'PENDING' }, { mappedTenantId: null }],
+      });
+
+      let syncedCount = 0;
+      for (const p of pendingItems) {
+        const serial = p.serialNumber;
+        const serialAliases = CwmpXmlParser.getSerialNumberAliases(serial);
+        const tenant = await this.resolveTenant(p.incomingHost, p.pathOrQuerySlug, {
+          serialAliases,
+          macAddress: p.macAddress,
+        });
+
+        if (tenant) {
+          let existingDevice = await Device.findOne({ serialNumber: { $in: serialAliases } });
+          if (!existingDevice) {
+            existingDevice = await Device.create({
+              tenantId: tenant._id,
+              deviceIdStr: `dev_${Date.now()}_${serial.slice(-4)}`,
+              serialNumber: serial,
+              macAddress: p.macAddress || `00:E0:${p.clientIp?.split('.').map((x) => parseInt(x).toString(16).padStart(2, '0')).slice(-4).join(':') || '00:00:00:00'}`,
+              manufacturer: p.manufacturer || 'Generic GPON',
+              modelName: p.productClass || 'GPON-ONT',
+              hardwareVersion: p.hardwareVersion || 'V1.0',
+              softwareVersion: p.softwareVersion || 'V1.0.0',
+              protocol: 'TR-069',
+              status: 'online',
+              lastInform: p.lastSeenAt || new Date(),
+              ipAddress: p.clientIp,
+              externalIpAddress: p.clientIp,
+              opticalStatus: 'normal',
+              assigned: false,
+              rawParameters: {},
+              wanProfiles: [{
+                name: 'Internet_TR069',
+                connectionType: 'PPPoE',
+                serviceType: 'INTERNET',
+                status: 'Connected',
+              }],
+              wifi24: {
+                ssid: '',
+                password: '',
+                enabled: true,
+                channel: 6,
+                channelAuto: true,
+                bandwidthMhz: 20,
+                securityMode: 'WPA2-PSK',
+                txPowerPercent: 100,
+              },
+              wifi5g: {
+                ssid: '',
+                password: '',
+                enabled: true,
+                channel: 44,
+                channelAuto: true,
+                bandwidthMhz: 80,
+                securityMode: 'WPA2-PSK',
+                txPowerPercent: 100,
+              },
+            });
+          } else {
+            existingDevice.tenantId = tenant._id;
+            await existingDevice.save();
+          }
+
+          p.status = 'MAPPED';
+          p.mappedTenantId = tenant._id as any;
+          p.mappedTenantSlug = tenant.slug;
+          p.mappedAt = new Date();
+          await p.save();
+          syncedCount++;
+        }
+      }
+      return syncedCount;
+    } catch (err: any) {
+      console.error('[CWMP] Error syncing pending devices to fleet:', err);
+      return 0;
+    }
+  }
+}

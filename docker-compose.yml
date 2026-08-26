@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # Backend API & WebSocket Core
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai-isp-os-backend
+    restart: always
+    environment:
+      PORT: 4000
+      NODE_ENV: production
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/ai_isp_os_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      JWT_SECRET: ${JWT_SECRET}
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://ciniplay.in}
+      WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+    ports:
+      - "127.0.0.1:4000:4000"
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - ai-isp-os-net
+
+  # Frontend Web Applications (Vite / Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai-isp-os-frontend
+    restart: always
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - backend
+    networks:
+      - ai-isp-os-net
+
+  # Multi-Tenant Document & Transactional Database (Internal Network Only)
+  mongodb:
+    image: mongo:7.0
+    container_name: ai-isp-os-mongodb
+    restart: always
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - ai-isp-os-net
+
+  # Cache & Event Bus (Internal Network Only)
+  redis:
+    image: redis:7.2-alpine
+    container_name: ai-isp-os-redis
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai-isp-os-net
+
+  # Prometheus Telemetry & Metrics (Internal Network Only)
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    container_name: ai-isp-os-prometheus
+    restart: always
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - ai-isp-os-net
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  ai-isp-os-net:
+    driver: bridge
