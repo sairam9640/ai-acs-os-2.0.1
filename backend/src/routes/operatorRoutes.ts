@@ -3827,8 +3827,130 @@ operatorRouter.post('/devices/:id/reboot', async (req: AuthenticatedRequest, res
  */
 operatorRouter.get('/network/olts', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const olts = await OLT.find({ tenantId: new Types.ObjectId(req.tenantId) });
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const olts = await OLT.find({ tenantId }).sort({ createdAt: -1 });
     return res.json({ success: true, olts });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/network/olts', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { name, code, ipAddress, vendor, modelName, totalSlots, totalPonPorts, location, photos } = req.body;
+
+    if (!name || !code || !ipAddress) {
+      return res.status(400).json({ success: false, error: 'OLT Name, Code, and IP Address are required' });
+    }
+
+    const olt = await OLT.create({
+      tenantId,
+      name,
+      code: code.trim().toUpperCase(),
+      ipAddress,
+      vendor: vendor || 'Generic OLT',
+      modelName: modelName || 'Chassis',
+      totalSlots: totalSlots || 4,
+      totalPonPorts: totalPonPorts || 16,
+      location: {
+        name: location?.name || 'Main POP',
+        lat: location?.lat || 0,
+        lng: location?.lng || 0,
+        address: location?.address || 'Not Configured',
+        elevationMeters: location?.elevationMeters || 0,
+      },
+      photos: photos || [],
+      status: 'online',
+    });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_OLT_CREATED',
+      targetResource: 'OLT',
+      targetId: olt._id.toString(),
+      targetIdentifier: olt.code,
+      correlationId: req.correlationId || `olt_create_${Date.now()}`,
+    });
+
+    return res.status(201).json({ success: true, olt, message: 'OLT Chassis created successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.put('/network/olts/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+    const { name, code, ipAddress, vendor, modelName, totalSlots, totalPonPorts, location, photos, status } = req.body;
+
+    const olt = await OLT.findOneAndUpdate(
+      { _id: id, tenantId },
+      {
+        $set: {
+          name,
+          code: code?.trim()?.toUpperCase(),
+          ipAddress,
+          vendor,
+          modelName,
+          totalSlots,
+          totalPonPorts,
+          location,
+          photos,
+          status,
+        },
+      },
+      { new: true }
+    );
+
+    if (!olt) return res.status(404).json({ success: false, error: 'OLT not found' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_OLT_UPDATED',
+      targetResource: 'OLT',
+      targetId: olt._id.toString(),
+      targetIdentifier: olt.code,
+      correlationId: req.correlationId || `olt_upd_${Date.now()}`,
+    });
+
+    return res.json({ success: true, olt, message: 'OLT Chassis updated successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.delete('/network/olts/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+
+    const olt = await OLT.findOneAndDelete({ _id: id, tenantId });
+    if (!olt) return res.status(404).json({ success: false, error: 'OLT not found' });
+
+    // Also remove associated PON ports
+    await PONPort.deleteMany({ oltId: olt._id, tenantId });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_OLT_DELETED',
+      targetResource: 'OLT',
+      targetId: olt._id.toString(),
+      targetIdentifier: olt.code,
+      correlationId: req.correlationId || `olt_del_${Date.now()}`,
+    });
+
+    return res.json({ success: true, message: 'OLT and its PON ports deleted successfully' });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -3836,10 +3958,463 @@ operatorRouter.get('/network/olts', async (req: AuthenticatedRequest, res: Respo
 
 operatorRouter.get('/network/pons', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const pons = await PONPort.find({ tenantId: new Types.ObjectId(req.tenantId) }).populate('oltId');
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { oltId } = req.query;
+    const query: any = { tenantId };
+    if (oltId) query.oltId = oltId;
+
+    const pons = await PONPort.find(query).populate('oltId', 'name code ipAddress vendor modelName').sort({ slotNumber: 1, portNumber: 1 });
     return res.json({ success: true, pons });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/network/pons', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { oltId, slotNumber, portNumber, portIdentifier, splitRatio, txPowerDbm, maxOnts } = req.body;
+
+    if (!oltId) return res.status(400).json({ success: false, error: 'OLT ID is required' });
+
+    const pIdentifier = portIdentifier || `${slotNumber ?? 0}/${portNumber ?? 1}`;
+    const pon = await PONPort.create({
+      tenantId,
+      oltId,
+      slotNumber: slotNumber ?? 0,
+      portNumber: portNumber ?? 1,
+      portIdentifier: pIdentifier,
+      splitRatio: splitRatio || '1:64',
+      txPowerDbm: txPowerDbm ?? 4.5,
+      maxOnts: maxOnts ?? 64,
+      status: 'active',
+    });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_PON_PORT_CREATED',
+      targetResource: 'PONPort',
+      targetId: pon._id.toString(),
+      targetIdentifier: pIdentifier,
+      correlationId: req.correlationId || `pon_create_${Date.now()}`,
+    });
+
+    return res.status(201).json({ success: true, pon, message: 'PON Port provisioned successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.delete('/network/pons/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+
+    const pon = await PONPort.findOneAndDelete({ _id: id, tenantId });
+    if (!pon) return res.status(404).json({ success: false, error: 'PON Port not found' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_PON_PORT_DELETED',
+      targetResource: 'PONPort',
+      targetId: pon._id.toString(),
+      targetIdentifier: pon.portIdentifier,
+      correlationId: req.correlationId || `pon_del_${Date.now()}`,
+    });
+
+    return res.json({ success: true, message: 'PON Port removed successfully' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 9.2 Fiber Infrastructure Nodes (FAT/NAP, Splitters, Joint Boxes, Poles, Manholes)
+ */
+operatorRouter.get('/network/nodes', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { type, search } = req.query;
+    const query: any = { tenantId };
+
+    if (type && type !== 'all') query.type = type;
+    if (search) {
+      const s = String(search).trim();
+      query.$or = [
+        { nodeCode: new RegExp(s, 'i') },
+        { name: new RegExp(s, 'i') },
+        { 'location.address': new RegExp(s, 'i') },
+      ];
+    }
+
+    const nodes = await FiberNode.find(query)
+      .populate('upstreamNodeId', 'nodeCode name type')
+      .populate('oltId', 'name code')
+      .populate('ponPortId', 'portIdentifier')
+      .sort({ createdAt: -1 });
+
+    return res.json({ success: true, nodes });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/network/nodes', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { nodeCode, name, type, location, totalCapacity, upstreamNodeId, upstreamPortNumber, ponPortId, oltId, photos, notes } = req.body;
+
+    if (!nodeCode || !name) {
+      return res.status(400).json({ success: false, error: 'Node Code and Name are required' });
+    }
+
+    const node = await FiberNode.create({
+      tenantId,
+      nodeCode: nodeCode.trim().toUpperCase(),
+      name: name.trim(),
+      type: type || 'FAT_NAP_BOX',
+      location: {
+        lat: location?.lat || 0,
+        lng: location?.lng || 0,
+        address: location?.address || 'Not Configured',
+        elevationMeters: location?.elevationMeters || 0,
+      },
+      photos: photos || [],
+      totalCapacity: totalCapacity || 16,
+      usedCapacity: 0,
+      upstreamNodeId: upstreamNodeId || undefined,
+      upstreamPortNumber: upstreamPortNumber || undefined,
+      ponPortId: ponPortId || undefined,
+      oltId: oltId || undefined,
+      notes: notes || '',
+      status: 'healthy',
+    });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_NODE_CREATED',
+      targetResource: 'FiberNode',
+      targetId: node._id.toString(),
+      targetIdentifier: node.nodeCode,
+      correlationId: req.correlationId || `node_create_${Date.now()}`,
+    });
+
+    return res.status(201).json({ success: true, node, message: 'Fiber Node provisioned successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.put('/network/nodes/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+    const { nodeCode, name, type, location, totalCapacity, usedCapacity, upstreamNodeId, upstreamPortNumber, ponPortId, oltId, photos, notes, status } = req.body;
+
+    const node = await FiberNode.findOneAndUpdate(
+      { _id: id, tenantId },
+      {
+        $set: {
+          nodeCode: nodeCode?.trim()?.toUpperCase(),
+          name: name?.trim(),
+          type,
+          location,
+          photos,
+          totalCapacity,
+          usedCapacity,
+          upstreamNodeId: upstreamNodeId || null,
+          upstreamPortNumber,
+          ponPortId: ponPortId || null,
+          oltId: oltId || null,
+          notes,
+          status,
+        },
+      },
+      { new: true }
+    );
+
+    if (!node) return res.status(404).json({ success: false, error: 'Fiber Node not found' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_NODE_UPDATED',
+      targetResource: 'FiberNode',
+      targetId: node._id.toString(),
+      targetIdentifier: node.nodeCode,
+      correlationId: req.correlationId || `node_upd_${Date.now()}`,
+    });
+
+    return res.json({ success: true, node, message: 'Fiber Node updated successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.delete('/network/nodes/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+
+    const node = await FiberNode.findOneAndDelete({ _id: id, tenantId });
+    if (!node) return res.status(404).json({ success: false, error: 'Fiber Node not found' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_NODE_DELETED',
+      targetResource: 'FiberNode',
+      targetId: node._id.toString(),
+      targetIdentifier: node.nodeCode,
+      correlationId: req.correlationId || `node_del_${Date.now()}`,
+    });
+
+    return res.json({ success: true, message: 'Fiber Node removed successfully' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 9.3 Fiber Cable Segments (Feeder, Distribution, Drop)
+ */
+operatorRouter.get('/network/segments', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { category, search } = req.query;
+    const query: any = { tenantId };
+
+    if (category && category !== 'all') query.category = category;
+    if (search) {
+      const s = String(search).trim();
+      query.$or = [
+        { cableCode: new RegExp(s, 'i') },
+        { name: new RegExp(s, 'i') },
+      ];
+    }
+
+    const segments = await FiberSegment.find(query)
+      .populate('fromNodeId', 'nodeCode name type location')
+      .populate('toNodeId', 'nodeCode name type location')
+      .sort({ createdAt: -1 });
+
+    return res.json({ success: true, segments });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/network/segments', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { cableCode, name, category, fiberStandard, totalCores, liveCores, fromNodeId, toNodeId, lengthMeters, attenuationDbPerKm, measuredLossDb, coordinates, photos } = req.body;
+
+    if (!cableCode || !name) {
+      return res.status(400).json({ success: false, error: 'Cable Code and Name are required' });
+    }
+
+    const tCores = Number(totalCores || 24);
+    const lCores = Number(liveCores || 0);
+    const darkCores = Math.max(0, tCores - lCores);
+
+    const segment = await FiberSegment.create({
+      tenantId,
+      cableCode: cableCode.trim().toUpperCase(),
+      name: name.trim(),
+      category: category || 'DISTRIBUTION',
+      fiberStandard: fiberStandard || 'G.652.D Single-Mode',
+      totalCores: tCores,
+      liveCores: lCores,
+      darkCores,
+      fromNodeId: fromNodeId || undefined,
+      toNodeId: toNodeId || undefined,
+      lengthMeters: lengthMeters || 0,
+      attenuationDbPerKm: attenuationDbPerKm ?? 0.35,
+      measuredLossDb: measuredLossDb || 0,
+      coordinates: coordinates || [],
+      photos: photos || [],
+      status: 'healthy',
+    });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_SEGMENT_CREATED',
+      targetResource: 'FiberSegment',
+      targetId: segment._id.toString(),
+      targetIdentifier: segment.cableCode,
+      correlationId: req.correlationId || `seg_create_${Date.now()}`,
+    });
+
+    return res.status(201).json({ success: true, segment, message: 'Fiber Cable Segment created successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.put('/network/segments/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+    const { cableCode, name, category, fiberStandard, totalCores, liveCores, fromNodeId, toNodeId, lengthMeters, attenuationDbPerKm, measuredLossDb, coordinates, photos, status } = req.body;
+
+    const tCores = totalCores !== undefined ? Number(totalCores) : 24;
+    const lCores = liveCores !== undefined ? Number(liveCores) : 0;
+    const darkCores = Math.max(0, tCores - lCores);
+
+    const segment = await FiberSegment.findOneAndUpdate(
+      { _id: id, tenantId },
+      {
+        $set: {
+          cableCode: cableCode?.trim()?.toUpperCase(),
+          name: name?.trim(),
+          category,
+          fiberStandard,
+          totalCores: tCores,
+          liveCores: lCores,
+          darkCores,
+          fromNodeId: fromNodeId || null,
+          toNodeId: toNodeId || null,
+          lengthMeters,
+          attenuationDbPerKm,
+          measuredLossDb,
+          coordinates,
+          photos,
+          status,
+        },
+      },
+      { new: true }
+    );
+
+    if (!segment) return res.status(404).json({ success: false, error: 'Fiber Segment not found' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_SEGMENT_UPDATED',
+      targetResource: 'FiberSegment',
+      targetId: segment._id.toString(),
+      targetIdentifier: segment.cableCode,
+      correlationId: req.correlationId || `seg_upd_${Date.now()}`,
+    });
+
+    return res.json({ success: true, segment, message: 'Fiber Segment updated successfully' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.delete('/network/segments/:id', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+
+    const segment = await FiberSegment.findOneAndDelete({ _id: id, tenantId });
+    if (!segment) return res.status(404).json({ success: false, error: 'Fiber Segment not found' });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'FIBER_SEGMENT_DELETED',
+      targetResource: 'FiberSegment',
+      targetId: segment._id.toString(),
+      targetIdentifier: segment.cableCode,
+      correlationId: req.correlationId || `seg_del_${Date.now()}`,
+    });
+
+    return res.json({ success: true, message: 'Fiber Segment removed successfully' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 9.4 Customer-to-Physical-Fiber Linking with User Approval & Audit Logs
+ */
+operatorRouter.post('/network/link-customer', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { customerId, fatBoxId, fatPortNumber, splitterId, ponPortId, oltId, dropCableLengthMeters } = req.body;
+
+    if (!customerId) return res.status(400).json({ success: false, error: 'Customer ID is required' });
+
+    const customer = await Customer.findOne({ _id: customerId, tenantId });
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    // Update customer fiberDropInfo
+    customer.fiberDropInfo = {
+      fatBoxId: fatBoxId ? new Types.ObjectId(fatBoxId) : undefined,
+      fatPortNumber: fatPortNumber ? Number(fatPortNumber) : undefined,
+      splitterId: splitterId ? new Types.ObjectId(splitterId) : undefined,
+      ponPortId: ponPortId ? new Types.ObjectId(ponPortId) : undefined,
+      oltId: oltId ? new Types.ObjectId(oltId) : undefined,
+      dropCableLengthMeters: dropCableLengthMeters ? Number(dropCableLengthMeters) : undefined,
+    };
+
+    await customer.save();
+
+    // Increment FAT box usedCapacity if linked
+    if (fatBoxId) {
+      const activeCustCount = await Customer.countDocuments({
+        tenantId,
+        'fiberDropInfo.fatBoxId': new Types.ObjectId(fatBoxId),
+      });
+      await FiberNode.updateOne(
+        { _id: new Types.ObjectId(fatBoxId), tenantId },
+        { $set: { usedCapacity: activeCustCount } }
+      );
+    }
+
+    // Increment PON port connected count
+    if (ponPortId) {
+      const activePonCount = await Customer.countDocuments({
+        tenantId,
+        'fiberDropInfo.ponPortId': new Types.ObjectId(ponPortId),
+      });
+      await PONPort.updateOne(
+        { _id: new Types.ObjectId(ponPortId), tenantId },
+        { $set: { connectedOntsCount: activePonCount } }
+      );
+    }
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'CUSTOMER_FIBER_ROUTE_LINKED',
+      targetResource: 'Customer',
+      targetId: customer._id.toString(),
+      targetIdentifier: customer.accountNumber,
+      correlationId: req.correlationId || `link_${Date.now()}`,
+    });
+
+    return res.json({
+      success: true,
+      customer,
+      message: `Customer ${customer.fullName} successfully linked to Physical Fiber Path.`,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
   }
 });
 
@@ -3855,9 +4430,28 @@ operatorRouter.get('/gis/layers', async (req: AuthenticatedRequest, res: Respons
   }
 });
 
+/**
+ * 10.1 Universal Search & Visual Route Tracer
+ */
+operatorRouter.get('/gis/trace', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { q, type } = req.query;
+    if (!q) return res.status(400).json({ success: false, error: 'Search query parameter (q) is required' });
+
+    const trace = await FiberGisService.traceElement(
+      req.tenantId!,
+      String(q),
+      type as any
+    );
+    return res.json({ success: true, trace });
+  } catch (error: any) {
+    return res.status(404).json({ success: false, error: error.message });
+  }
+});
+
 operatorRouter.get('/gis/trace/customer/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const trace = await FiberGisService.traceCustomerRoute(req.params.id);
+    const trace = await FiberGisService.traceElement(req.tenantId!, req.params.id, 'customer');
     return res.json({ success: true, trace });
   } catch (error: any) {
     return res.status(404).json({ success: false, error: error.message });

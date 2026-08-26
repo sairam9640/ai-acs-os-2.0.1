@@ -149,17 +149,31 @@ describe('AI ISP OS — Fiber GIS Topology, Routing & Fault Correlation Engine',
   });
 
   afterAll(async () => {
+    await Tenant.deleteMany({ _id: tenant._id });
+    await Customer.deleteMany({ tenantId: tenant._id });
+    await Device.deleteMany({ tenantId: tenant._id });
+    await OLT.deleteMany({ tenantId: tenant._id });
+    await PONPort.deleteMany({ tenantId: tenant._id });
+    await FiberNode.deleteMany({ tenantId: tenant._id });
+    await FiberSegment.deleteMany({ tenantId: tenant._id });
     await mongoose.disconnect();
   });
 
-  it('Trace Customer Route should trace from Customer -> FAT Box -> Splitter -> Central Office -> OLT', async () => {
+  it('Trace Customer Route should trace from Customer -> ONT -> FAT Box -> Splitter -> PON -> OLT', async () => {
     const trace = await FiberGisService.traceCustomerRoute(customer._id.toString());
     expect(trace).toBeDefined();
     expect(trace.customerId).toBe(customer._id.toString());
-    expect(trace.pathNodes.length).toBeGreaterThanOrEqual(4);
-    expect(trace.pathNodes[0].nodeType).toBe('CUSTOMER_PREMISE');
-    expect(trace.pathNodes[1].nodeCode).toBe('FAT-01');
-    expect(trace.pathNodes[2].nodeCode).toBe('SPL-01');
+    expect(trace.pathNodes.length).toBeGreaterThanOrEqual(6);
+
+    const types = trace.pathNodes.map((n: any) => n.nodeType);
+    expect(types).toContain('CUSTOMER_PREMISE');
+    expect(types).toContain('ONT_DEVICE');
+    expect(types).toContain('FAT_NAP_BOX');
+    expect(types).toContain('PRIMARY_SPLITTER');
+    expect(types).toContain('PON_PORT');
+    expect(types).toContain('OLT_CHASSIS');
+
+    expect(trace.isFullyLinked).toBe(true);
     expect(trace.totalDistanceMeters).toBeGreaterThan(0);
   });
 
@@ -174,5 +188,100 @@ describe('AI ISP OS — Fiber GIS Topology, Routing & Fault Correlation Engine',
     expect(impact.totalImpactedCustomers).toBe(1);
     expect(impact.impactedCustomers[0].accountNumber).toBe('CUST-GIS-001');
     expect(impact.totalMonthlyRevenueAtRisk).toBe(799);
+  });
+
+  it('Universal trace should support search by ONT Serial, MAC Address, FAT Code, Splitter, and OLT', async () => {
+    // Trace by ONT Serial
+    const ontTrace = await FiberGisService.traceElement(tenant._id.toString(), 'HWTCGIS001', 'ont');
+    expect(ontTrace).toBeDefined();
+    expect(ontTrace.matchedTarget.type).toBe('ONT');
+    expect(ontTrace.pathNodes.length).toBeGreaterThan(0);
+
+    // Trace by MAC
+    const macTrace = await FiberGisService.traceElement(tenant._id.toString(), 'AA:11:22:33:44:55', 'mac');
+    expect(macTrace).toBeDefined();
+    expect(macTrace.matchedTarget.type).toBe('MAC');
+
+    // Trace by FAT Node Code
+    const fatTrace = await FiberGisService.traceElement(tenant._id.toString(), 'FAT-01', 'fat');
+    expect(fatTrace).toBeDefined();
+    expect(fatTrace.matchedTarget.type).toBe('FAT_NODE');
+
+    // Trace by Splitter Code
+    const splTrace = await FiberGisService.traceElement(tenant._id.toString(), 'SPL-01', 'splitter');
+    expect(splTrace).toBeDefined();
+    expect(splTrace.matchedTarget.type).toBe('SPLITTER');
+
+    // Trace by OLT Code
+    const oltTrace = await FiberGisService.traceElement(tenant._id.toString(), 'OLT-01', 'olt');
+    expect(oltTrace).toBeDefined();
+    expect(oltTrace.matchedTarget.type).toBe('OLT');
+  });
+
+  it('Zero Fake Data policy should return NOT_CONFIGURED for unlinked hops without inventing fake links', async () => {
+    const unlinkedCust = await Customer.create({
+      tenantId: tenant._id,
+      accountNumber: 'CUST-UNLINKED-01',
+      serviceId: 'SRV-UNLINKED-01',
+      fullName: 'Unlinked Subscriber',
+      phone: '9999900000',
+      email: 'unlinked@test.com',
+      serviceAddress: 'Sector 9 Remote Road',
+      planId: 'plan-basic',
+      billing: { monthlyRate: 799, currency: 'INR', dueDay: 5 },
+      status: 'active',
+      fiberDropInfo: {
+        dropCableLengthMeters: 25,
+      },
+    });
+
+    const trace = await FiberGisService.traceElement(tenant._id.toString(), unlinkedCust.accountNumber, 'customer');
+    expect(trace).toBeDefined();
+    expect(trace.isFullyLinked).toBe(false);
+
+    // Find the FAT hop
+    const fatHop = trace.pathNodes.find((n: any) => n.nodeType === 'FAT_NAP_BOX');
+    expect(fatHop).toBeDefined();
+    expect(fatHop.isConfigured).toBe(false);
+    expect(fatHop.status).toBe('NOT_CONFIGURED');
+    expect(fatHop.nodeCode).toBe('Not Configured');
+
+    await Customer.deleteOne({ _id: unlinkedCust._id });
+  });
+
+  it('Should accurately compute dark fiber cores and core utilization metrics', async () => {
+    const layers = await FiberGisService.getMapLayers(tenant._id.toString());
+    expect(layers.summary).toBeDefined();
+    expect(layers.summary.totalSegments).toBeGreaterThan(0);
+    expect(layers.summary.coreMetrics).toBeDefined();
+    expect(layers.summary.coreMetrics.totalCores).toBe(36); // 24 feeder + 12 dist
+    expect(layers.summary.coreMetrics.liveCores).toBe(18);  // 12 feeder + 6 dist
+    expect(layers.summary.coreMetrics.darkCores).toBe(18);  // 36 - 18
+    expect(layers.summary.coreMetrics.utilizationPercent).toBe(50);
+  });
+
+  it('Should strictly enforce multi-tenant isolation on GIS layers and universal trace', async () => {
+    const otherTenant = await Tenant.create({
+      name: 'Rival ISP Ltd',
+      slug: 'rivalisp',
+      subdomain: 'rival.ai-ispos.com',
+      operatorKey: 'opk_rival_gis',
+      owner: { name: 'Rival', email: 'rival@test.com', phone: '000' },
+    });
+
+    // Empty tenant gets empty layers with zero fake data
+    const rivalLayers = await FiberGisService.getMapLayers(otherTenant._id.toString());
+    expect(rivalLayers.olts.length).toBe(0);
+    expect(rivalLayers.nodes.length).toBe(0);
+    expect(rivalLayers.segments.length).toBe(0);
+    expect(rivalLayers.customers.length).toBe(0);
+    expect(rivalLayers.summary.totalOlts).toBe(0);
+
+    // Rival cannot trace tenant's customer
+    await expect(
+      FiberGisService.traceElement(otherTenant._id.toString(), customer.accountNumber, 'customer')
+    ).rejects.toThrow();
+
+    await Tenant.deleteOne({ _id: otherTenant._id });
   });
 });

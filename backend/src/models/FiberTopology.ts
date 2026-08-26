@@ -16,7 +16,9 @@ export interface IOLT extends Document {
     lat: number;
     lng: number;
     address: string;
+    elevationMeters?: number;
   };
+  photos?: string[];
   status: 'online' | 'warning' | 'critical' | 'offline';
   temperatureC?: number;
   cpuUsagePercent?: number;
@@ -28,25 +30,27 @@ const OLTSchema = new Schema<IOLT>(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
     name: { type: String, required: true, trim: true },
-    code: { type: String, default: function(this: any) { return this.name ? this.name.toUpperCase().replace(/\s+/g, '-') : 'OLT-01'; }, trim: true },
+    code: { type: String, required: true, trim: true },
     ipAddress: { type: String, required: true },
-    vendor: { type: String, default: 'Huawei' },
-    modelName: { type: String, default: 'MA5800-X7' },
-    totalSlots: { type: Number, default: 7 },
+    vendor: { type: String, default: 'Generic OLT' },
+    modelName: { type: String, default: 'Chassis' },
+    totalSlots: { type: Number, default: 4 },
     totalPonPorts: { type: Number, default: 16 },
     location: {
-      name: { type: String, default: 'Central POP / NOC' },
-      lat: { type: Number, default: 12.9352 },
-      lng: { type: Number, default: 77.6245 },
-      address: { type: String, default: '' },
+      name: { type: String, default: 'Main POP' },
+      lat: { type: Number, default: 0 },
+      lng: { type: Number, default: 0 },
+      address: { type: String, default: 'Not Configured' },
+      elevationMeters: { type: Number, default: 0 },
     },
+    photos: [{ type: String }],
     status: {
       type: String,
       enum: ['online', 'warning', 'critical', 'offline'],
       default: 'online',
     },
-    temperatureC: { type: Number, default: 38 },
-    cpuUsagePercent: { type: Number, default: 22 },
+    temperatureC: { type: Number },
+    cpuUsagePercent: { type: Number },
   },
   { timestamps: true }
 );
@@ -78,7 +82,7 @@ const PONPortSchema = new Schema<IPONPort>(
     oltId: { type: Schema.Types.ObjectId, ref: 'OLT', required: true, index: true },
     slotNumber: { type: Number, default: 0 },
     portNumber: { type: Number, default: 1 },
-    portIdentifier: { type: String, default: function(this: any) { return `${this.slotNumber ?? 0}/${this.portNumber ?? 1}`; } },
+    portIdentifier: { type: String, required: true },
     splitRatio: { type: String, default: '1:64' },
     txPowerDbm: { type: Number, default: 4.5 },
     maxOnts: { type: Number, default: 64 },
@@ -119,6 +123,7 @@ export interface IFiberNode extends Document {
     address: string;
     elevationMeters?: number;
   };
+  photos?: string[];
   totalCapacity: number; // e.g. 8 ports, 16 ports, 24 splices
   usedCapacity: number;
   upstreamNodeId?: Types.ObjectId;
@@ -148,19 +153,19 @@ const FiberNodeSchema = new Schema<IFiberNode>(
         'MANHOLE',
         'POLE',
       ],
-      default: function(this: any) { return this.nodeType || 'FAT_NAP_BOX'; },
+      default: 'FAT_NAP_BOX',
       index: true,
     },
     nodeType: {
       type: String,
-      default: function(this: any) { return this.type || 'CENTRAL_OFFICE'; },
     },
     location: {
-      lat: { type: Number, default: function(this: any) { return this.coordinates?.lat || 12.9716; } },
-      lng: { type: Number, default: function(this: any) { return this.coordinates?.lng || 77.5946; } },
-      address: { type: String, default: '' },
+      lat: { type: Number, default: 0 },
+      lng: { type: Number, default: 0 },
+      address: { type: String, default: 'Not Configured' },
       elevationMeters: { type: Number, default: 0 },
     },
+    photos: [{ type: String }],
     totalCapacity: { type: Number, default: 16 },
     usedCapacity: { type: Number, default: 0 },
     upstreamNodeId: { type: Schema.Types.ObjectId, ref: 'FiberNode', index: true },
@@ -192,11 +197,12 @@ export interface IFiberSegment extends Document {
   totalCores: number; // e.g. 24, 48, 96
   liveCores: number;
   darkCores: number;
-  fromNodeId: Types.ObjectId;
-  toNodeId: Types.ObjectId;
+  fromNodeId?: Types.ObjectId;
+  toNodeId?: Types.ObjectId;
   lengthMeters: number;
   attenuationDbPerKm: number;
   measuredLossDb: number;
+  photos?: string[];
   status: 'healthy' | 'attenuated' | 'cut' | 'maintenance';
   coordinates: Array<{ lat: number; lng: number }>; // Geo polyline
   createdAt: Date;
@@ -216,13 +222,14 @@ const FiberSegmentSchema = new Schema<IFiberSegment>(
     },
     fiberStandard: { type: String, default: 'G.652.D Single-Mode' },
     totalCores: { type: Number, default: 24 },
-    liveCores: { type: Number, default: 12 },
-    darkCores: { type: Number, default: 12 },
-    fromNodeId: { type: Schema.Types.ObjectId, ref: 'FiberNode', required: true, index: true },
-    toNodeId: { type: Schema.Types.ObjectId, ref: 'FiberNode', required: true, index: true },
-    lengthMeters: { type: Number, required: true },
+    liveCores: { type: Number, default: 0 },
+    darkCores: { type: Number, default: 24 },
+    fromNodeId: { type: Schema.Types.ObjectId, ref: 'FiberNode', index: true },
+    toNodeId: { type: Schema.Types.ObjectId, ref: 'FiberNode', index: true },
+    lengthMeters: { type: Number, default: 0 },
     attenuationDbPerKm: { type: Number, default: 0.35 },
-    measuredLossDb: { type: Number, default: 0.8 },
+    measuredLossDb: { type: Number, default: 0 },
+    photos: [{ type: String }],
     status: {
       type: String,
       enum: ['healthy', 'attenuated', 'cut', 'maintenance'],
@@ -241,3 +248,4 @@ const FiberSegmentSchema = new Schema<IFiberSegment>(
 
 FiberSegmentSchema.index({ tenantId: 1, cableCode: 1 }, { unique: true });
 export const FiberSegment = model<IFiberSegment>('FiberSegment', FiberSegmentSchema);
+

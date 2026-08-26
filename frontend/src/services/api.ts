@@ -625,12 +625,121 @@ class ApiService {
     return this.request('/operator/network/olts');
   }
 
-  async getPons() {
-    return this.request('/operator/network/pons');
+  async createOlt(payload: any) {
+    return this.request('/operator/network/olts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateOlt(id: string, payload: any) {
+    return this.request(`/operator/network/olts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteOlt(id: string) {
+    return this.request(`/operator/network/olts/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getPons(oltId?: string) {
+    const q = oltId ? `?oltId=${encodeURIComponent(oltId)}` : '';
+    return this.request(`/operator/network/pons${q}`);
+  }
+
+  async createPon(payload: any) {
+    return this.request('/operator/network/pons', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deletePon(id: string) {
+    return this.request(`/operator/network/pons/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getFiberNodes(type?: string, search?: string) {
+    const params = new URLSearchParams();
+    if (type && type !== 'all') params.append('type', type);
+    if (search) params.append('search', search);
+    const q = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/operator/network/nodes${q}`);
+  }
+
+  async createFiberNode(payload: any) {
+    return this.request('/operator/network/nodes', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateFiberNode(id: string, payload: any) {
+    return this.request(`/operator/network/nodes/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteFiberNode(id: string) {
+    return this.request(`/operator/network/nodes/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getFiberSegments(category?: string, search?: string) {
+    const params = new URLSearchParams();
+    if (category && category !== 'all') params.append('category', category);
+    if (search) params.append('search', search);
+    const q = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/operator/network/segments${q}`);
+  }
+
+  async createFiberSegment(payload: any) {
+    return this.request('/operator/network/segments', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateFiberSegment(id: string, payload: any) {
+    return this.request(`/operator/network/segments/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteFiberSegment(id: string) {
+    return this.request(`/operator/network/segments/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async linkCustomerFiber(payload: {
+    customerId: string;
+    fatBoxId?: string;
+    fatPortNumber?: number;
+    splitterId?: string;
+    ponPortId?: string;
+    oltId?: string;
+    dropCableLengthMeters?: number;
+  }) {
+    return this.request('/operator/network/link-customer', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   async getGisLayers() {
     return this.request('/operator/gis/layers');
+  }
+
+  async universalTrace(query: string, type = 'auto') {
+    return this.request(`/operator/gis/trace?q=${encodeURIComponent(query)}&type=${encodeURIComponent(type)}`);
   }
 
   async traceCustomerRoute(customerId: string) {

@@ -33,38 +33,39 @@ describe('AI ISP OS Part 2.4 — Fiber GIS Engineering, Optical Budget & OTDR Te
     olt = await OLT.create({
       tenantId: tenant._id,
       name: 'Eng OLT 01',
-      model: 'Huawei MA5800',
+      code: 'OLT-ENG-01',
+      vendor: 'Huawei',
+      modelName: 'MA5800',
       ipAddress: '10.200.0.1',
       totalPonPorts: 16,
-      coordinates: { lat: 12.9352, lng: 77.6245 },
+      location: { lat: 12.9352, lng: 77.6245, address: 'Eng Central Office' },
     });
 
     centralOfficeNode = await FiberNode.create({
       tenantId: tenant._id,
       nodeCode: 'CO-ENG-01',
       name: 'Eng Central Office',
-      nodeType: 'CENTRAL_OFFICE',
+      type: 'CENTRAL_OFFICE',
       oltId: olt._id,
-      coordinates: { lat: 12.9352, lng: 77.6245 },
+      location: { lat: 12.9352, lng: 77.6245, address: 'Eng Central Office' },
     });
 
     splitterNode = await FiberNode.create({
       tenantId: tenant._id,
       nodeCode: 'SPL-ENG-01',
       name: 'Primary 1:8 Splitter',
-      nodeType: 'PRIMARY_SPLITTER',
+      type: 'PRIMARY_SPLITTER',
       upstreamNodeId: centralOfficeNode._id,
-      splitRatio: '1:8',
-      coordinates: { lat: 12.9360, lng: 77.6255 },
+      location: { lat: 12.9360, lng: 77.6255, address: 'Splitter 1:8 Pole' },
     });
 
     fatNode = await FiberNode.create({
       tenantId: tenant._id,
       nodeCode: 'FAT-ENG-01',
       name: 'Pole FAT NAP-01',
-      nodeType: 'FAT_NAP_BOX',
+      type: 'FAT_NAP_BOX',
       upstreamNodeId: splitterNode._id,
-      coordinates: { lat: 12.9370, lng: 77.6265 },
+      location: { lat: 12.9370, lng: 77.6265, address: 'Pole FAT NAP-01' },
     });
 
     device = await Device.create({
