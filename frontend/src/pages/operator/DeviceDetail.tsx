@@ -82,27 +82,231 @@ type TabType =
 interface ModelSpecificOntGraphicProps {
   model?: string;
   vendor?: string;
+  oui?: string;
+  productClass?: string;
+  hardwareVersion?: string;
+  softwareVersion?: string;
   serialNumber?: string;
   isOnline?: boolean;
+  rxPower?: number | null;
   className?: string;
 }
+
+// In-Memory & LocalStorage Caching Layer for ONT Hardware Visual Profiles
+const ontGraphicMemoryCache = new Map<string, any>();
+
+const getCachedHardwareProfile = (vendor: string, model: string, oui: string, hwVer: string, pClass: string) => {
+  const cacheKey = `ont_vis_spec_${vendor}_${model}_${oui}_${hwVer}_${pClass}`.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  
+  // 1. Check in-memory cache
+  if (ontGraphicMemoryCache.has(cacheKey)) {
+    return ontGraphicMemoryCache.get(cacheKey);
+  }
+
+  // 2. Check localStorage cache
+  try {
+    const localCached = localStorage.getItem(cacheKey);
+    if (localCached) {
+      const parsed = JSON.parse(localCached);
+      ontGraphicMemoryCache.set(cacheKey, parsed);
+      return parsed;
+    }
+  } catch (_) {}
+
+  // 3. Resolve profile from TR-069 metadata
+  const vendorUpper = String(vendor || '').toUpperCase();
+  const modelUpper = String(model || '').toUpperCase();
+  const ouiUpper = String(oui || '').toUpperCase();
+  const hwUpper = String(hwVer || '').toUpperCase();
+  const classUpper = String(pClass || '').toUpperCase();
+
+  let profileType = 'GENERIC_NEUTRAL';
+  let displayName = `${vendor || 'ONT'} ${model || 'Optical Terminal'}`;
+  let subTitle = `${pClass || 'FTTH ONT'} | HW: ${hwVer || 'V1.0'}`;
+  let antennaCount = 2;
+  let bandType = 'Dual-Band AC1200';
+  let chassisColor = 'slate';
+
+  // Match GENEXIS
+  if (vendorUpper.includes('GENEXIS') || ouiUpper.includes('00259E')) {
+    if (modelUpper.includes('PLATINUM') || modelUpper.includes('4410')) {
+      profileType = 'GENEXIS_PLATINUM_4410';
+      displayName = 'GENEXIS Platinum-4410';
+      subTitle = 'AC1200 Gigabit Dual-Band GPON ONT';
+      antennaCount = 4;
+      bandType = 'Dual-Band 2.4G & 5G';
+      chassisColor = 'black';
+    } else if (modelUpper.includes('TITANIUM') || modelUpper.includes('2122')) {
+      profileType = 'GENEXIS_TITANIUM_2122A';
+      displayName = 'GENEXIS Titanium-2122A';
+      subTitle = 'Gigabit XPON Dual-Band Router';
+      antennaCount = 2;
+      bandType = 'Dual-Band 2.4G & 5G';
+      chassisColor = 'charcoal';
+    } else if (modelUpper.includes('EARTH') || modelUpper.includes('2022')) {
+      profileType = 'GENEXIS_EARTH_2022';
+      displayName = 'GENEXIS EARTH-2022';
+      subTitle = 'Eco GPON Wi-Fi Terminal';
+      antennaCount = 2;
+      bandType = 'Single-Band 2.4G';
+      chassisColor = 'pearl';
+    } else if (modelUpper.includes('PURE') || modelUpper.includes('ED500')) {
+      profileType = 'GENEXIS_PURE_ED500';
+      displayName = 'GENEXIS Pure-ED500';
+      subTitle = 'Optical Bridge Media Converter';
+      antennaCount = 0;
+      bandType = 'Gigabit Ethernet SFU';
+      chassisColor = 'white';
+    } else {
+      profileType = 'GENEXIS_GENERIC';
+      displayName = `GENEXIS ${model || 'GPON ONT'}`;
+      subTitle = `${pClass || 'XPON Terminal'} | HW: ${hwVer || 'V1.0'}`;
+    }
+  }
+  // Match HUAWEI
+  else if (vendorUpper.includes('HUAWEI') || ouiUpper.includes('001018') || ouiUpper.includes('001FCE') || modelUpper.startsWith('HG8') || modelUpper.startsWith('EG8')) {
+    if (modelUpper.includes('8145') || modelUpper.includes('HG8145V5') || modelUpper.includes('EG8145V5')) {
+      profileType = 'HUAWEI_HG8145V5';
+      displayName = `Huawei EchoLife ${model || 'HG8145V5'}`;
+      subTitle = 'Dual-Band GPON Routing ONT';
+      antennaCount = 2;
+      bandType = 'Dual-Band 2.4G & 5G';
+      chassisColor = 'white';
+    } else if (modelUpper.includes('8546') || modelUpper.includes('HG8546M')) {
+      profileType = 'HUAWEI_HG8546M';
+      displayName = `Huawei EchoLife ${model || 'HG8546M'}`;
+      subTitle = 'Single-Band 2.4G FTTH ONT';
+      antennaCount = 2;
+      bandType = 'Single-Band 2.4G';
+      chassisColor = 'white';
+    } else if (modelUpper.includes('8010') || modelUpper.includes('8310') || antennaCount === 0) {
+      profileType = 'HUAWEI_HG8010H';
+      displayName = `Huawei EchoLife ${model || 'HG8010H'}`;
+      subTitle = '1GE Bridge GPON SFU Terminal';
+      antennaCount = 0;
+      bandType = '1x Gigabit Bridge';
+      chassisColor = 'white';
+    } else {
+      profileType = 'HUAWEI_GENERIC';
+      displayName = `Huawei ${model || 'EchoLife ONT'}`;
+      subTitle = `${pClass || 'Optical Terminal'} | HW: ${hwVer || 'V1.0'}`;
+    }
+  }
+  // Match ZTE
+  else if (vendorUpper.includes('ZTE') || ouiUpper.includes('001E73') || ouiUpper.includes('286ED4') || modelUpper.startsWith('F6') || modelUpper.startsWith('ZXHN')) {
+    if (modelUpper.includes('670') || modelUpper.includes('F670L')) {
+      profileType = 'ZTE_ZXHN_F670L';
+      displayName = `ZTE ${model || 'ZXHN F670L'}`;
+      subTitle = 'AC1200 Dual-Band GPON Gateway';
+      antennaCount = 4;
+      bandType = 'Dual-Band 2.4G & 5G';
+      chassisColor = 'white';
+    } else if (modelUpper.includes('660') || modelUpper.includes('F660')) {
+      profileType = 'ZTE_ZXHN_F660';
+      displayName = `ZTE ${model || 'ZXHN F660'}`;
+      subTitle = 'XPON Home Gateway Terminal';
+      antennaCount = 2;
+      bandType = 'Single-Band 2.4G';
+      chassisColor = 'white';
+    } else {
+      profileType = 'ZTE_GENERIC';
+      displayName = `ZTE ${model || 'XPON ONT'}`;
+      subTitle = `${pClass || 'Optical Terminal'} | HW: ${hwVer || 'V1.0'}`;
+    }
+  }
+  // Match SYROTECH / REALTEK
+  else if (vendorUpper.includes('SYROTECH') || vendorUpper.includes('REALTEK') || modelUpper.includes('SY-GPON') || modelUpper.includes('1110') || modelUpper.includes('2010')) {
+    profileType = 'SYROTECH_GPON_1110';
+    displayName = `SYROTECH ${model || 'SY-GPON-1110'}`;
+    subTitle = 'High-Gain Dual-Band XPON Terminal';
+    antennaCount = 2;
+    bandType = 'High-Gain Dual-Band';
+    chassisColor = 'white';
+  }
+  // Match HGU RH821
+  else if (modelUpper.includes('RH821') || modelUpper.includes('HGU')) {
+    profileType = 'HGU_RH821';
+    displayName = `HGU ${model || 'RH821GWV-DG'}`;
+    subTitle = 'Dual-Band Realtek HGU Gateway';
+    antennaCount = 4;
+    bandType = 'Dual-Band 2.4G & 5G';
+    chassisColor = 'black';
+  }
+  // Match TP-LINK
+  else if (vendorUpper.includes('TP-LINK') || modelUpper.includes('XC220') || modelUpper.includes('XR500')) {
+    profileType = 'TPLINK_XC220';
+    displayName = `TP-Link ${model || 'XC220-G3v'}`;
+    subTitle = 'AC1200 Wireless VoIP GPON Router';
+    antennaCount = 2;
+    bandType = 'Dual-Band 2.4G & 5G';
+    chassisColor = 'black';
+  }
+  // Match NOKIA / ALCATEL
+  else if (vendorUpper.includes('NOKIA') || vendorUpper.includes('ALCATEL') || modelUpper.startsWith('G-140') || modelUpper.startsWith('G-240')) {
+    profileType = 'NOKIA_G140W';
+    displayName = `Nokia ${model || 'G-140W-ME'}`;
+    subTitle = 'Gigabit Dual-Band Optical Terminal';
+    antennaCount = 2;
+    bandType = 'Dual-Band 2.4G & 5G';
+    chassisColor = 'white';
+  }
+  // Match NETLINK / DIGISOL / D-LINK
+  else if (vendorUpper.includes('NETLINK') || vendorUpper.includes('DIGISOL') || vendorUpper.includes('D-LINK') || modelUpper.includes('V2801') || modelUpper.includes('HG323')) {
+    profileType = 'NETLINK_XPON';
+    displayName = `${vendor} ${model || 'Gigabit XPON'}`;
+    subTitle = 'FTTH Dual-Band Optical Router';
+    antennaCount = 2;
+    bandType = 'Dual-Band 2.4G & 5G';
+    chassisColor = 'black';
+  }
+
+  const result = {
+    profileType,
+    displayName,
+    subTitle,
+    antennaCount,
+    bandType,
+    chassisColor,
+    vendor: vendor || 'GENERIC',
+    model: model || 'ONT',
+    productClass: pClass || 'ONT',
+    hardwareVersion: hwVer || 'V1.0',
+    oui: oui || '00259E',
+  };
+
+  // Cache result
+  ontGraphicMemoryCache.set(cacheKey, result);
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(result));
+  } catch (_) {}
+
+  return result;
+};
 
 const ModelSpecificOntGraphic: React.FC<ModelSpecificOntGraphicProps> = ({
   model = '',
   vendor = '',
+  oui = '',
+  productClass = 'ONT',
+  hardwareVersion = 'V1.0',
+  softwareVersion = '',
   serialNumber = '',
   isOnline = true,
+  rxPower = null,
   className = '',
 }) => {
-  const modelUpper = String(model || '').toUpperCase();
-  const vendorUpper = String(vendor || '').toUpperCase();
-  const ledColor = isOnline ? '#10B981' : '#EF4444';
+  const profile = getCachedHardwareProfile(vendor, model, oui, hardwareVersion, productClass);
+  const pwrColor = isOnline ? '#10B981' : '#64748B';
+  const ponColor = isOnline && (rxPower == null || rxPower > -29.0) ? '#10B981' : isOnline ? '#F59E0B' : '#64748B';
+  const losColor = isOnline && (rxPower == null || rxPower > -29.0) ? '#10B981' : isOnline && rxPower != null && rxPower <= -29.0 ? '#EF4444' : '#EF4444';
+  const wifiColor = isOnline ? '#38BDF8' : '#64748B';
+  const lanColor = isOnline ? '#10B981' : '#64748B';
 
-  // 1. GENEXIS PLATINUM-4410 (4 External Antennas, Sleek Dual-Tone Black Chassis)
-  if (modelUpper.includes('PLATINUM') || modelUpper.includes('4410')) {
+  // 1. GENEXIS PLATINUM-4410 (4 External Antennas, Sleek Charcoal Chassis)
+  if (profile.profileType === 'GENEXIS_PLATINUM_4410') {
     return (
       <div className={`flex flex-col items-center justify-center p-3 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-700 shadow-lg text-center ${className}`}>
-        <svg viewBox="0 0 280 200" className="w-full max-w-[210px] h-auto drop-shadow-2xl" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 280 185" className="w-full max-w-[210px] h-auto drop-shadow-2xl" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M25 15 L35 15 L45 90 L35 90 Z" fill="#334155" stroke="#475569" strokeWidth="1.5" />
           <line x1="30" y1="25" x2="38" y2="85" stroke="#0EA5E9" strokeWidth="1.5" strokeOpacity="0.7" />
           <rect x="75" y="10" width="10" height="95" rx="5" fill="#1E293B" stroke="#475569" strokeWidth="1.5" />
@@ -112,30 +316,32 @@ const ModelSpecificOntGraphic: React.FC<ModelSpecificOntGraphicProps> = ({
           <rect x="42" y="82" width="196" height="85" rx="10" fill="#0F172A" stroke="#334155" strokeWidth="2.5" />
           <rect x="52" y="90" width="176" height="69" rx="8" fill="#1E293B" />
           <line x1="58" y1="120" x2="222" y2="120" stroke="#334155" strokeWidth="1" strokeDasharray="3 3" />
-          <line x1="58" y1="128" x2="222" y2="128" stroke="#334155" strokeWidth="1" strokeDasharray="3 3" />
           <rect x="105" y="96" width="70" height="16" rx="4" fill="#0284C7" />
           <text x="140" y="108" fill="#FFFFFF" fontSize="9" fontWeight="bold" fontFamily="monospace" textAnchor="middle">GENEXIS</text>
-          <circle cx="70" cy="144" r="3.5" fill={ledColor} />
-          <circle cx="88" cy="144" r="3.5" fill={ledColor} />
-          <circle cx="106" cy="144" r="3.5" fill={ledColor} />
-          <circle cx="124" cy="144" r="3.5" fill={ledColor} />
-          <circle cx="142" cy="144" r="3.5" fill="#38BDF8" />
-          <circle cx="160" cy="144" r="3.5" fill="#38BDF8" />
-          <circle cx="178" cy="144" r="3.5" fill={ledColor} />
-          <rect x="62" y="167" width="22" height="7" rx="3" fill="#334155" />
-          <rect x="196" y="167" width="22" height="7" rx="3" fill="#334155" />
+          {/* Status LEDs */}
+          <circle cx="70" cy="144" r="3" fill={pwrColor} />
+          <circle cx="88" cy="144" r="3" fill={ponColor} />
+          <circle cx="106" cy="144" r="3" fill={losColor} />
+          <circle cx="124" cy="144" r="3" fill={lanColor} />
+          <circle cx="142" cy="144" r="3" fill={wifiColor} />
+          <circle cx="160" cy="144" r="3" fill={wifiColor} />
+          <circle cx="178" cy="144" r="3" fill={pwrColor} />
+          <rect x="62" y="167" width="22" height="6" rx="3" fill="#334155" />
+          <rect x="196" y="167" width="22" height="6" rx="3" fill="#334155" />
         </svg>
-        <span className="text-[11px] font-bold text-sky-400 font-mono mt-1">GENEXIS Platinum-4410</span>
-        <span className="text-[9px] text-slate-400 font-medium">AC1200 Gigabit Dual-Band GPON ONT</span>
+        <div className="mt-2 space-y-0.5">
+          <span className="text-[11px] font-bold text-sky-400 font-mono block">{profile.displayName}</span>
+          <span className="text-[9px] text-slate-400 font-medium block">{profile.subTitle}</span>
+        </div>
       </div>
     );
   }
 
   // 2. GENEXIS TITANIUM-2122A (Dual External Antennas, Matte Charcoal Chassis)
-  if (modelUpper.includes('TITANIUM') || modelUpper.includes('2122')) {
+  if (profile.profileType === 'GENEXIS_TITANIUM_2122A') {
     return (
       <div className={`flex flex-col items-center justify-center p-3 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-700 shadow-lg text-center ${className}`}>
-        <svg viewBox="0 0 260 190" className="w-full max-w-[195px] h-auto drop-shadow-2xl" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 260 185" className="w-full max-w-[195px] h-auto drop-shadow-2xl" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect x="30" y="12" width="10" height="115" rx="5" fill="#1E293B" stroke="#475569" strokeWidth="1.8" />
           <rect x="33" y="22" width="4" height="95" rx="2" fill="#0284C7" />
           <rect x="220" y="12" width="10" height="115" rx="5" fill="#1E293B" stroke="#475569" strokeWidth="1.8" />
@@ -144,45 +350,85 @@ const ModelSpecificOntGraphic: React.FC<ModelSpecificOntGraphicProps> = ({
           <rect x="50" y="85" width="160" height="68" rx="8" fill="#1E293B" />
           <path d="M50 85 L130 92 L210 85 L210 102 L130 110 L50 102 Z" fill="#0F172A" opacity="0.6" />
           <text x="130" y="104" fill="#38BDF8" fontSize="10" fontWeight="bold" fontFamily="monospace" textAnchor="middle">Titanium-2122A</text>
-          <circle cx="68" cy="138" r="3.5" fill={ledColor} />
-          <circle cx="86" cy="138" r="3.5" fill={ledColor} />
-          <circle cx="104" cy="138" r="3.5" fill={ledColor} />
-          <circle cx="122" cy="138" r="3.5" fill="#0284C7" />
-          <circle cx="140" cy="138" r="3.5" fill="#0284C7" />
-          <rect x="60" y="160" width="20" height="7" rx="3" fill="#475569" />
-          <rect x="180" y="160" width="20" height="7" rx="3" fill="#475569" />
+          {/* Status LEDs */}
+          <circle cx="68" cy="138" r="3" fill={pwrColor} />
+          <circle cx="86" cy="138" r="3" fill={ponColor} />
+          <circle cx="104" cy="138" r="3" fill={losColor} />
+          <circle cx="122" cy="138" r="3" fill={wifiColor} />
+          <circle cx="140" cy="138" r="3" fill={wifiColor} />
+          <rect x="60" y="160" width="20" height="6" rx="3" fill="#475569" />
+          <rect x="180" y="160" width="20" height="6" rx="3" fill="#475569" />
         </svg>
-        <span className="text-[11px] font-bold text-sky-400 font-mono mt-1">GENEXIS Titanium-2122A</span>
-        <span className="text-[9px] text-slate-400 font-medium">Gigabit XPON Dual-Band Router</span>
+        <div className="mt-2 space-y-0.5">
+          <span className="text-[11px] font-bold text-sky-400 font-mono block">{profile.displayName}</span>
+          <span className="text-[9px] text-slate-400 font-medium block">{profile.subTitle}</span>
+        </div>
       </div>
     );
   }
 
-  // 3. GENEXIS EARTH-2022 (Pearl White Curved Aerodynamic Chassis)
-  if (modelUpper.includes('EARTH') || modelUpper.includes('2022')) {
+  // 3. HUAWEI ECHOLIFE HG8145V5 / EG8145V5 (Glossy White Dual-Antenna Gateway)
+  if (profile.profileType === 'HUAWEI_HG8145V5' || profile.profileType === 'HUAWEI_HG8546M') {
     return (
-      <div className={`flex flex-col items-center justify-center p-3 bg-gradient-to-b from-slate-100 to-slate-200 rounded-2xl border border-slate-300 shadow-md text-center ${className}`}>
-        <svg viewBox="0 0 250 180" className="w-full max-w-[190px] h-auto drop-shadow-md" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="36" y="15" width="9" height="110" rx="4.5" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="2" />
-          <rect x="205" y="15" width="9" height="110" rx="4.5" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="2" />
-          <rect x="46" y="75" width="158" height="78" rx="14" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="2" />
-          <path d="M56 95 Q 125 82 194 95" stroke="#94A3B8" strokeWidth="2" fill="none" />
-          <text x="125" y="112" fill="#047857" fontSize="10" fontWeight="bold" fontFamily="monospace" textAnchor="middle">EARTH-2022</text>
-          <circle cx="75" cy="132" r="3.5" fill={ledColor} />
-          <circle cx="95" cy="132" r="3.5" fill={ledColor} />
-          <circle cx="115" cy="132" r="3.5" fill={ledColor} />
-          <circle cx="135" cy="132" r="3.5" fill={ledColor} />
-          <rect x="66" y="153" width="18" height="6" rx="2" fill="#94A3B8" />
-          <rect x="166" y="153" width="18" height="6" rx="2" fill="#94A3B8" />
+      <div className={`flex flex-col items-center justify-center p-3 bg-gradient-to-b from-slate-50 to-slate-100 rounded-2xl border border-slate-300 shadow-md text-center ${className}`}>
+        <svg viewBox="0 0 260 185" className="w-full max-w-[195px] h-auto drop-shadow-md" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="32" y="12" width="10" height="115" rx="5" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="2" />
+          <line x1="37" y1="20" x2="37" y2="105" stroke="#E2E8F0" strokeWidth="1.5" />
+          <rect x="218" y="12" width="10" height="115" rx="5" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="2" />
+          <line x1="223" y1="20" x2="223" y2="105" stroke="#E2E8F0" strokeWidth="1.5" />
+          <rect x="44" y="76" width="172" height="84" rx="10" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="2" />
+          <rect x="52" y="84" width="156" height="68" rx="8" fill="#F8FAFC" />
+          <rect x="95" y="90" width="70" height="14" rx="3" fill="#DC2626" />
+          <text x="130" y="100" fill="#FFFFFF" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">HUAWEI</text>
+          {/* Status LEDs */}
+          <circle cx="70" cy="132" r="3" fill={pwrColor} />
+          <circle cx="88" cy="132" r="3" fill={ponColor} />
+          <circle cx="106" cy="132" r="3" fill={losColor} />
+          <circle cx="124" cy="132" r="3" fill={lanColor} />
+          <circle cx="142" cy="132" r="3" fill={wifiColor} />
+          <circle cx="160" cy="132" r="3" fill={wifiColor} />
+          <rect x="62" y="160" width="18" height="6" rx="2" fill="#CBD5E1" />
+          <rect x="180" y="160" width="18" height="6" rx="2" fill="#CBD5E1" />
         </svg>
-        <span className="text-[11px] font-bold text-emerald-700 font-mono mt-1">GENEXIS EARTH-2022</span>
-        <span className="text-[9px] text-slate-500 font-medium">Eco GPON Wi-Fi Terminal</span>
+        <div className="mt-2 space-y-0.5">
+          <span className="text-[11px] font-bold text-slate-800 font-mono block">{profile.displayName}</span>
+          <span className="text-[9px] text-slate-500 font-medium block">{profile.subTitle}</span>
+        </div>
       </div>
     );
   }
 
-  // 4. SYROTECH / REALTEK SY-GPON-1110 / 2010 (Pure White FTTH ONT with 2 Antennas)
-  if (modelUpper.includes('SY-GPON') || modelUpper.includes('1110') || modelUpper.includes('2010') || vendorUpper.includes('REALTEK') || vendorUpper.includes('SYROTECH')) {
+  // 4. ZTE ZXHN F670L (4-Antenna White Chassis)
+  if (profile.profileType === 'ZTE_ZXHN_F670L' || profile.profileType === 'HGU_RH821') {
+    return (
+      <div className={`flex flex-col items-center justify-center p-3 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-700 shadow-lg text-center ${className}`}>
+        <svg viewBox="0 0 280 185" className="w-full max-w-[200px] h-auto drop-shadow-2xl" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="35" y="12" width="8" height="100" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
+          <rect x="75" y="10" width="8" height="100" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
+          <rect x="197" y="10" width="8" height="100" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
+          <rect x="237" y="12" width="8" height="100" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
+          <rect x="45" y="78" width="190" height="84" rx="10" fill="#0F172A" stroke="#334155" strokeWidth="2.5" />
+          <text x="140" y="105" fill="#E2E8F0" fontSize="9" fontWeight="bold" fontFamily="monospace" textAnchor="middle">{profile.displayName}</text>
+          {/* Status LEDs */}
+          <circle cx="75" cy="140" r="3" fill={pwrColor} />
+          <circle cx="95" cy="140" r="3" fill={ponColor} />
+          <circle cx="115" cy="140" r="3" fill={losColor} />
+          <circle cx="135" cy="140" r="3" fill={lanColor} />
+          <circle cx="155" cy="140" r="3" fill={wifiColor} />
+          <circle cx="175" cy="140" r="3" fill={wifiColor} />
+          <rect x="65" y="162" width="20" height="6" rx="3" fill="#334155" />
+          <rect x="195" y="162" width="20" height="6" rx="3" fill="#334155" />
+        </svg>
+        <div className="mt-2 space-y-0.5">
+          <span className="text-[11px] font-bold text-sky-400 font-mono block">{profile.displayName}</span>
+          <span className="text-[9px] text-slate-400 font-medium block">{profile.subTitle}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 5. SYROTECH / REALTEK (High-Gain Pure White ONT)
+  if (profile.profileType === 'SYROTECH_GPON_1110' || profile.profileType === 'GENEXIS_EARTH_2022') {
     return (
       <div className={`flex flex-col items-center justify-center p-3 bg-gradient-to-b from-slate-50 to-slate-100 rounded-2xl border border-slate-300 shadow-md text-center ${className}`}>
         <svg viewBox="0 0 250 180" className="w-full max-w-[190px] h-auto drop-shadow-md" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -193,68 +439,49 @@ const ModelSpecificOntGraphic: React.FC<ModelSpecificOntGraphicProps> = ({
           <rect x="42" y="74" width="166" height="78" rx="8" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="2" />
           <rect x="50" y="82" width="150" height="62" rx="6" fill="#F8FAFC" />
           <rect x="95" y="88" width="60" height="14" rx="3" fill="#0284C7" />
-          <text x="125" y="98" fill="#FFFFFF" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">SYROTECH</text>
-          <circle cx="68" cy="126" r="3" fill={ledColor} />
-          <circle cx="84" cy="126" r="3" fill={ledColor} />
-          <circle cx="100" cy="126" r="3" fill={ledColor} />
-          <circle cx="116" cy="126" r="3" fill={ledColor} />
-          <circle cx="132" cy="126" r="3" fill={ledColor} />
-          <rect x="58" y="152" width="18" height="6" rx="2" fill="#94A3B8" />
-          <rect x="174" y="152" width="18" height="6" rx="2" fill="#94A3B8" />
+          <text x="125" y="98" fill="#FFFFFF" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">{profile.vendor}</text>
+          {/* Status LEDs */}
+          <circle cx="68" cy="126" r="3" fill={pwrColor} />
+          <circle cx="84" cy="126" r="3" fill={ponColor} />
+          <circle cx="100" cy="126" r="3" fill={losColor} />
+          <circle cx="116" cy="126" r="3" fill={lanColor} />
+          <circle cx="132" cy="126" r="3" fill={wifiColor} />
+          <rect x="58" y="152" width="18" height="6" rx="2" fill="#CBD5E1" />
+          <rect x="174" y="152" width="18" height="6" rx="2" fill="#CBD5E1" />
         </svg>
-        <span className="text-[11px] font-bold text-sky-800 font-mono mt-1">SYROTECH {model || 'SY-GPON-1110'}</span>
-        <span className="text-[9px] text-slate-500 font-medium">Realtek High-Gain GPON/XPON ONT</span>
+        <div className="mt-2 space-y-0.5">
+          <span className="text-[11px] font-bold text-sky-800 font-mono block">{profile.displayName}</span>
+          <span className="text-[9px] text-slate-500 font-medium block">{profile.subTitle}</span>
+        </div>
       </div>
     );
   }
 
-  // 5. HGU RH821GWV-DG (Commercial Dual-Band HGU Gateway)
-  if (modelUpper.includes('RH821') || modelUpper.includes('HGU')) {
-    return (
-      <div className={`flex flex-col items-center justify-center p-3 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-700 shadow-lg text-center ${className}`}>
-        <svg viewBox="0 0 270 190" className="w-full max-w-[200px] h-auto drop-shadow-2xl" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="35" y="12" width="8" height="100" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
-          <rect x="75" y="10" width="8" height="100" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
-          <rect x="187" y="10" width="8" height="100" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
-          <rect x="227" y="12" width="8" height="100" rx="4" fill="#334155" stroke="#475569" strokeWidth="1.5" />
-          <rect x="45" y="80" width="180" height="82" rx="10" fill="#0F172A" stroke="#334155" strokeWidth="2.5" />
-          <line x1="60" y1="96" x2="210" y2="96" stroke="#1E293B" strokeWidth="3" />
-          <line x1="60" y1="104" x2="210" y2="104" stroke="#1E293B" strokeWidth="3" />
-          <text x="135" y="122" fill="#E2E8F0" fontSize="10" fontWeight="bold" fontFamily="monospace" textAnchor="middle">HGU RH821GWV-DG</text>
-          <circle cx="75" cy="144" r="3.5" fill={ledColor} />
-          <circle cx="95" cy="144" r="3.5" fill={ledColor} />
-          <circle cx="115" cy="144" r="3.5" fill={ledColor} />
-          <circle cx="135" cy="144" r="3.5" fill="#38BDF8" />
-          <circle cx="155" cy="144" r="3.5" fill="#38BDF8" />
-          <rect x="65" y="162" width="20" height="7" rx="3" fill="#334155" />
-          <rect x="185" y="162" width="20" height="7" rx="3" fill="#334155" />
-        </svg>
-        <span className="text-[11px] font-bold text-sky-400 font-mono mt-1">HGU RH821GWV-DG</span>
-        <span className="text-[9px] text-slate-400 font-medium">Dual-Band Realtek HGU Gateway</span>
-      </div>
-    );
-  }
-
-  // 6. DEFAULT / GENERIC GPON ONT
+  // 6. DEFAULT / NEUTRAL PROFESSIONAL HARDWARE PLACEHOLDER
+  // Unrecognized models display a clean, neutral hardware chassis with real TR-069 LED telemetry
   return (
-    <div className={`flex flex-col items-center justify-center p-3 bg-[#F8FAFC] rounded-2xl border border-[#CBD5E1] shadow-xs text-center ${className}`}>
-      <svg viewBox="0 0 240 180" className="w-full max-w-[180px] h-auto drop-shadow-md" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <div className={`flex flex-col items-center justify-center p-3 bg-gradient-to-b from-[#F8FAFC] to-[#F1F5F9] rounded-2xl border border-[#CBD5E1] shadow-xs text-center ${className}`}>
+      <svg viewBox="0 0 240 180" className="w-full max-w-[185px] h-auto drop-shadow-sm" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="28" y="10" width="10" height="120" rx="5" fill="#E2E8F0" stroke="#CBD5E1" strokeWidth="2" />
         <rect x="31" y="20" width="4" height="100" rx="2" fill="#94A3B8" />
         <rect x="202" y="10" width="10" height="120" rx="5" fill="#E2E8F0" stroke="#CBD5E1" strokeWidth="2" />
         <rect x="205" y="20" width="4" height="100" rx="2" fill="#94A3B8" />
-        <rect x="38" y="80" width="164" height="75" rx="8" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="2" />
-        <rect x="44" y="86" width="152" height="63" rx="6" fill="#FFFFFF" />
-        <text x="120" y="112" fill="#0F172A" fontSize="9" fontWeight="bold" fontFamily="monospace" textAnchor="middle">{model || 'GPON ONT'}</text>
-        <circle cx="60" cy="132" r="3" fill={ledColor} />
-        <circle cx="72" cy="132" r="3" fill={ledColor} />
-        <circle cx="84" cy="132" r="3" fill={ledColor} />
-        <circle cx="96" cy="132" r="3" fill={ledColor} />
-        <rect x="52" y="153" width="18" height="6" rx="2" fill="#94A3B8" />
-        <rect x="170" y="153" width="18" height="6" rx="2" fill="#94A3B8" />
+        <rect x="38" y="80" width="164" height="75" rx="8" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="2" />
+        <rect x="44" y="86" width="152" height="63" rx="6" fill="#F8FAFC" />
+        <text x="120" y="112" fill="#0F172A" fontSize="9" fontWeight="bold" fontFamily="monospace" textAnchor="middle">{profile.displayName}</text>
+        {/* Status LEDs */}
+        <circle cx="60" cy="132" r="3" fill={pwrColor} />
+        <circle cx="72" cy="132" r="3" fill={ponColor} />
+        <circle cx="84" cy="132" r="3" fill={losColor} />
+        <circle cx="96" cy="132" r="3" fill={lanColor} />
+        <circle cx="108" cy="132" r="3" fill={wifiColor} />
+        <rect x="52" y="153" width="18" height="6" rx="2" fill="#CBD5E1" />
+        <rect x="170" y="153" width="18" height="6" rx="2" fill="#CBD5E1" />
       </svg>
-      <span className="text-[11px] font-bold text-[#0F172A] font-mono mt-1">{vendor} {model || 'GPON ONT'}</span>
-      <span className="text-[9px] text-[#64748B] font-medium">Gigabit Optical Terminal</span>
+      <div className="mt-2 space-y-0.5">
+        <span className="text-[11px] font-bold text-[#0F172A] font-mono block">{profile.displayName}</span>
+        <span className="text-[9px] text-[#64748B] font-medium block">{profile.subTitle}</span>
+      </div>
     </div>
   );
 };
@@ -1399,8 +1626,13 @@ export const DeviceDetail: React.FC = () => {
                       <ModelSpecificOntGraphic
                         model={workspace.header.model}
                         vendor={workspace.header.vendor}
+                        oui={workspace.header.oui}
+                        productClass={workspace.device?.productClass || (workspace.header as any)?.productClass || 'ONT'}
+                        hardwareVersion={workspace.header.hardwareVersion}
+                        softwareVersion={workspace.header.softwareVersion}
                         serialNumber={workspace.header.serialNumber}
                         isOnline={workspace.header.status === 'online'}
+                        rxPower={workspace.optical?.rxPowerDbm}
                       />
                     </div>
 
