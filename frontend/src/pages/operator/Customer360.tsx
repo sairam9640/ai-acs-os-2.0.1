@@ -1,1405 +1,1095 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import {
+  PhoneCall,
   User,
   Radio,
   Wifi,
-  Smartphone,
   MapPin,
-  Ticket,
-  Wrench,
-  History,
-  Bot,
-  RefreshCw,
-  Signal,
-  CheckCircle2,
-  AlertTriangle,
-  Lock,
-  Power,
-  Play,
-  Shield,
-  Layers,
-  Eye,
-  EyeOff,
-  Cpu,
-  Phone,
-  Mail,
-  Calendar,
   CalendarClock,
   CreditCard,
   MessageSquare,
+  Ticket,
+  Wrench,
+  Shield,
+  RefreshCw,
+  Power,
+  RotateCcw,
+  Zap,
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Download,
+  Eye,
+  EyeOff,
   Send,
   Plus,
   ArrowRight,
-  ChevronRight,
-  Clock,
   Sparkles,
-  Zap,
-  Activity,
-  DollarSign,
+  Server,
+  Layers,
+  ChevronRight,
+  TrendingUp,
   FileText,
-  Copy,
+  Camera,
+  Trash2,
   ExternalLink,
-  ShieldCheck,
-  Flame,
-  Check,
-  AlertCircle,
-  Hash,
-  Share2,
+  Lock,
+  Search,
+  Filter,
 } from 'lucide-react';
 import { Shell } from '../../components/layout/Shell.js';
 import { StateWrapper } from '../../components/ui/StateWrapper.js';
-import { Tabs, TabItem } from '../../components/ui/Tabs.js';
-import { Badge } from '../../components/ui/Badge.js';
-import { Button, Input } from '../../components/ui/Button.js';
 import { Card } from '../../components/ui/Card.js';
+import { Button } from '../../components/ui/Button.js';
+import { Badge } from '../../components/ui/Badge.js';
 import { Modal } from '../../components/ui/Modal.js';
 import { api } from '../../services/api.js';
 
 export const Customer360: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [pendingCommand, setPendingCommand] = useState<any>(null);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<
+    'cockpit' | 'fiber' | 'optical' | 'assets' | 'documents' | 'timeline' | 'whatsapp' | 'tickets' | 'billing' | 'reports'
+  >('cockpit');
+
+  // Security & PII Unmasking
+  const [isUnmasked, setIsUnmasked] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Visibility toggles
-  const [showPppoePass, setShowPppoePass] = useState(false);
-  const [showWifi24Pass, setShowWifi24Pass] = useState(false);
-  const [showWifi5gPass, setShowWifi5gPass] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
-
-  // Modals
-  const [isWifiModalOpen, setIsWifiModalOpen] = useState(false);
-  const [wifiForm, setWifiForm] = useState({
-    ssid5g: '',
-    pass5g: '',
-    ssid24: '',
-    pass24: '',
-  });
+  // Modals State
+  const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
+  const [ticketForm, setTicketForm] = useState({ title: '', category: 'NO_INTERNET', priority: 'high', description: '' });
 
   const [isRenewModalOpen, setIsRenewModalOpen] = useState(false);
-  const [renewForm, setRenewForm] = useState({
-    billingCycleDays: 30,
-    paymentAmount: 699,
-    paymentReference: '',
-    paymentMode: 'Cash / UPI',
+  const [renewForm, setRenewForm] = useState({ validityDays: 30, paymentAmount: 699, paymentMode: 'CASH', paymentReference: '' });
+
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [whatsAppForm, setWhatsAppForm] = useState({ eventType: 'PAYMENT_RECEIVED', message: '' });
+
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const [docForm, setDocForm] = useState({
+    name: 'Customer Premise ONT Installation',
+    category: 'INSTALLATION_PHOTO',
+    url: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800&auto=format&fit=crop&q=60',
   });
 
-  const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
-  const [ticketForm, setTicketForm] = useState({
-    subject: '',
-    description: '',
-    category: 'NO_INTERNET',
-    priority: 'high',
+  const [isAssetModalOpen, setIsAssetModalOpen] = useState(false);
+  const [assetForm, setAssetForm] = useState({
+    category: 'ONT',
+    serialNumber: '',
+    brand: 'Genexis',
+    modelName: 'Titanium-2122A',
   });
 
-  const [isRetriggerModalOpen, setIsRetriggerModalOpen] = useState(false);
-  const [retriggerEventType, setRetriggerEventType] = useState('PLAN_EXPIRING_3D');
+  // Timeline Filter
+  const [timelineFilter, setTimelineFilter] = useState('ALL');
 
-  const copyToClipboard = (text: string, fieldName: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedField(fieldName);
-    setTimeout(() => setCopiedField(null), 2000);
-  };
+  // Document Lightbox
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
-  const fetchCustomer360 = async () => {
+  // Action Loading
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const fetch360Data = async () => {
     if (!id) return;
     setIsLoading(true);
     setError(null);
     try {
-      const res = await api.getCustomer360(id);
+      const res: any = await api.getCustomer360(id);
       setIsLoading(false);
       if (res.success && res.data) {
         setData(res.data);
-        if (res.data.device) {
-          setWifiForm({
-            ssid5g: res.data.device.wifi5g?.ssid || '',
-            pass5g: res.data.device.wifi5g?.password || '',
-            ssid24: res.data.device.wifi24?.ssid || '',
-            pass24: res.data.device.wifi24?.password || '',
-          });
-        }
-        if (res.data.customer?.servicePlan) {
-          setRenewForm({
-            billingCycleDays: 30,
-            paymentAmount: res.data.customer.servicePlan.price || 699,
-            paymentReference: `PAY_${Date.now().toString().slice(-6)}`,
-            paymentMode: 'Cash / UPI',
-          });
+        if (res.data.customer?.servicePlan?.price) {
+          setRenewForm((prev) => ({ ...prev, paymentAmount: res.data.customer.servicePlan.price }));
         }
       } else {
-        setError(res.error || 'Failed to load Customer 360 profile');
+        setError(res.error || 'Failed to load customer details');
       }
     } catch (err: any) {
       setIsLoading(false);
-      setError(err.message || 'Error fetching customer profile');
+      setError(err.message || 'Error fetching customer data');
     }
   };
 
   useEffect(() => {
-    fetchCustomer360();
+    fetch360Data();
   }, [id]);
+
+  // Actions
+  const handleToggleUnmask = async () => {
+    if (!isUnmasked && id) {
+      try {
+        await api.logCustomerUnmaskAudit(id, 'PPPOE_PASSWORD_AND_DOCUMENTS');
+      } catch {}
+    }
+    setIsUnmasked(!isUnmasked);
+  };
+
+  const handleSummonOnt = async () => {
+    if (!data?.device?._id) return alert('No ONT bound to this customer.');
+    setActionLoading(true);
+    try {
+      await api.summonDevice(data.device._id);
+      setFeedback({ type: 'success', message: 'TR-069 Connection Request dispatched to ONT successfully!' });
+      fetch360Data();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message || 'Failed to poll ONT' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRebootOnt = async () => {
+    if (!data?.device?._id) return alert('No ONT bound to this customer.');
+    if (!confirm(`Are you sure you want to reboot ONT ${data.device.serialNumber}?`)) return;
+    setActionLoading(true);
+    try {
+      await api.rebootDevice(data.device._id);
+      setFeedback({ type: 'success', message: `Reboot command sent to ONT ${data.device.serialNumber}` });
+      fetch360Data();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message || 'Failed to reboot ONT' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCreateTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    try {
+      await api.createOperatorCustomerTicket(id, ticketForm);
+      setIsTicketModalOpen(false);
+      setFeedback({ type: 'success', message: 'Support ticket logged and assigned successfully!' });
+      fetch360Data();
+    } catch (err: any) {
+      alert('Error creating ticket: ' + err.message);
+    }
+  };
+
+  const handleRenewPlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    try {
+      await api.renewCustomerPlan(id, renewForm);
+      setIsRenewModalOpen(false);
+      setFeedback({ type: 'success', message: 'Plan renewed and payment recorded successfully!' });
+      fetch360Data();
+    } catch (err: any) {
+      alert('Error renewing plan: ' + err.message);
+    }
+  };
+
+  const handleSendWhatsApp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    try {
+      await api.retriggerPlanNotification(id, whatsAppForm.eventType);
+      setIsWhatsAppModalOpen(false);
+      setFeedback({ type: 'success', message: `WhatsApp alert (${whatsAppForm.eventType}) dispatched!` });
+      fetch360Data();
+    } catch (err: any) {
+      alert('Error dispatching WhatsApp: ' + err.message);
+    }
+  };
+
+  const handleUploadDocument = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    try {
+      await api.uploadCustomerDocument(id, docForm);
+      setIsDocModalOpen(false);
+      setFeedback({ type: 'success', message: 'Document uploaded to subscriber vault successfully!' });
+      fetch360Data();
+    } catch (err: any) {
+      alert('Upload error: ' + err.message);
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    if (!id || !confirm('Are you sure you want to delete this document?')) return;
+    try {
+      await api.deleteCustomerDocument(id, docId);
+      setFeedback({ type: 'success', message: 'Document deleted successfully.' });
+      fetch360Data();
+    } catch (err: any) {
+      alert('Delete error: ' + err.message);
+    }
+  };
+
+  const handleAssignAsset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    try {
+      await api.assignCustomerAsset(id, assetForm);
+      setIsAssetModalOpen(false);
+      setFeedback({ type: 'success', message: 'Hardware asset assigned to subscriber successfully!' });
+      fetch360Data();
+    } catch (err: any) {
+      alert('Asset assign error: ' + err.message);
+    }
+  };
 
   const customer = data?.customer;
   const device = data?.device;
-  const capabilities = data?.capabilities || {};
-  const fiberRoute = data?.fiberRoute;
-  const aiBrief = data?.aiDiagnosticBrief || {};
-  const messageHistory = data?.messageHistory || [];
-  const billingHistory = data?.billingHistory || [];
-  const tickets = data?.openTickets || [];
-  const pastJobs = data?.pastJobs || [];
-  const commands = data?.commandHistory || [];
-
-  // Live Refresh / Summon ONT Telemetry
-  const handleSummonLivePoll = async () => {
-    if (!device) return;
-    try {
-      setActionLoading(true);
-      const res: any = await api.summonDevice(device._id);
-      if (res.success) {
-        setFeedback({
-          type: 'success',
-          message: `Live telemetry poll triggered! CPE ${device.serialNumber} contacted via TR-069.`,
-        });
-        fetchCustomer360();
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message || 'Failed to summon device' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Remote Reboot
-  const handleRebootDevice = async () => {
-    if (!device || !confirm(`Dispatch remote TR-069 reboot command to ONT ${device.serialNumber}?`)) return;
-    try {
-      setActionLoading(true);
-      const res = await api.rebootDevice(device._id);
-      if (res.success) {
-        setFeedback({ type: 'success', message: 'Reboot command sent to ONT.' });
-        fetchCustomer360();
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message || 'Reboot failed' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Wi-Fi Config
-  const handleApplyWifi = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!device) return;
-    try {
-      setActionLoading(true);
-      const res = await api.updateDeviceWifi(device._id, {
-        wifi5g: { ssid: wifiForm.ssid5g, password: wifiForm.pass5g },
-        wifi24: { ssid: wifiForm.ssid24, password: wifiForm.pass24 },
-      });
-      if (res.success) {
-        setFeedback({ type: 'success', message: 'Wi-Fi configuration pushed via TR-069!' });
-        setIsWifiModalOpen(false);
-        fetchCustomer360();
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message || 'Wi-Fi update failed' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Create Quick Support Ticket
-  const handleCreateTicket = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!customer) return;
-    try {
-      setActionLoading(true);
-      const res: any = await api.createOperatorCustomerTicket(customer._id, ticketForm);
-      if (res.success) {
-        setFeedback({
-          type: 'success',
-          message: `Support ticket ${res.ticket?.ticketNumber || 'created'} logged successfully!`,
-        });
-        setIsTicketModalOpen(false);
-        fetchCustomer360();
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message || 'Failed to create ticket' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Renew Plan
-  const handleRenewPlan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!customer) return;
-    try {
-      setActionLoading(true);
-      const res: any = await api.renewCustomerPlan(customer._id, renewForm);
-      if (res.success) {
-        setFeedback({
-          type: 'success',
-          message: `Plan renewed for ${customer.fullName}! WhatsApp receipts and events emitted.`,
-        });
-        setIsRenewModalOpen(false);
-        fetchCustomer360();
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message || 'Failed to renew plan' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Retrigger Notification
-  const handleRetriggerNotification = async () => {
-    if (!customer) return;
-    try {
-      setActionLoading(true);
-      const res: any = await api.retriggerPlanNotification(customer._id, retriggerEventType);
-      if (res.success) {
-        setFeedback({
-          type: 'success',
-          message: `WhatsApp notification [${retriggerEventType}] re-emitted to ${customer.phone}!`,
-        });
-        setIsRetriggerModalOpen(false);
-        fetchCustomer360();
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', message: err.message || 'Failed to retrigger notification' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Calculate Remaining Days and Status Badges
   const plan = customer?.servicePlan;
-  let remainingDays = 30;
+  const reports = data?.operationalReports;
+  const assets = data?.assignedAssets;
+
+  // Expiry Calculations
+  let remainingDays = 0;
   let isExpired = false;
-  let isExpiringSoon = false;
   if (plan?.endDate) {
     const end = new Date(plan.endDate).getTime();
-    const now = Date.now();
-    remainingDays = Math.ceil((end - now) / 86400000);
+    remainingDays = Math.ceil((end - Date.now()) / 86400000);
     isExpired = remainingDays <= 0;
-    isExpiringSoon = remainingDays > 0 && remainingDays <= 3;
   }
 
-  const tabs: TabItem[] = [
-    { id: 'overview', label: 'Call Cockpit', icon: Activity },
-    { id: 'fiber', label: 'Fiber GIS Route', icon: MapPin },
-    { id: 'optical', label: 'Live Optical Power', icon: Signal },
-    { id: 'plan', label: 'Active Plan & Expiry', icon: CalendarClock },
-    { id: 'billing', label: 'Billing History', icon: CreditCard, count: billingHistory.length },
-    { id: 'messages', label: 'WhatsApp History', icon: MessageSquare, count: messageHistory.length },
-    { id: 'tickets', label: 'Tickets & Complaints', icon: Ticket, count: tickets.length },
-    { id: 'wifi', label: 'Wi-Fi & LAN Clients', icon: Wifi, count: device?.connectedClients?.length || 0 },
-  ];
+  // Optical Signal Gauge Color
+  const rxPower = device?.currentRxPowerDbm != null ? Number(device.currentRxPowerDbm) : null;
+  const opticalColor =
+    rxPower == null ? 'text-slate-400' : rxPower >= -20 ? 'text-emerald-600' : rxPower >= -24 ? 'text-sky-600' : rxPower >= -27 ? 'text-amber-600' : 'text-rose-600';
+
+  const filteredTimeline = (data?.timeline || []).filter((item: any) => {
+    if (timelineFilter === 'ALL') return true;
+    return item.type === timelineFilter;
+  });
 
   return (
     <Shell
       portalType="operator"
-      title={customer ? `Customer 360° — ${customer.fullName}` : 'Customer 360°'}
-      breadcrumbs={[
-        { label: 'Customer Directory', href: '/operator/customers' },
-        { label: customer?.accountNumber || 'Subscriber 360°' },
-      ]}
-      primaryAction={
-        <div className="flex items-center space-x-2">
-          <Button
-            size="sm"
-            onClick={() => setIsTicketModalOpen(true)}
-            className="bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs flex items-center space-x-1"
-          >
-            <Ticket className="w-3.5 h-3.5 mr-1" />
-            <span>Open Complaint</span>
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => setIsRenewModalOpen(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs flex items-center space-x-1"
-          >
-            <CreditCard className="w-3.5 h-3.5 mr-1" />
-            <span>Renew Plan</span>
-          </Button>
-          {device && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleSummonLivePoll}
-              disabled={actionLoading}
-              className="text-xs text-sky-700 border-sky-300 hover:bg-sky-50 flex items-center space-x-1"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 mr-1 ${actionLoading ? 'animate-spin' : ''}`} />
-              <span>Poll Live ONT</span>
-            </Button>
-          )}
-        </div>
-      }
+      title="Customer Operations Workspace"
+      breadcrumbs={[{ label: 'Customers', href: '/operator/customers' }, { label: customer?.fullName || 'Customer Profile' }]}
     >
-      <StateWrapper
-        isLoading={isLoading}
-        error={error}
-        onRetry={fetchCustomer360}
-        pendingCommand={pendingCommand}
-      >
-        {customer && (
-          <div className="space-y-5 max-w-7xl mx-auto pb-12">
-            {/* Feedback Alert */}
-            {feedback && (
-              <div
-                className={`p-3.5 rounded-xl flex items-center justify-between border text-xs shadow-xs ${
-                  feedback.type === 'success'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-rose-50 text-rose-800 border-rose-200'
-                }`}
+      <StateWrapper isLoading={isLoading} error={error} onRetry={fetch360Data}>
+        <div className="space-y-5 max-w-7xl mx-auto pb-16 font-sans">
+          {/* TOP QUICK ACTION TOOLBAR */}
+          <div className="p-3 bg-white border border-slate-200 rounded-2xl shadow-xs flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 rounded-lg bg-sky-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                <PhoneCall className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider block">Support Cockpit</span>
+                <span className="text-xs font-black text-slate-900">{customer?.fullName} ({customer?.accountNumber})</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleSummonOnt}
+                disabled={actionLoading || !device}
+                className="h-7 text-xs font-bold text-sky-700 bg-sky-50 border-sky-200 hover:bg-sky-100"
               >
-                <div className="flex items-center space-x-2">
-                  {feedback.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span className="font-medium">{feedback.message}</span>
+                <RefreshCw className="w-3 h-3 mr-1" />
+                Poll ONT
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRebootOnt}
+                disabled={actionLoading || !device}
+                className="h-7 text-xs font-bold text-rose-700 bg-rose-50 border-rose-200 hover:bg-rose-100"
+              >
+                <RotateCcw className="w-3 h-3 mr-1" />
+                Reboot ONT
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={() => setIsRenewModalOpen(true)}
+                className="h-7 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+              >
+                <CreditCard className="w-3 h-3 mr-1" />
+                Renew Plan
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsWhatsAppModalOpen(true)}
+                className="h-7 text-xs font-bold text-emerald-800 bg-emerald-50 border-emerald-200 hover:bg-emerald-100"
+              >
+                <MessageSquare className="w-3 h-3 mr-1" />
+                WhatsApp Ping
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsTicketModalOpen(true)}
+                className="h-7 text-xs font-bold text-amber-800 bg-amber-50 border-amber-200 hover:bg-amber-100"
+              >
+                <Ticket className="w-3 h-3 mr-1" />
+                Log Ticket
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsDocModalOpen(true)}
+                className="h-7 text-xs font-bold text-indigo-700 bg-indigo-50 border-indigo-200 hover:bg-indigo-100"
+              >
+                <Camera className="w-3 h-3 mr-1" />
+                Add Photo/Doc
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleToggleUnmask}
+                className="h-7 text-xs font-bold text-slate-700 bg-slate-100 border-slate-300 hover:bg-slate-200"
+              >
+                {isUnmasked ? <EyeOff className="w-3 h-3 mr-1" /> : <Eye className="w-3 h-3 mr-1" />}
+                {isUnmasked ? 'Mask PII' : 'Unmask PII'}
+              </Button>
+            </div>
+          </div>
+
+          {feedback && (
+            <div
+              className={`p-3 rounded-xl flex items-center justify-between border text-xs ${
+                feedback.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                {feedback.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertTriangle className="w-4 h-4 text-rose-600" />}
+                <span className="font-medium">{feedback.message}</span>
+              </div>
+              <button onClick={() => setFeedback(null)} className="underline font-mono text-[11px]">Dismiss</button>
+            </div>
+          )}
+
+          {/* TOP VITALS SUMMARY CARD */}
+          <Card className="p-5 bg-gradient-to-br from-slate-900 to-slate-950 text-white rounded-2xl shadow-sm space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Subscriber Info */}
+              <div className="space-y-1 md:border-r border-slate-800 pr-3">
+                <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">Subscriber Identity</span>
+                <h2 className="text-lg font-black text-white truncate">{customer?.fullName}</h2>
+                <div className="text-xs font-mono text-slate-300 space-y-0.5">
+                  <p>Acc #: {customer?.accountNumber}</p>
+                  <p>Phone: {customer?.phone}</p>
+                  <p className="truncate">Area: {customer?.address?.area}, {customer?.address?.city}</p>
                 </div>
+              </div>
+
+              {/* Plan & Expiry */}
+              <div className="space-y-1 md:border-r border-slate-800 pr-3">
+                <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">Subscribed Plan</span>
+                <h3 className="text-sm font-black text-white truncate">{plan?.name}</h3>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-black font-mono text-emerald-400">₹{plan?.price || plan?.monthlyFee}</span>
+                  <span className="text-xs text-slate-400">/mo</span>
+                </div>
+                <div className="flex items-center space-x-2 text-xs font-mono">
+                  <Badge variant={isExpired ? 'danger' : remainingDays <= 3 ? 'warning' : 'success'} className="text-[10px]">
+                    {isExpired ? `Expired (${Math.abs(remainingDays)}d ago)` : `${remainingDays} Days Left`}
+                  </Badge>
+                  <span className="text-slate-400 text-[11px]">
+                    Exp: {plan?.endDate ? new Date(plan.endDate).toLocaleDateString() : 'N/A'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Live Optical Signal */}
+              <div className="space-y-1 md:border-r border-slate-800 pr-3">
+                <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">Live Optical Power</span>
+                <div className="flex items-baseline space-x-2">
+                  <span className={`text-2xl font-black font-mono ${opticalColor}`}>
+                    {rxPower != null ? `${rxPower.toFixed(2)} dBm` : 'N/A'}
+                  </span>
+                  <Badge variant={device?.status === 'online' ? 'success' : 'neutral'} className="text-[10px]">
+                    {device?.status === 'online' ? 'TR-069 Online' : 'Offline'}
+                  </Badge>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono space-y-0.5">
+                  <p>TX Power: {device?.currentTxPowerDbm != null ? `${device.currentTxPowerDbm} dBm` : '2.14 dBm'}</p>
+                  <p>Serial: {device?.serialNumber || 'No ONT Bound'}</p>
+                </div>
+              </div>
+
+              {/* WAN & PPPoE */}
+              <div className="space-y-1">
+                <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider">WAN & IP Session</span>
+                <p className="text-xs font-mono font-bold text-slate-200 truncate">
+                  {customer?.wanConfig?.pppoeUsername || `${customer?.accountNumber?.toLowerCase()}@isp`}
+                </p>
+                <div className="text-[11px] text-slate-300 font-mono space-y-0.5">
+                  <p>PPPoE Pass: {isUnmasked ? (customer?.wanConfig?.pppoePassword || 'giga@pass2026') : '••••••••'}</p>
+                  <p>VLAN: {customer?.wanConfig?.vlanId || 100} • IP: {device?.ipAddress || '10.20.44.112'}</p>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* 10 NAVIGATION TABS */}
+          <div className="flex items-center space-x-1 border-b border-slate-200 overflow-x-auto pb-0.5 scrollbar-thin text-xs">
+            {[
+              { id: 'cockpit', label: 'Call Cockpit', icon: PhoneCall },
+              { id: 'fiber', label: 'Fiber GIS Route', icon: MapPin },
+              { id: 'optical', label: 'Optical & WAN', icon: Radio },
+              { id: 'assets', label: `Assigned Assets (${assets?.warehouseItems?.length || 0})`, icon: Layers },
+              { id: 'documents', label: `Documents (${data?.documents?.length || 0})`, icon: FileText },
+              { id: 'timeline', label: `Timeline (${data?.timeline?.length || 0})`, icon: Clock },
+              { id: 'whatsapp', label: `WhatsApp Logs (${data?.messageHistory?.length || 0})`, icon: MessageSquare },
+              { id: 'tickets', label: `Tickets (${data?.openTickets?.length || 0})`, icon: Ticket },
+              { id: 'billing', label: `Invoices (${data?.billingHistory?.length || 0})`, icon: CreditCard },
+              { id: 'reports', label: 'Subscriber Reports', icon: TrendingUp },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
                 <button
-                  onClick={() => setFeedback(null)}
-                  className="text-[11px] underline font-mono ml-4"
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`flex items-center space-x-1.5 px-3 py-2 rounded-t-xl font-bold whitespace-nowrap transition-all ${
+                    isActive
+                      ? 'bg-white border-t-2 border-sky-600 text-sky-700 shadow-xs border-x border-slate-200 -mb-px'
+                      : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100/60'
+                  }`}
                 >
-                  Dismiss
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{tab.label}</span>
                 </button>
-              </div>
-            )}
+              );
+            })}
+          </div>
 
-            {/* TOP CALL COCKPIT SUMMARY CARD (DESIGNED FOR LIVE CALL SUPPORT) */}
-            <Card className="p-5 bg-white border border-slate-200 shadow-sm rounded-2xl">
-              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-                {/* Customer Identity */}
-                <div className="flex items-center space-x-3.5">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-700 text-white flex items-center justify-center text-xl font-black shadow-sm">
-                    {customer.fullName?.charAt(0)}
+          {/* TAB 1: CALL COCKPIT */}
+          {activeTab === 'cockpit' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+              {/* AI Diagnostic Brief */}
+              <Card className="p-5 bg-gradient-to-br from-sky-50 to-blue-50/50 border border-sky-200 rounded-2xl shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase text-sky-900 tracking-wider flex items-center">
+                    <Sparkles className="w-4 h-4 mr-1.5 text-sky-600" />
+                    AI Support Diagnostics
+                  </h3>
+                  <Badge variant={data?.aiDiagnosticBrief?.healthScore >= 80 ? 'success' : 'warning'}>
+                    Score: {data?.aiDiagnosticBrief?.healthScore || 100}/100
+                  </Badge>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-800">Root Cause Analysis:</p>
+                  <ul className="space-y-1.5">
+                    {(data?.aiDiagnosticBrief?.insights || []).map((ins: string, idx: number) => (
+                      <li key={idx} className="text-xs text-slate-700 flex items-start space-x-2 bg-white/80 p-2 rounded-lg border border-sky-100">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-sky-600 shrink-0 mt-0.5" />
+                        <span>{ins}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <p className="text-xs font-bold text-slate-800">Recommended Support Steps:</p>
+                  <ul className="space-y-1.5">
+                    {(data?.aiDiagnosticBrief?.suggestedActions || []).map((act: string, idx: number) => (
+                      <li key={idx} className="text-xs text-slate-800 font-semibold flex items-start space-x-2 bg-white p-2 rounded-lg border border-sky-200">
+                        <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                        <span>{act}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </Card>
+
+              {/* Live Device Telemetry */}
+              <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                  <Radio className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
+                  CPE Hardware Diagnostics
+                </h3>
+
+                <div className="space-y-2 text-xs font-mono">
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Device Model:</span>
+                    <span className="font-bold text-slate-900">{device?.vendor} {device?.modelName || 'Titanium-2122A'}</span>
                   </div>
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <h2 className="text-xl font-black text-slate-900">{customer.fullName}</h2>
-                      <Badge variant={customer.status === 'active' ? 'success' : 'danger'}>
-                        {customer.status?.toUpperCase()}
-                      </Badge>
-                      {isExpired && (
-                        <span className="bg-red-100 text-red-800 border border-red-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                          SUBSCRIPTION EXPIRED
-                        </span>
-                      )}
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Serial Number:</span>
+                    <span className="font-bold text-slate-900">{device?.serialNumber || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">MAC Address:</span>
+                    <span className="font-bold text-slate-900">{device?.macAddress || '3C:90:66:88:12:F1'}</span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Firmware Version:</span>
+                    <span className="font-bold text-slate-900">{device?.softwareVersion || 'V2.1.04-P1'}</span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Wi-Fi 2.4G / 5G SSID:</span>
+                    <span className="font-bold text-slate-900">{device?.wifi24g?.ssid || 'ApexFiber_5G'}</span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Connected Clients:</span>
+                    <span className="font-bold text-slate-900">{device?.connectedClients?.length || 4} Devices Active</span>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Quick Customer Snapshot */}
+              <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                  <User className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+                  Subscriber Profile & Installation
+                </h3>
+
+                <div className="space-y-2 text-xs font-sans">
+                  <div className="p-2.5 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold font-mono">Physical Installation Address</span>
+                    <p className="font-semibold text-slate-800">
+                      {customer?.address?.street}, {customer?.address?.area}, {customer?.address?.city} - {customer?.address?.pincode}
+                    </p>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-50 rounded-xl space-y-1 font-mono text-[11px]">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold font-sans">Fiber Path Terminal</span>
+                    <p className="text-slate-800 font-bold">{assets?.fiberTermination?.fatBoxName} (Port #{assets?.fiberTermination?.fatPortNumber})</p>
+                    <p className="text-slate-500">Drop Cable: {assets?.fiberTermination?.dropCableLengthMeters}m to Premise</p>
+                  </div>
+
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-between text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-emerald-800 uppercase font-mono">Lifetime Billing</span>
+                      <p className="font-black font-mono text-emerald-900 text-sm">₹{reports?.lifetimeValue?.toLocaleString() || 699}</p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1 font-mono">
-                      <span className="text-sky-600 font-bold bg-sky-50 px-1.5 py-0.5 rounded">
-                        {customer.accountNumber}
+                    <Badge variant="success">Good Standing</Badge>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* TAB 2: FIBER GIS ROUTE */}
+          {activeTab === 'fiber' && (
+            <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Topological Optical Fiber Path</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Carrier-grade optical signal path from Central OLT to Customer ONT</p>
+                </div>
+                <Badge variant="info" className="font-mono text-xs">
+                  Total Optical Loss: {data?.fiberRoute?.totalOpticalLossDb?.toFixed(2) || '17.40'} dB
+                </Badge>
+              </div>
+
+              <div className="relative border-l-2 border-sky-300 ml-4 pl-6 space-y-6 py-2">
+                {(data?.fiberRoute?.breakdown || [
+                  { step: 1, type: 'OLT', name: 'OLT-CORE-01', port: 'PON 0/1', power: '+3.5 dBm' },
+                  { step: 2, type: 'FEEDER_CABLE', name: 'Feeder F-101', distance: '1.2 km', power: '+2.8 dBm' },
+                  { step: 3, type: 'PRIMARY_SPLITTER', name: 'Splitter-1:8 (MH-04)', ratio: '1:8 (-10.2 dB)', power: '-7.4 dBm' },
+                  { step: 4, type: 'DISTRIBUTION_CABLE', name: 'Dist Cable D-22', distance: '450m', power: '-8.1 dBm' },
+                  { step: 5, type: 'FAT_SPLITTER', name: assets?.fiberTermination?.fatBoxName || 'FAT-KORAMANGALA-01', port: `Port #${assets?.fiberTermination?.fatPortNumber || 3}`, power: '-19.5 dBm' },
+                  { step: 6, type: 'DROP_CABLE', name: '2-Core Armored Drop', distance: `${assets?.fiberTermination?.dropCableLengthMeters || 45}m`, power: '-19.8 dBm' },
+                  { step: 7, type: 'ONT', name: device?.serialNumber || 'Subscriber ONT', power: `${rxPower || -19.8} dBm (Healthy)` },
+                ]).map((node: any, idx: number) => (
+                  <div key={idx} className="relative flex items-start justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <div className="absolute -left-[31px] top-4 w-3.5 h-3.5 rounded-full bg-sky-600 border-2 border-white shadow-xs"></div>
+                    <div>
+                      <span className="text-[10px] font-bold text-sky-700 uppercase tracking-wider font-mono">
+                        Step {idx + 1}: {node.type}
                       </span>
-                      <span>•</span>
-                      <span className="text-slate-700">{customer.serviceId}</span>
-                      <span>•</span>
-                      <a
-                        href={`tel:${customer.phone}`}
-                        className="flex items-center text-emerald-700 font-semibold hover:underline"
-                      >
-                        <Phone className="w-3 h-3 mr-1" />
-                        {customer.phone}
-                      </a>
-                      {customer.email && (
-                        <>
-                          <span>•</span>
-                          <span className="text-slate-600">{customer.email}</span>
-                        </>
-                      )}
+                      <h4 className="font-bold text-slate-900 text-xs mt-0.5">{node.name}</h4>
+                      <p className="text-[11px] text-slate-500 font-mono">{node.port || node.distance || node.ratio || ''}</p>
                     </div>
+                    <span className="font-mono font-bold text-xs text-slate-800 bg-white px-2 py-1 rounded border border-slate-200">
+                      {node.power || node.powerDbm || '-19.8 dBm'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* TAB 3: OPTICAL & WAN */}
+          {activeTab === 'optical' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                  <Radio className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
+                  Optical Transceiver Telemetry
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-sans">RX Optical Power</span>
+                    <p className={`text-xl font-black ${opticalColor}`}>{rxPower != null ? `${rxPower.toFixed(2)} dBm` : 'N/A'}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-sans">TX Optical Power</span>
+                    <p className="text-xl font-black text-slate-800">{device?.currentTxPowerDbm != null ? `${device.currentTxPowerDbm} dBm` : '2.14 dBm'}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-sans">Laser Bias Current</span>
+                    <p className="text-lg font-black text-slate-800">14.2 mA</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-sans">ONT Temperature</span>
+                    <p className="text-lg font-black text-slate-800">41.5 °C</p>
                   </div>
                 </div>
+              </Card>
 
-                {/* Quick Diagnostic Gauges */}
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Optical Power Quick Gauge */}
-                  <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-center min-w-[110px]">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase block">RX Optical</span>
-                    <span
-                      className={`text-base font-black font-mono ${
-                        device?.currentRxPowerDbm
-                          ? device.currentRxPowerDbm < -27
-                            ? 'text-red-600'
-                            : device.currentRxPowerDbm < -24
-                            ? 'text-amber-600'
-                            : 'text-emerald-700'
-                          : 'text-slate-400'
-                      }`}
-                    >
-                      {device?.currentRxPowerDbm ? `${device.currentRxPowerDbm} dBm` : '-21.4 dBm'}
-                    </span>
-                    <span className="text-[10px] text-slate-400 block font-sans">
-                      {device?.currentRxPowerDbm && device.currentRxPowerDbm < -27 ? 'Critical Loss' : 'Healthy Range'}
-                    </span>
+              <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                  <Server className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+                  PPPoE WAN Network Interface
+                </h3>
+                <div className="space-y-2 text-xs font-mono">
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Username:</span>
+                    <span className="font-bold text-slate-900">{customer?.wanConfig?.pppoeUsername}</span>
                   </div>
-
-                  {/* Active Plan & Expiry Gauge */}
-                  <div className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-center min-w-[130px]">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Plan Validity</span>
-                    <span
-                      className={`text-base font-black font-mono ${
-                        isExpired
-                          ? 'text-red-600'
-                          : isExpiringSoon
-                          ? 'text-amber-600'
-                          : 'text-sky-700'
-                      }`}
-                    >
-                      {isExpired ? '0 Days (Expired)' : `${remainingDays} Days Left`}
-                    </span>
-                    <span className="text-[10px] text-slate-500 block truncate max-w-[120px]">
-                      {plan?.name || 'Broadband 100M'}
-                    </span>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Assigned IP:</span>
+                    <span className="font-bold text-slate-900">{device?.ipAddress || '10.20.44.112'}</span>
                   </div>
-
-                  {/* AI Health Score Gauge */}
-                  <div className="px-3.5 py-2 bg-sky-50 border border-sky-200 rounded-xl text-center min-w-[110px]">
-                    <span className="text-[10px] font-bold text-sky-800 uppercase flex items-center justify-center">
-                      <Bot className="w-3 h-3 mr-1 text-sky-600" />
-                      AI Score
-                    </span>
-                    <span className="text-base font-black text-sky-700 font-mono">
-                      {aiBrief.healthScore || 90}/100
-                    </span>
-                    <span className="text-[10px] text-sky-600 font-semibold block">
-                      {aiBrief.connectionState || 'Healthy'}
-                    </span>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">VLAN Tag:</span>
+                    <span className="font-bold text-slate-900">{customer?.wanConfig?.vlanId || 100}</span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Primary DNS:</span>
+                    <span className="font-bold text-slate-900">{customer?.wanConfig?.dnsPrimary || '8.8.8.8'}</span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Secondary DNS:</span>
+                    <span className="font-bold text-slate-900">{customer?.wanConfig?.dnsSecondary || '1.1.1.1'}</span>
                   </div>
                 </div>
+              </Card>
+            </div>
+          )}
+
+          {/* TAB 4: ASSIGNED HARDWARE ASSETS */}
+          {activeTab === 'assets' && (
+            <Card className="overflow-hidden border border-slate-200 bg-white rounded-2xl shadow-xs">
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Physical Hardware Assets Assigned to Subscriber</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Track serial numbers, warranties, and warehouse stock records</p>
+                </div>
+                <Button size="sm" onClick={() => setIsAssetModalOpen(true)} className="text-xs bg-sky-600 hover:bg-sky-700 text-white font-bold">
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Assign Stock Item
+                </Button>
               </div>
 
-              {/* Secondary Details Row */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 pt-3 text-xs text-slate-600">
-                <div>
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase block">Service Address</span>
-                  <p className="font-medium text-slate-800 truncate" title={`${customer.address?.street || ''}, ${customer.address?.area || ''}`}>
-                    {customer.address?.street || 'Plot 45'}, {customer.address?.area || 'Jubilee Hills'}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase block">PPPoE Username</span>
-                  <div className="flex items-center space-x-1">
-                    <p className="font-mono font-bold text-slate-900">{customer.wanConfig?.pppoeUsername || 'bsnl_user01'}</p>
-                    <button
-                      onClick={() => copyToClipboard(customer.wanConfig?.pppoeUsername || 'bsnl_user01', 'pppoeUser')}
-                      className="text-slate-400 hover:text-slate-700"
-                      title="Copy PPPoE Username"
-                    >
-                      {copiedField === 'pppoeUser' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                    </button>
+              <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* ONT Card */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-sky-700">OPTICAL NETWORK TERMINAL (ONT)</span>
+                    <Badge variant="success">Active</Badge>
                   </div>
+                  <p className="font-bold text-slate-900 text-sm">{assets?.ont?.brand} {assets?.ont?.model || 'Titanium-2122A'}</p>
+                  <p className="font-mono text-slate-600">Serial: {assets?.ont?.serialNumber || device?.serialNumber || 'N/A'}</p>
+                  <p className="font-mono text-slate-600">MAC: {assets?.ont?.macAddress || '3C:90:66:88:12:F1'}</p>
+                  <p className="font-mono text-[11px] text-slate-500">Warranty Exp: {assets?.ont?.warrantyExpiry ? new Date(assets.ont.warrantyExpiry).toLocaleDateString() : 'Active (24m)'}</p>
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase block">ONT Serial Number</span>
-                  <p className="font-mono font-bold text-slate-900">
-                    {device?.serialNumber || <span className="text-amber-600 font-sans">Unassigned</span>}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase block">VLAN Tagging</span>
-                  <p className="font-mono font-medium text-slate-800">
-                    {customer.wanConfig?.vlanEnabled && customer.wanConfig?.vlanId ? `VID ${customer.wanConfig.vlanId} (Tagged)` : 'Untagged'}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase block">Live Call Action</span>
-                  <div className="flex items-center space-x-2 mt-0.5">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIsRetriggerModalOpen(true)}
-                      className="h-6 px-2 text-[11px] text-sky-700 border-sky-300 hover:bg-sky-50"
-                    >
-                      <Send className="w-2.5 h-2.5 mr-1" />
-                      <span>WhatsApp Ping</span>
-                    </Button>
+
+                {/* Secondary Router Card */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-purple-700">WI-FI 6 MESH ROUTER</span>
+                    <Badge variant={assets?.secondaryRouter ? 'success' : 'neutral'}>
+                      {assets?.secondaryRouter ? 'Assigned' : 'Optional'}
+                    </Badge>
                   </div>
+                  <p className="font-bold text-slate-900 text-sm">{assets?.secondaryRouter?.brand || 'TP-Link'} {assets?.secondaryRouter?.model || 'Archer AX12 Dual-Band'}</p>
+                  <p className="font-mono text-slate-600">Serial: {assets?.secondaryRouter?.serialNumber || 'SN-RTR-99201'}</p>
+                  <p className="font-mono text-[11px] text-slate-500">Warranty: Active (12m)</p>
+                </div>
+
+                {/* SFP Transceiver & Fiber Drop */}
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-emerald-700">SFP PON & FIBER DROP</span>
+                    <Badge variant="info">Carrier Grade</Badge>
+                  </div>
+                  <p className="font-bold text-slate-900 text-sm">Class B+ GPON Optical SFP</p>
+                  <p className="font-mono text-slate-600">FAT Terminal: {assets?.fiberTermination?.fatBoxName}</p>
+                  <p className="font-mono text-slate-600">Splitter Port: #{assets?.fiberTermination?.fatPortNumber}</p>
+                  <p className="font-mono text-[11px] text-slate-500">Drop Cable: {assets?.fiberTermination?.dropCableLengthMeters} meters</p>
                 </div>
               </div>
             </Card>
+          )}
 
-            {/* AI Call Assistant Guidance Banner */}
-            <div className="p-3.5 bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-200 rounded-xl text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-              <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-lg bg-sky-600 text-white flex items-center justify-center shrink-0">
-                  <Sparkles className="w-4 h-4" />
-                </div>
+          {/* TAB 5: CUSTOMER DOCUMENTS & PHOTOS */}
+          {activeTab === 'documents' && (
+            <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
                 <div>
-                  <span className="font-bold text-sky-900">AI Call Support Insight:</span>
-                  <p className="text-sky-800 mt-0.5">
-                    {(aiBrief.insights && aiBrief.insights[0]) || 'Optical signal and TR-069 session are normal. Recommended next action: verify Wi-Fi signal quality with subscriber.'}
-                  </p>
+                  <h3 className="font-bold text-slate-900 text-sm">Subscriber Document Vault & Photos</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Aadhaar, CAF forms, and premise installation photo proofs</p>
                 </div>
+                <Button size="sm" onClick={() => setIsDocModalOpen(true)} className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold">
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Upload Document / Photo
+                </Button>
               </div>
 
-              {aiBrief.suggestedActions && aiBrief.suggestedActions.length > 0 && (
-                <div className="shrink-0">
-                  <Badge variant="purple" className="font-medium text-[11px]">
-                    Action: {aiBrief.suggestedActions[0]}
-                  </Badge>
-                </div>
-              )}
-            </div>
-
-            {/* Tab Navigation */}
-            <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
-
-            {/* TAB 1: CALL COCKPIT (ALL-IN-ONE OVERVIEW) */}
-            {activeTab === 'overview' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                {/* Column 1: Live ONT & Wi-Fi */}
-                <div className="space-y-4">
-                  <Card className="p-4 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                      <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center">
-                        <Radio className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
-                        Live ONT Telemetry
-                      </h3>
-                      <Badge variant={device?.status === 'online' ? 'success' : 'neutral'}>
-                        {device?.status === 'online' ? 'Online' : 'Offline'}
-                      </Badge>
-                    </div>
-
-                    <div className="space-y-2 text-xs">
-                      <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">Model & Vendor</span>
-                        <span className="font-semibold text-slate-800">{device?.manufacturer || 'Genexis'} {device?.modelName || 'Titanium-2122A'}</span>
-                      </div>
-                      <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">Firmware Version</span>
-                        <span className="font-mono text-slate-800">{device?.softwareVersion || 'V5R019'}</span>
-                      </div>
-                      <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">WAN IP Address</span>
-                        <span className="font-mono font-bold text-slate-900">{device?.ipAddress || '100.64.45.12'}</span>
-                      </div>
-                      <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">MAC Address</span>
-                        <span className="font-mono text-slate-800">{device?.macAddress || '00:E0:4C:11:22:33'}</span>
-                      </div>
-                      <div className="flex justify-between py-1">
-                        <span className="text-slate-500">ONT Uptime</span>
-                        <span className="font-mono text-slate-800">{Math.round((device?.uptimeSeconds || 86400) / 3600)} Hours</span>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex space-x-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setIsWifiModalOpen(true)}
-                        className="w-full text-xs"
-                      >
-                        <Wifi className="w-3 h-3 mr-1 text-sky-600" />
-                        <span>Wi-Fi Setup</span>
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleRebootDevice}
-                        className="w-full text-xs text-amber-700 border-amber-200 hover:bg-amber-50"
-                      >
-                        <Power className="w-3 h-3 mr-1" />
-                        <span>Reboot</span>
-                      </Button>
-                    </div>
-                  </Card>
-
-                  {/* Active Wi-Fi Radios Preview */}
-                  <Card className="p-4 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center">
-                        <Wifi className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
-                        Wi-Fi Credentials
-                      </h3>
-                      <span className="text-[10px] text-slate-400 font-mono">Dual-Band</span>
-                    </div>
-
-                    <div className="space-y-2 text-xs">
-                      {/* 2.4G */}
-                      <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-100 space-y-1">
-                        <div className="flex items-center justify-between font-semibold text-slate-800">
-                          <span>2.4 GHz: {device?.wifi24?.ssid || 'ApexFiber_2.4G'}</span>
-                          <Badge variant="success" className="text-[10px]">Active</Badge>
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
-                          <span>Password: {showWifi24Pass ? (device?.wifi24?.password || 'Apex@2026') : '••••••••'}</span>
-                          <button
-                            onClick={() => setShowWifi24Pass(!showWifi24Pass)}
-                            className="text-slate-400 hover:text-slate-700"
-                          >
-                            {showWifi24Pass ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 5G */}
-                      <div className="p-2.5 bg-purple-50/50 rounded-lg border border-purple-100 space-y-1">
-                        <div className="flex items-center justify-between font-semibold text-slate-800">
-                          <span>5 GHz: {device?.wifi5g?.ssid || 'ApexFiber_5G_HighSpeed'}</span>
-                          <Badge variant="purple" className="text-[10px]">Active</Badge>
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
-                          <span>Password: {showWifi5gPass ? (device?.wifi5g?.password || 'Apex@5GPass') : '••••••••'}</span>
-                          <button
-                            onClick={() => setShowWifi5gPass(!showWifi5gPass)}
-                            className="text-slate-400 hover:text-slate-700"
-                          >
-                            {showWifi5gPass ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                </div>
-
-                {/* Column 2: Physical Fiber Path & Optical Health */}
-                <div className="space-y-4">
-                  <Card className="p-4 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                      <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center">
-                        <MapPin className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
-                        Physical Fiber Route
-                      </h3>
-                      <Badge variant="info">
-                        Loss: {fiberRoute?.estimatedTotalLossDb || 2.1} dB
-                      </Badge>
-                    </div>
-
-                    <div className="space-y-2 pt-1">
-                      {(fiberRoute?.pathNodes || [
-                        { step: 1, name: 'Main Central OLT-01 (Port 1/1)', nodeCode: 'OLT-HYD-01', nodeType: 'OLT', status: 'healthy' },
-                        { step: 2, name: 'Primary Fiber Splice Closure 04', nodeCode: 'FJC-SEC-04', nodeType: 'CLOSURE', status: 'healthy' },
-                        { step: 3, name: 'FAT Box 12 (1:8 Splitter)', nodeCode: 'FAT-ST-12', nodeType: 'FAT_BOX', status: 'healthy' },
-                        { step: 4, name: 'Subscriber Drop ONT', nodeCode: device?.serialNumber || 'ONT-CUST', nodeType: 'ONT', status: 'healthy' },
-                      ]).map((node: any, idx: number) => (
-                        <div
-                          key={idx}
-                          className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs"
-                        >
-                          <div className="flex items-center space-x-2.5">
-                            <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-[10px]">
-                              {idx + 1}
-                            </span>
-                            <div>
-                              <p className="font-bold text-slate-900">{node.name}</p>
-                              <span className="font-mono text-[10px] text-slate-500">{node.nodeCode} ({node.nodeType})</span>
-                            </div>
-                          </div>
-                          <Badge variant="success" className="text-[10px]">{node.status || 'healthy'}</Badge>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setActiveTab('fiber')}
-                        className="text-xs text-sky-700"
-                      >
-                        <span>Inspect Full GIS Trace →</span>
-                      </Button>
-                    </div>
-                  </Card>
-
-                  {/* Optical Historical Trend */}
-                  <Card className="p-4 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center">
-                        <Signal className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
-                        Optical Stability
-                      </h3>
-                      <span className="text-[10px] text-slate-400 font-mono">Last 20 Changes</span>
-                    </div>
-
-                    <div className="space-y-1.5 max-h-36 overflow-y-auto text-xs">
-                      {(device?.rxPowerHistory || [
-                        { valueDbm: device?.currentRxPowerDbm || -21.4, timestamp: new Date() },
-                      ]).slice(0, 5).map((rx: any, idx: number) => (
-                        <div key={idx} className="flex justify-between items-center py-1 border-b border-slate-100 text-[11px]">
-                          <div className="flex items-center space-x-2">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            <span className="font-mono font-bold text-slate-800">{rx.valueDbm} dBm</span>
-                          </div>
-                          <span className="text-slate-400 font-mono">{new Date(rx.timestamp).toLocaleTimeString()}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </Card>
-                </div>
-
-                {/* Column 3: Tickets, Messages & Billing */}
-                <div className="space-y-4">
-                  {/* Recent Support Tickets */}
-                  <Card className="p-4 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center">
-                        <Ticket className="w-3.5 h-3.5 mr-1.5 text-amber-600" />
-                        Complaints & Tickets ({tickets.length})
-                      </h3>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setIsTicketModalOpen(true)}
-                        className="h-6 px-2 text-[11px] text-amber-700 border-amber-300"
-                      >
-                        <Plus className="w-2.5 h-2.5 mr-0.5" />
-                        New
-                      </Button>
-                    </div>
-
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {tickets.length === 0 ? (
-                        <p className="text-xs text-slate-400 italic py-2 text-center">No active complaints or tickets logged.</p>
-                      ) : (
-                        tickets.map((t: any) => (
-                          <div key={t._id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono font-bold text-sky-700">{t.ticketNumber}</span>
-                              <Badge variant={t.status === 'resolved' || t.status === 'closed' ? 'success' : 'warning'} className="text-[10px]">
-                                {t.status}
-                              </Badge>
-                            </div>
-                            <p className="font-medium text-slate-900 text-[11px]">{t.subject}</p>
-                            <span className="text-[10px] text-slate-400 block font-mono">
-                              {new Date(t.createdAt).toLocaleDateString()}
-                            </span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </Card>
-
-                  {/* Recent WhatsApp Dispatches */}
-                  <Card className="p-4 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center">
-                        <MessageSquare className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
-                        Dispatched WhatsApp Alerts
-                      </h3>
-                      <span className="text-[10px] text-slate-400 font-mono">{messageHistory.length} Sent</span>
-                    </div>
-
-                    <div className="space-y-2 max-h-44 overflow-y-auto text-xs">
-                      {messageHistory.length === 0 ? (
-                        <p className="text-xs text-slate-400 italic py-2 text-center">No recent WhatsApp notification records.</p>
-                      ) : (
-                        messageHistory.slice(0, 4).map((msg: any) => (
-                          <div key={msg._id} className="p-2 bg-slate-50 border border-slate-200 rounded-lg space-y-0.5">
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono font-bold text-[10px] bg-slate-200 text-slate-700 px-1 py-0.2 rounded">
-                                {msg.templateCode}
-                              </span>
-                              <span className="text-[10px] text-slate-400 font-mono">
-                                {new Date(msg.createdAt).toLocaleDateString()}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-slate-700 truncate font-mono mt-0.5">
-                              {msg.contentRenderedSanitized}
-                            </p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </Card>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: PHYSICAL FIBER GIS ROUTE */}
-            {activeTab === 'fiber' && (
-              <div className="space-y-4">
-                <Card className="p-5 border border-slate-200 bg-white shadow-xs rounded-xl space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div>
-                      <h3 className="font-bold text-slate-900 text-sm flex items-center">
-                        <MapPin className="w-4 h-4 mr-2 text-emerald-600" />
-                        End-to-End Fiber Network Topology & Attenuation Route
-                      </h3>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        Physical fiber core tracing from OLT chassis port to subscriber ONT.
-                      </p>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Badge variant="info">
-                        Total Distance: {fiberRoute?.totalDistanceMeters || 450} meters
-                      </Badge>
-                      <Badge variant="success">
-                        Calculated Optical Loss: {fiberRoute?.estimatedTotalLossDb || 2.1} dB
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {/* Path Visual Flow */}
-                  <div className="space-y-3">
-                    {(fiberRoute?.pathNodes || [
-                      { step: 1, name: 'Main Central OLT-01 (Port 1/1)', nodeCode: 'OLT-HYD-01', nodeType: 'OLT', status: 'healthy', location: { lat: 17.4399, lng: 78.3980 }, lossDb: 0.1 },
-                      { step: 2, name: 'Primary Fiber Splice Closure 04', nodeCode: 'FJC-SEC-04', nodeType: 'CLOSURE', status: 'healthy', location: { lat: 17.4410, lng: 78.3995 }, lossDb: 0.3 },
-                      { step: 3, name: 'FAT Box 12 (1:8 PLC Splitter)', nodeCode: 'FAT-ST-12', nodeType: 'FAT_BOX', status: 'healthy', location: { lat: 17.4425, lng: 78.4010 }, lossDb: 1.2 },
-                      { step: 4, name: 'Subscriber Drop Cable & ONT', nodeCode: device?.serialNumber || 'ONT-CUST', nodeType: 'ONT', status: 'healthy', location: { lat: 17.4430, lng: 78.4015 }, lossDb: 0.5 },
-                    ]).map((node: any, idx: number) => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {(data?.documents || []).length === 0 ? (
+                  <p className="text-xs text-slate-400 italic col-span-3 py-6 text-center">No documents or photos uploaded yet.</p>
+                ) : (
+                  data.documents.map((doc: any) => (
+                    <div key={doc.documentId} className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 space-y-2 group">
                       <div
-                        key={idx}
-                        className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                        className="h-36 bg-slate-200 overflow-hidden cursor-pointer relative flex items-center justify-center"
+                        onClick={() => setSelectedPhoto(doc.url)}
                       >
-                        <div className="flex items-center space-x-3.5">
-                          <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-bold flex items-center justify-center text-xs shadow-xs">
-                            {node.step || idx + 1}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-slate-900 text-sm">{node.name}</h4>
-                            <div className="flex items-center space-x-2 text-xs text-slate-500 font-mono mt-0.5">
-                              <span className="bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-semibold">{node.nodeCode}</span>
-                              <span>•</span>
-                              <span>Type: {node.nodeType}</span>
-                              {node.location?.lat && (
-                                <>
-                                  <span>•</span>
-                                  <span>GPS: {node.location.lat.toFixed(4)}, {node.location.lng.toFixed(4)}</span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center space-x-3">
-                          <span className="text-xs font-mono font-semibold text-slate-700">
-                            Loss: +{node.lossDb || 0.2} dB
-                          </span>
-                          <Badge variant="success">{node.status || 'healthy'}</Badge>
+                        <img src={doc.url} alt={doc.name} className="w-full h-full object-cover group-hover:scale-105 transition-all" />
+                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all text-white text-xs font-bold">
+                          <Eye className="w-4 h-4 mr-1" /> View Lightbox
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </Card>
+                      <div className="p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Badge variant="neutral" className="text-[10px] font-mono">{doc.category}</Badge>
+                          <button
+                            onClick={() => handleDeleteDocument(doc.documentId)}
+                            className="text-rose-500 hover:text-rose-700 p-1"
+                            title="Delete Document"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <h4 className="font-bold text-slate-900 text-xs truncate">{doc.name}</h4>
+                        <p className="text-[10px] text-slate-400 font-mono">
+                          {new Date(doc.uploadedAt).toLocaleDateString()} • Verified
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
-            )}
+            </Card>
+          )}
 
-            {/* TAB 3: LIVE OPTICAL POWER */}
-            {activeTab === 'optical' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <Card className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs space-y-1">
-                    <span className="text-xs font-bold text-slate-500 uppercase">RX Optical Power</span>
-                    <p className="text-3xl font-black text-emerald-700 font-mono">
-                      {device?.currentRxPowerDbm || -21.4} dBm
-                    </p>
-                    <p className="text-[11px] text-slate-400">Carrier Threshold: -27.0 dBm</p>
-                  </Card>
-
-                  <Card className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs space-y-1">
-                    <span className="text-xs font-bold text-slate-500 uppercase">TX Optical Power</span>
-                    <p className="text-3xl font-black text-sky-700 font-mono">
-                      {device?.currentTxPowerDbm || 2.2} dBm
-                    </p>
-                    <p className="text-[11px] text-slate-400">Standard (+0.5 to +5.0 dBm)</p>
-                  </Card>
-
-                  <Card className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs space-y-1">
-                    <span className="text-xs font-bold text-slate-500 uppercase">Optical Voltage / Current</span>
-                    <p className="text-2xl font-black text-slate-800 font-mono">
-                      {device?.opticalVoltageV || 3.3} V / {device?.biasCurrentMa || 14.2} mA
-                    </p>
-                    <p className="text-[11px] text-slate-400">Transceiver Health: Optimal</p>
-                  </Card>
-
-                  <Card className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs space-y-1">
-                    <span className="text-xs font-bold text-slate-500 uppercase">Hardware Temperature</span>
-                    <p className="text-2xl font-black text-slate-800 font-mono">
-                      {device?.temperatureC || 44}°C
-                    </p>
-                    <p className="text-[11px] text-slate-400">CPU / RAM: {device?.cpuUsagePercent || 15}% / {device?.memoryUsagePercent || 40}%</p>
-                  </Card>
+          {/* TAB 6: UNIFIED CUSTOMER TIMELINE */}
+          {activeTab === 'timeline' && (
+            <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Unified 360° Chronological Customer Timeline</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Stream combining billing, WhatsApp, tickets, field jobs, TR-069, and security events</p>
                 </div>
 
-                {/* 20-Point Optical Delta History Table */}
-                <Card className="overflow-hidden border border-slate-200 bg-white shadow-xs rounded-xl">
-                  <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                    <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
-                      Historical RX Optical Power Readings (Last 20 Significant Changes)
-                    </h3>
-                    <Badge variant="info">Delta Deduplication Active</Badge>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase">
-                          <th className="py-2.5 px-4">#</th>
-                          <th className="py-2.5 px-4">RX Power (dBm)</th>
-                          <th className="py-2.5 px-4">Optical Status</th>
-                          <th className="py-2.5 px-4">Recorded Timestamp</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-mono">
-                        {(device?.rxPowerHistory || [
-                          { valueDbm: device?.currentRxPowerDbm || -21.4, timestamp: new Date() },
-                        ]).map((rx: any, idx: number) => (
-                          <tr key={idx} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-4 text-slate-400">{idx + 1}</td>
-                            <td className="py-2.5 px-4 font-bold text-emerald-700">{rx.valueDbm} dBm</td>
-                            <td className="py-2.5 px-4">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-sans font-semibold bg-emerald-100 text-emerald-800">
-                                Healthy
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-4 text-slate-600">{new Date(rx.timestamp).toLocaleString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              </div>
-            )}
-
-            {/* TAB 4: ACTIVE PLAN & EXPIRY */}
-            {activeTab === 'plan' && (
-              <div className="space-y-4">
-                <Card className="p-6 border border-slate-200 bg-white shadow-xs rounded-xl space-y-4">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                    <div>
-                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Subscribed Broadband Package</span>
-                      <h3 className="text-xl font-black text-slate-900 mt-1">{plan?.name || 'GigaFast 100M Unlimited'}</h3>
-                      <p className="text-xs text-slate-500 font-mono mt-0.5">
-                        {plan?.downloadSpeedMbps || 100} Mbps Download / {plan?.uploadSpeedMbps || 100} Mbps Upload
-                      </p>
-                    </div>
-
-                    <div className="flex items-center space-x-3">
-                      <div className="text-right">
-                        <span className="text-2xl font-black text-emerald-700 font-mono">₹{plan?.price || 699}</span>
-                        <span className="text-xs text-slate-400 block">per month</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() => setIsRenewModalOpen(true)}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
-                      >
-                        <CreditCard className="w-3.5 h-3.5 mr-1" />
-                        <span>Renew Now</span>
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Expiry Window Progress */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                      <span className="text-slate-500 font-semibold uppercase text-[10px]">Start Date</span>
-                      <p className="font-bold text-slate-900 font-mono text-sm mt-1">
-                        {plan?.startDate ? new Date(plan.startDate).toISOString().split('T')[0] : '2026-08-01'}
-                      </p>
-                    </div>
-
-                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                      <span className="text-slate-500 font-semibold uppercase text-[10px]">Expiry Date</span>
-                      <p className="font-bold text-sky-900 font-mono text-sm mt-1">
-                        {plan?.endDate ? new Date(plan.endDate).toISOString().split('T')[0] : '2026-09-01'}
-                      </p>
-                    </div>
-
-                    <div className={`p-3.5 rounded-xl border ${isExpired ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
-                      <span className={`font-semibold uppercase text-[10px] ${isExpired ? 'text-red-700' : 'text-emerald-700'}`}>Remaining Validity</span>
-                      <p className={`font-black font-mono text-sm mt-1 ${isExpired ? 'text-red-700' : 'text-emerald-700'}`}>
-                        {isExpired ? 'EXPIRED' : `${remainingDays} Days Remaining`}
-                      </p>
-                    </div>
-                  </div>
-                </Card>
-              </div>
-            )}
-
-            {/* TAB 5: BILLING HISTORY */}
-            {activeTab === 'billing' && (
-              <div className="space-y-4">
-                <Card className="overflow-hidden border border-slate-200 bg-white shadow-xs rounded-xl">
-                  <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                    <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
-                      Subscriber Billing & Payment Records
-                    </h3>
-                    <Button
-                      size="sm"
-                      onClick={() => setIsRenewModalOpen(true)}
-                      className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                {/* Filter Pills */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {['ALL', 'BILLING', 'WHATSAPP', 'TICKET', 'FIELD_JOB', 'TR069_COMMAND', 'SECURITY_AUDIT'].map((flt) => (
+                    <button
+                      key={flt}
+                      onClick={() => setTimelineFilter(flt)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono transition-all ${
+                        timelineFilter === flt ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
                     >
-                      <Plus className="w-3 h-3 mr-1" />
-                      Record Payment
-                    </Button>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase">
-                          <th className="py-2.5 px-4">Date</th>
-                          <th className="py-2.5 px-4">Description</th>
-                          <th className="py-2.5 px-4">Amount</th>
-                          <th className="py-2.5 px-4">Payment Mode</th>
-                          <th className="py-2.5 px-4">Receipt / Ref #</th>
-                          <th className="py-2.5 px-4">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-sans">
-                        {billingHistory.length === 0 ? (
-                          <tr>
-                            <td colSpan={6} className="py-8 text-center text-slate-400 italic">
-                              No billing transactions recorded yet.
-                            </td>
-                          </tr>
-                        ) : (
-                          billingHistory.map((b: any, idx: number) => (
-                            <tr key={idx} className="hover:bg-slate-50">
-                              <td className="py-2.5 px-4 font-mono text-slate-600">
-                                {new Date(b.date).toLocaleDateString()}
-                              </td>
-                              <td className="py-2.5 px-4 font-semibold text-slate-900">{b.description}</td>
-                              <td className="py-2.5 px-4 font-mono font-bold text-emerald-700">₹{b.amount}</td>
-                              <td className="py-2.5 px-4 text-slate-700">{b.paymentMode}</td>
-                              <td className="py-2.5 px-4 font-mono text-slate-600">{b.referenceNumber}</td>
-                              <td className="py-2.5 px-4">
-                                <Badge variant="success">Paid</Badge>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
+                      {flt}
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
 
-            {/* TAB 6: WHATSAPP MESSAGE HISTORY */}
-            {activeTab === 'messages' && (
-              <div className="space-y-4">
-                <Card className="overflow-hidden border border-slate-200 bg-white shadow-xs rounded-xl">
-                  <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                    <div>
-                      <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
-                        Dispatched WhatsApp Notifications
-                      </h3>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Log of carrier WhatsApp events dispatched to {customer.phone}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIsRetriggerModalOpen(true)}
-                      className="h-7 text-xs text-sky-700 border-sky-300 hover:bg-sky-50"
-                    >
-                      <Send className="w-3 h-3 mr-1" />
-                      Retrigger Notification
-                    </Button>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase">
-                          <th className="py-2.5 px-4">Event Type</th>
-                          <th className="py-2.5 px-4">Rendered Message Preview</th>
-                          <th className="py-2.5 px-4">Status</th>
-                          <th className="py-2.5 px-4">Sent At</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-sans">
-                        {messageHistory.length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="py-8 text-center text-slate-400 italic">
-                              No WhatsApp messages logged for this customer.
-                            </td>
-                          </tr>
-                        ) : (
-                          messageHistory.map((m: any) => (
-                            <tr key={m._id} className="hover:bg-slate-50">
-                              <td className="py-3 px-4">
-                                <span className="font-mono text-xs font-bold bg-slate-100 text-slate-800 px-2 py-0.5 rounded border border-slate-200">
-                                  {m.templateCode}
-                                </span>
-                              </td>
-                              <td className="py-3 px-4 font-mono text-[11px] text-slate-800 max-w-md truncate">
-                                {m.contentRenderedSanitized}
-                              </td>
-                              <td className="py-3 px-4">
-                                <Badge variant={m.status === 'sent' || m.status === 'delivered' ? 'success' : 'warning'}>
-                                  {m.status}
-                                </Badge>
-                              </td>
-                              <td className="py-3 px-4 font-mono text-slate-500 text-[11px]">
-                                {new Date(m.createdAt).toLocaleString()}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              </div>
-            )}
-
-            {/* TAB 7: TICKETS & COMPLAINTS */}
-            {activeTab === 'tickets' && (
-              <div className="space-y-4">
-                <Card className="overflow-hidden border border-slate-200 bg-white shadow-xs rounded-xl">
-                  <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                    <div>
-                      <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
-                        Support Complaints & Trouble Tickets Timeline
-                      </h3>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Historical incidents, complaints, and resolution logs
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => setIsTicketModalOpen(true)}
-                      className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium"
-                    >
-                      <Plus className="w-3 h-3 mr-1" />
-                      Log Complaint
-                    </Button>
-                  </div>
-
-                  <div className="p-4 space-y-3">
-                    {tickets.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic py-6 text-center">
-                        No support tickets or complaints recorded for this customer.
-                      </p>
-                    ) : (
-                      tickets.map((t: any) => (
-                        <div key={t._id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
-                            <div className="flex items-center space-x-2">
-                              <span className="font-mono font-bold text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded text-xs">
-                                {t.ticketNumber}
-                              </span>
-                              <h4 className="font-bold text-slate-900 text-sm">{t.subject}</h4>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Badge variant={t.priority === 'urgent' ? 'danger' : t.priority === 'high' ? 'warning' : 'neutral'}>
-                                {t.priority?.toUpperCase()}
-                              </Badge>
-                              <Badge variant={t.status === 'resolved' || t.status === 'closed' ? 'success' : 'warning'}>
-                                {t.status?.toUpperCase()}
-                              </Badge>
-                            </div>
-                          </div>
-
-                          <p className="text-xs text-slate-700 leading-relaxed">{t.description}</p>
-
-                          <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-200 text-[11px] text-slate-500 font-mono">
-                            <span>Category: <strong>{t.category}</strong></span>
-                            <span>Created: {new Date(t.createdAt).toLocaleString()}</span>
-                            {t.assignedToUserId && <span>Assigned: <strong>{t.assignedToUserId.fullName}</strong></span>}
-                          </div>
+              <div className="relative border-l-2 border-slate-200 ml-4 pl-6 space-y-5 py-2">
+                {filteredTimeline.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic py-6 text-center">No timeline events found for this filter.</p>
+                ) : (
+                  filteredTimeline.map((evt: any) => (
+                    <div key={evt.id} className="relative bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex items-start justify-between">
+                      <div className="absolute -left-[31px] top-4 w-3.5 h-3.5 rounded-full bg-slate-400 border-2 border-white shadow-xs"></div>
+                      <div className="space-y-1">
+                        <div className="flex items-center space-x-2">
+                          <Badge variant={evt.severity || 'info'} className="text-[10px] font-mono">
+                            {evt.type}
+                          </Badge>
+                          <span className="font-bold text-slate-900 text-xs">{evt.title}</span>
                         </div>
+                        <p className="text-xs text-slate-600 font-sans">{evt.subtitle}</p>
+                        <span className="text-[10px] text-slate-400 font-mono block">Actor: {evt.actor || 'System'}</span>
+                      </div>
+                      <span className="text-[11px] font-mono text-slate-400 whitespace-nowrap">
+                        {new Date(evt.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+          )}
+
+          {/* TAB 7: WHATSAPP DISPATCHES */}
+          {activeTab === 'whatsapp' && (
+            <Card className="overflow-hidden border border-slate-200 bg-white rounded-2xl shadow-xs">
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Outbound WhatsApp Notification Dispatches</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Receipts, expiry reminders, and payment confirmations</p>
+                </div>
+                <Button size="sm" onClick={() => setIsWhatsAppModalOpen(true)} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+                  <Send className="w-3.5 h-3.5 mr-1" />
+                  Retrigger WhatsApp
+                </Button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase">
+                      <th className="py-3 px-4">Template / Event</th>
+                      <th className="py-3 px-4">Recipient Phone</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Dispatched Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans">
+                    {(data?.messageHistory || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-6 text-center text-slate-400 italic">No WhatsApp notifications dispatched yet.</td>
+                      </tr>
+                    ) : (
+                      data.messageHistory.map((msg: any) => (
+                        <tr key={msg._id} className="hover:bg-slate-50">
+                          <td className="py-3 px-4 font-mono font-bold text-slate-900">{msg.templateName || msg.type || 'NOTIFICATION'}</td>
+                          <td className="py-3 px-4 font-mono text-slate-700">{msg.recipient?.identifier || customer?.phone}</td>
+                          <td className="py-3 px-4">
+                            <Badge variant={msg.status === 'DELIVERED' || msg.status === 'SENT' ? 'success' : 'danger'}>
+                              {msg.status}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-slate-500 text-[11px]">
+                            {new Date(msg.createdAt).toLocaleString()}
+                          </td>
+                        </tr>
                       ))
                     )}
-                  </div>
-                </Card>
+                  </tbody>
+                </table>
               </div>
-            )}
+            </Card>
+          )}
 
-            {/* TAB 8: WI-FI & CLIENTS */}
-            {activeTab === 'wifi' && device && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* 2.4 GHz */}
-                  <Card className="p-5 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                      <h3 className="font-bold text-slate-900 text-xs uppercase">2.4 GHz Wi-Fi Radio</h3>
-                      <Badge variant={device.wifi24?.enabled ? 'success' : 'neutral'}>
-                        {device.wifi24?.enabled ? 'Active' : 'Disabled'}
-                      </Badge>
-                    </div>
-                    <div className="space-y-2 text-xs">
-                      <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">SSID Name</span>
-                        <span className="font-bold text-slate-900">{device.wifi24?.ssid || 'ApexFiber_2.4G'}</span>
-                      </div>
-                      <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">Channel / Bandwidth</span>
-                        <span className="font-mono text-slate-800">Channel {device.wifi24?.channel || 6} (20 MHz)</span>
-                      </div>
-                      <div className="flex justify-between py-1">
-                        <span className="text-slate-500">Security</span>
-                        <span className="font-medium text-slate-800">{device.wifi24?.securityMode || 'WPA2-PSK'}</span>
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* 5 GHz */}
-                  <Card className="p-5 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                      <h3 className="font-bold text-slate-900 text-xs uppercase">5 GHz AC/AX Wi-Fi Radio</h3>
-                      <Badge variant={device.wifi5g?.enabled ? 'purple' : 'neutral'}>
-                        {device.wifi5g?.enabled ? 'High-Speed Active' : 'Disabled'}
-                      </Badge>
-                    </div>
-                    <div className="space-y-2 text-xs">
-                      <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">SSID Name</span>
-                        <span className="font-bold text-slate-900">{device.wifi5g?.ssid || 'ApexFiber_5G'}</span>
-                      </div>
-                      <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">Channel / Bandwidth</span>
-                        <span className="font-mono text-slate-800">Channel {device.wifi5g?.channel || 44} (80 MHz)</span>
-                      </div>
-                      <div className="flex justify-between py-1">
-                        <span className="text-slate-500">Security</span>
-                        <span className="font-medium text-slate-800">{device.wifi5g?.securityMode || 'WPA2-PSK'}</span>
-                      </div>
-                    </div>
-                  </Card>
+          {/* TAB 8: TICKETS & COMPLAINTS */}
+          {activeTab === 'tickets' && (
+            <Card className="overflow-hidden border border-slate-200 bg-white rounded-2xl shadow-xs">
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Subscriber Complaints & Support Tickets</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Active incident timeline and resolution SLAs</p>
                 </div>
-
-                {/* Connected Clients */}
-                <Card className="p-5 border border-slate-200 bg-white shadow-xs rounded-xl space-y-3">
-                  <h3 className="font-bold text-slate-900 text-xs uppercase">Connected LAN & WLAN Devices</h3>
-                  <div className="space-y-2">
-                    {(device.connectedClients || [
-                      { hostname: 'Vikram-iPhone15', mac: 'BC:D0:74:11:22:33', ip: '192.168.1.101', interfaceType: '5GHz Wi-Fi', isBlocked: false },
-                      { hostname: 'Samsung-SmartTV', mac: '00:1A:7D:AA:BB:CC', ip: '192.168.1.102', interfaceType: 'Ethernet LAN1', isBlocked: false },
-                    ]).map((client: any) => (
-                      <div key={client.mac} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
-                        <div className="flex items-center space-x-3">
-                          <Smartphone className="w-4 h-4 text-sky-600" />
-                          <div>
-                            <p className="font-bold text-slate-900">{client.hostname || 'Client Device'}</p>
-                            <span className="font-mono text-[11px] text-slate-500">{client.mac} • {client.ip} • {client.interfaceType}</span>
-                          </div>
-                        </div>
-                        <Badge variant="success">Active</Badge>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
+                <Button size="sm" onClick={() => setIsTicketModalOpen(true)} className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold">
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Log New Ticket
+                </Button>
               </div>
-            )}
-          </div>
-        )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase">
+                      <th className="py-3 px-4">Ticket Reference</th>
+                      <th className="py-3 px-4">Subject & Category</th>
+                      <th className="py-3 px-4">Priority</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Assigned Staff</th>
+                      <th className="py-3 px-4">Created Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans">
+                    {(data?.openTickets || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-6 text-center text-slate-400 italic">No support tickets recorded for this customer.</td>
+                      </tr>
+                    ) : (
+                      data.openTickets.map((t: any) => (
+                        <tr key={t._id} className="hover:bg-slate-50">
+                          <td className="py-3 px-4 font-mono font-bold text-slate-900">{t.ticketNumber || t._id.slice(-6)}</td>
+                          <td className="py-3 px-4">
+                            <p className="font-bold text-slate-800">{t.title || t.subject}</p>
+                            <span className="text-[11px] text-slate-400 font-mono">{t.category}</span>
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-rose-700">{t.priority}</td>
+                          <td className="py-3 px-4">
+                            <Badge variant={t.status === 'resolved' || t.status === 'closed' ? 'success' : 'warning'}>
+                              {t.status}
+                            </Badge>
+                          </td>
+                          <td className="py-3 px-4 text-slate-700">{t.assignedToUserId?.fullName || 'NOC Queue'}</td>
+                          <td className="py-3 px-4 font-mono text-slate-500 text-[11px]">
+                            {new Date(t.createdAt).toLocaleDateString()}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          {/* TAB 9: BILLING & INVOICES */}
+          {activeTab === 'billing' && (
+            <Card className="overflow-hidden border border-slate-200 bg-white rounded-2xl shadow-xs">
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Tax Invoices & Payment Ledger</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Official GST receipts and subscription payments</p>
+                </div>
+                <Button size="sm" onClick={() => setIsRenewModalOpen(true)} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+                  <CreditCard className="w-3.5 h-3.5 mr-1" />
+                  Record Payment
+                </Button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase">
+                      <th className="py-3 px-4">Reference #</th>
+                      <th className="py-3 px-4">Description</th>
+                      <th className="py-3 px-4">Amount</th>
+                      <th className="py-3 px-4">Payment Mode</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4 text-right">Receipt</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans">
+                    {(data?.billingHistory || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-6 text-center text-slate-400 italic">No payment invoices recorded.</td>
+                      </tr>
+                    ) : (
+                      data.billingHistory.map((b: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-3 px-4 font-mono font-bold text-slate-900">{b.referenceNumber}</td>
+                          <td className="py-3 px-4 font-semibold text-slate-800">{b.description}</td>
+                          <td className="py-3 px-4 font-mono font-black text-emerald-700">₹{b.amount}</td>
+                          <td className="py-3 px-4 text-slate-600 font-mono">{b.paymentMode}</td>
+                          <td className="py-3 px-4">
+                            <Badge variant="success">Paid</Badge>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-slate-500 text-[11px]">
+                            {new Date(b.date).toLocaleDateString()}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <a
+                              href={b.receiptUrl || `/api/v1/customer/invoices/${b.referenceNumber}/download`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center text-xs font-bold text-sky-700 hover:underline"
+                            >
+                              <Download className="w-3 h-3 mr-1" />
+                              Print
+                            </a>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          {/* TAB 10: SUBSCRIBER REPORTS & AUDIT */}
+          {activeTab === 'reports' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                  <TrendingUp className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                  Subscriber Lifetime Value & SLA Performance
+                </h3>
+                <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-sans">Customer Lifetime Value (LTV)</span>
+                    <p className="text-xl font-black text-emerald-700">₹{reports?.lifetimeValue?.toLocaleString() || 699}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-sans">Average Monthly Spend</span>
+                    <p className="text-xl font-black text-slate-800">₹{reports?.averageMonthlyRevenue || 699}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-sans">Total Lifetime Complaints</span>
+                    <p className="text-lg font-black text-slate-800">{reports?.totalTicketsCount || 0}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-sans">Average MTTR Resolution</span>
+                    <p className="text-lg font-black text-sky-700">{reports?.averageResolutionHours || 2.8} hrs</p>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                  <Shield className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+                  Security & Audit Trails
+                </h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto font-sans">
+                  {(data?.auditHistory || []).map((a: any) => (
+                    <div key={a._id} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="font-bold text-slate-900 font-mono">{a.action}</span>
+                        <span className="text-[10px] text-slate-500 block">By {a.actor?.email || a.actor?.role}</span>
+                      </div>
+                      <span className="font-mono text-slate-400 text-[10px]">{new Date(a.timestamp).toLocaleDateString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          )}
+        </div>
       </StateWrapper>
 
-      {/* MODAL: CREATE QUICK COMPLAINT / SUPPORT TICKET */}
-      <Modal
-        isOpen={isTicketModalOpen}
-        onClose={() => setIsTicketModalOpen(false)}
-        title={`Log Support Complaint — ${customer?.fullName || 'Subscriber'}`}
-        subtitle="Log customer complaint during live call and assign severity."
-      >
-        <form onSubmit={handleCreateTicket} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Issue Subject *</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Optical signal red light / Frequent Wi-Fi disconnect"
-              value={ticketForm.subject}
-              onChange={(e) => setTicketForm({ ...ticketForm, subject: e.target.value })}
-              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Category</label>
-              <select
-                value={ticketForm.category}
-                onChange={(e) => setTicketForm({ ...ticketForm, category: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
-              >
-                <option value="NO_INTERNET">NO_INTERNET (LOS / Red Light)</option>
-                <option value="SLOW_SPEED">SLOW_SPEED (Speed Degradation)</option>
-                <option value="WIFI_ISSUE">WIFI_ISSUE (Range / Disconnect)</option>
-                <option value="BILLING">BILLING (Payment / Plan Issue)</option>
-                <option value="RELOCATION">RELOCATION (Address Shift)</option>
-                <option value="GENERAL">GENERAL (Other Inquiry)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Priority Severity</label>
-              <select
-                value={ticketForm.priority}
-                onChange={(e) => setTicketForm({ ...ticketForm, priority: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold"
-              >
-                <option value="urgent">URGENT (Service Complete Down)</option>
-                <option value="high">HIGH (Severe Intermittent)</option>
-                <option value="medium">MEDIUM (Normal Support)</option>
-                <option value="low">LOW (General Inquiry)</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Detailed Description & Notes</label>
-            <textarea
-              rows={3}
-              placeholder="Provide caller observations, troubleshooting performed, etc."
-              value={ticketForm.description}
-              onChange={(e) => setTicketForm({ ...ticketForm, description: e.target.value })}
-              className="w-full p-2.5 text-xs border border-slate-300 rounded-lg"
-            />
-          </div>
-
-          <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
-            <Button type="button" variant="outline" onClick={() => setIsTicketModalOpen(false)} className="text-xs">
-              Cancel
-            </Button>
-            <Button type="submit" disabled={actionLoading} className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold">
-              Submit Ticket
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* MODAL: RENEW PLAN & COLLECT PAYMENT */}
+      {/* MODAL: RENEW PLAN */}
       <Modal
         isOpen={isRenewModalOpen}
         onClose={() => setIsRenewModalOpen(false)}
-        title={`Renew Plan — ${customer?.fullName || 'Subscriber'}`}
-        subtitle="Extend validity and record payment receipt."
+        title={`Renew Plan for ${customer?.fullName}`}
+        subtitle="Extends validity by 30 days and logs formal payment receipt."
       >
         <form onSubmit={handleRenewPlan} className="space-y-4">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+            <span className="text-slate-500">Active Plan:</span>
+            <p className="font-bold text-slate-900 text-sm">{plan?.name}</p>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Amount Paid (₹) *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Validity Extension</label>
+              <select
+                value={renewForm.validityDays}
+                onChange={(e) => setRenewForm({ ...renewForm, validityDays: Number(e.target.value) })}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold"
+              >
+                <option value={30}>30 Days (1 Month)</option>
+                <option value={90}>90 Days (Quarterly)</option>
+                <option value={180}>180 Days (Half-Yearly)</option>
+                <option value={365}>365 Days (Annual)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Collected Amount (₹)</label>
               <input
                 type="number"
                 required
-                min={0}
                 value={renewForm.paymentAmount}
                 onChange={(e) => setRenewForm({ ...renewForm, paymentAmount: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg font-mono font-bold text-emerald-700"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Extension Period (Days) *</label>
-              <input
-                type="number"
-                required
-                min={1}
-                value={renewForm.billingCycleDays}
-                onChange={(e) => setRenewForm({ ...renewForm, billingCycleDays: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg font-mono font-semibold"
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg font-mono font-bold"
               />
             </div>
           </div>
@@ -1410,141 +1100,289 @@ export const Customer360: React.FC = () => {
               <select
                 value={renewForm.paymentMode}
                 onChange={(e) => setRenewForm({ ...renewForm, paymentMode: e.target.value })}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold"
               >
-                <option value="Cash / UPI">Cash / UPI</option>
-                <option value="Online Payment Gateway">Online Gateway</option>
-                <option value="Bank Transfer">Bank Transfer</option>
+                <option value="CASH">Cash In Hand</option>
+                <option value="UPI_DIRECT">Direct UPI (GPay / PhonePe)</option>
+                <option value="RAZORPAY">Razorpay</option>
+                <option value="CASHFREE">Cashfree</option>
+                <option value="PHONEPE">PhonePe PG</option>
               </select>
             </div>
+
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Payment Ref / Receipt #</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Reference / Txn ID</label>
               <input
                 type="text"
+                placeholder="e.g. UPI-9920199"
                 value={renewForm.paymentReference}
                 onChange={(e) => setRenewForm({ ...renewForm, paymentReference: e.target.value })}
-                placeholder="e.g. UPI-998822"
                 className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg font-mono"
               />
             </div>
-          </div>
-
-          <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs text-emerald-800">
-            <div className="flex items-center space-x-1 font-bold">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Instant WhatsApp Receipt:</span>
-            </div>
-            <p className="mt-0.5 text-[11px] text-emerald-700">
-              Dispatches <strong>PLAN_RENEWED</strong> & <strong>PAYMENT_RECEIVED</strong> WhatsApp receipts automatically.
-            </p>
           </div>
 
           <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
             <Button type="button" variant="outline" onClick={() => setIsRenewModalOpen(false)} className="text-xs">
               Cancel
             </Button>
-            <Button type="submit" disabled={actionLoading} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
-              Confirm & Renew
+            <Button type="submit" className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+              Confirm Plan Renewal
             </Button>
           </div>
         </form>
       </Modal>
 
-      {/* MODAL: WI-FI RECONFIGURATION */}
+      {/* MODAL: LOG TICKET */}
       <Modal
-        isOpen={isWifiModalOpen}
-        onClose={() => setIsWifiModalOpen(false)}
-        title="Reconfigure Subscriber Wi-Fi"
-        subtitle="Pushes changes via TR-069 session."
+        isOpen={isTicketModalOpen}
+        onClose={() => setIsTicketModalOpen(false)}
+        title="Log Support Complaint Ticket"
+        subtitle="Dispatches ticket to NOC queue and field technicians."
       >
-        <form onSubmit={handleApplyWifi} className="space-y-4">
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-800">5 GHz Wi-Fi Settings</h4>
-            <Input
-              label="5 GHz SSID Name"
-              value={wifiForm.ssid5g}
-              onChange={(e) => setWifiForm({ ...wifiForm, ssid5g: e.target.value })}
-            />
-            <Input
-              label="5 GHz Password"
-              type="text"
-              value={wifiForm.pass5g}
-              onChange={(e) => setWifiForm({ ...wifiForm, pass5g: e.target.value })}
-            />
-          </div>
-
-          <div className="space-y-3 pt-3 border-t border-slate-200">
-            <h4 className="text-xs font-bold text-slate-800">2.4 GHz Wi-Fi Settings</h4>
-            <Input
-              label="2.4 GHz SSID Name"
-              value={wifiForm.ssid24}
-              onChange={(e) => setWifiForm({ ...wifiForm, ssid24: e.target.value })}
-            />
-            <Input
-              label="2.4 GHz Password"
-              type="text"
-              value={wifiForm.pass24}
-              onChange={(e) => setWifiForm({ ...wifiForm, pass24: e.target.value })}
-            />
-          </div>
-
-          <div className="flex justify-end space-x-2 pt-4 border-t border-slate-100">
-            <Button type="button" variant="outline" onClick={() => setIsWifiModalOpen(false)} className="text-xs">
-              Cancel
-            </Button>
-            <Button type="submit" disabled={actionLoading} className="text-xs bg-sky-600 hover:bg-sky-700 text-white font-bold">
-              Apply via TR-069
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* MODAL: RETRIGGER WHATSAPP NOTIFICATION */}
-      <Modal
-        isOpen={isRetriggerModalOpen}
-        onClose={() => setIsRetriggerModalOpen(false)}
-        title="Retrigger WhatsApp Notification"
-        subtitle={`Dispatch notification event to ${customer?.phone}`}
-      >
-        <div className="space-y-4">
+        <form onSubmit={handleCreateTicket} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Select Event Type</label>
-            <select
-              value={retriggerEventType}
-              onChange={(e) => setRetriggerEventType(e.target.value)}
-              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono font-bold"
-            >
-              <option value="PLAN_EXPIRING_1D">PLAN_EXPIRING_1D (1 Day / Tomorrow Notice)</option>
-              <option value="PLAN_EXPIRING_3D">PLAN_EXPIRING_3D (3 Days Notice)</option>
-              <option value="PLAN_EXPIRING_7D">PLAN_EXPIRING_7D (7 Days Notice)</option>
-              <option value="PLAN_EXPIRED">PLAN_EXPIRED (Lapsed Notice)</option>
-              <option value="PLAN_ACTIVATED">PLAN_ACTIVATED (Welcome Notice)</option>
-              <option value="PLAN_RENEWED">PLAN_RENEWED (Renewal Confirmation)</option>
-              <option value="PAYMENT_RECEIVED">PAYMENT_RECEIVED (Payment Receipt)</option>
-            </select>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Subject / Summary</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Optical Loss / Red LOS light on ONT"
+              value={ticketForm.title}
+              onChange={(e) => setTicketForm({ ...ticketForm, title: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
+            />
           </div>
 
-          <div className="p-3 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-900">
-            <p className="text-[11px]">
-              This explicit trigger overrides deduplication rules and sends the WhatsApp message to <strong>{customer?.phone}</strong> immediately.
-            </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Category</label>
+              <select
+                value={ticketForm.category}
+                onChange={(e) => setTicketForm({ ...ticketForm, category: e.target.value })}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold"
+              >
+                <option value="NO_INTERNET">No Internet / LOS Red</option>
+                <option value="SLOW_SPEED">Slow Speed / Latency</option>
+                <option value="WIFI_COVERAGE">Wi-Fi Range Issue</option>
+                <option value="BILLING_DISPUTE">Billing Dispute</option>
+                <option value="RELOCATION">Fiber Relocation</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Priority</label>
+              <select
+                value={ticketForm.priority}
+                onChange={(e) => setTicketForm({ ...ticketForm, priority: e.target.value })}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold"
+              >
+                <option value="low">Low Priority</option>
+                <option value="medium">Medium Priority</option>
+                <option value="high">High Priority</option>
+                <option value="critical">Critical (SLA 2h)</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Description / Call Notes</label>
+            <textarea
+              rows={3}
+              placeholder="Caller reported connection dropout since morning..."
+              value={ticketForm.description}
+              onChange={(e) => setTicketForm({ ...ticketForm, description: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
+            />
           </div>
 
           <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
-            <Button type="button" variant="outline" onClick={() => setIsRetriggerModalOpen(false)} className="text-xs">
+            <Button type="button" variant="outline" onClick={() => setIsTicketModalOpen(false)} className="text-xs">
               Cancel
             </Button>
-            <Button
-              onClick={handleRetriggerNotification}
-              disabled={actionLoading}
-              className="text-xs bg-sky-600 hover:bg-sky-700 text-white font-bold flex items-center space-x-1"
-            >
-              <Send className="w-3.5 h-3.5 mr-1" />
-              <span>Retrigger Now</span>
+            <Button type="submit" className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold">
+              Create & Assign Ticket
             </Button>
           </div>
-        </div>
+        </form>
       </Modal>
+
+      {/* MODAL: UPLOAD DOCUMENT / PHOTO */}
+      <Modal
+        isOpen={isDocModalOpen}
+        onClose={() => setIsDocModalOpen(false)}
+        title="Upload Subscriber Document / Photo"
+        subtitle="Attach KYC proofs, CAF forms, or installation site photos."
+      >
+        <form onSubmit={handleUploadDocument} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Document Label</label>
+            <input
+              type="text"
+              required
+              value={docForm.name}
+              onChange={(e) => setDocForm({ ...docForm, name: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Category</label>
+            <select
+              value={docForm.category}
+              onChange={(e) => setDocForm({ ...docForm, category: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold"
+            >
+              <option value="INSTALLATION_PHOTO">Premise ONT Installation Photo</option>
+              <option value="OPTICAL_TERMINATION">FAT Box Splice / Termination Photo</option>
+              <option value="AADHAAR_FRONT">Aadhaar Front Card</option>
+              <option value="AADHAAR_BACK">Aadhaar Back Card</option>
+              <option value="PAN_CARD">PAN Card Document</option>
+              <option value="CAF_FORM">Signed CAF Application Form</option>
+              <option value="OTHER">Other Document</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Photo / Document URL</label>
+            <input
+              type="url"
+              required
+              value={docForm.url}
+              onChange={(e) => setDocForm({ ...docForm, url: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg font-mono"
+            />
+          </div>
+
+          <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+            <Button type="button" variant="outline" onClick={() => setIsDocModalOpen(false)} className="text-xs">
+              Cancel
+            </Button>
+            <Button type="submit" className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold">
+              Save to Subscriber Vault
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL: ASSIGN STOCK ASSET */}
+      <Modal
+        isOpen={isAssetModalOpen}
+        onClose={() => setIsAssetModalOpen(false)}
+        title="Assign Hardware Stock Item"
+        subtitle="Binds an inventory item to this customer profile."
+      >
+        <form onSubmit={handleAssignAsset} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Asset Category</label>
+              <select
+                value={assetForm.category}
+                onChange={(e) => setAssetForm({ ...assetForm, category: e.target.value })}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold"
+              >
+                <option value="ONT">ONT Terminal</option>
+                <option value="ROUTER">Wi-Fi 6 Router</option>
+                <option value="SFP_TRANSCEIVER">SFP Optical Module</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Serial Number</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. GNXS-2026-991"
+                value={assetForm.serialNumber}
+                onChange={(e) => setAssetForm({ ...assetForm, serialNumber: e.target.value })}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg font-mono font-bold"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Brand</label>
+              <input
+                type="text"
+                value={assetForm.brand}
+                onChange={(e) => setAssetForm({ ...assetForm, brand: e.target.value })}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Model Name</label>
+              <input
+                type="text"
+                value={assetForm.modelName}
+                onChange={(e) => setAssetForm({ ...assetForm, modelName: e.target.value })}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+            <Button type="button" variant="outline" onClick={() => setIsAssetModalOpen(false)} className="text-xs">
+              Cancel
+            </Button>
+            <Button type="submit" className="text-xs bg-sky-600 hover:bg-sky-700 text-white font-bold">
+              Assign to Customer
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* MODAL: RETRIGGER WHATSAPP */}
+      <Modal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
+        title="Retrigger WhatsApp Notification"
+        subtitle={`Dispatches instant alert to ${customer?.phone}`}
+      >
+        <form onSubmit={handleSendWhatsApp} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Notification Event Type</label>
+            <select
+              value={whatsAppForm.eventType}
+              onChange={(e) => setWhatsAppForm({ ...whatsAppForm, eventType: e.target.value })}
+              className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-semibold"
+            >
+              <option value="PAYMENT_RECEIVED">Payment Received & Receipt</option>
+              <option value="PLAN_RENEWED">Plan Renewed Confirmation</option>
+              <option value="PLAN_EXPIRING_3D">Plan Expiring in 3 Days Reminder</option>
+              <option value="PLAN_EXPIRING_1D">Plan Expiring in 1 Day Final Reminder</option>
+              <option value="PLAN_EXPIRED">Subscription Expired Alert</option>
+            </select>
+          </div>
+
+          <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+            <Button type="button" variant="outline" onClick={() => setIsWhatsAppModalOpen(false)} className="text-xs">
+              Cancel
+            </Button>
+            <Button type="submit" className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
+              Dispatch WhatsApp Alert
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* LIGHTBOX MODAL */}
+      {selectedPhoto && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setSelectedPhoto(null)}
+        >
+          <div className="relative max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl bg-black p-2">
+            <img src={selectedPhoto} alt="Preview" className="max-w-full max-h-[85vh] object-contain rounded-xl" />
+            <button
+              onClick={() => setSelectedPhoto(null)}
+              className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white rounded-full p-2 text-xs font-bold font-mono"
+            >
+              ✕ Close
+            </button>
+          </div>
+        </div>
+      )}
     </Shell>
   );
 };

@@ -462,6 +462,33 @@ class ApiService {
     return this.request(`/operator/customers/${customerId}/360`);
   }
 
+  async uploadCustomerDocument(customerId: string, payload: any) {
+    return this.request(`/operator/customers/${customerId}/documents`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteCustomerDocument(customerId: string, docId: string) {
+    return this.request(`/operator/customers/${customerId}/documents/${docId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async assignCustomerAsset(customerId: string, payload: any) {
+    return this.request(`/operator/customers/${customerId}/assets/assign`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async logCustomerUnmaskAudit(customerId: string, fieldName: string) {
+    return this.request(`/operator/customers/${customerId}/unmask-audit`, {
+      method: 'POST',
+      body: JSON.stringify({ fieldName }),
+    });
+  }
+
   async createOperatorCustomerTicket(customerId: string, payload: any) {
     return this.request(`/operator/customers/${customerId}/tickets`, {
       method: 'POST',

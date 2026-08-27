@@ -249,7 +249,7 @@ operatorRouter.post('/customers', async (req: AuthenticatedRequest, res: Respons
 });
 
 /**
- * 7.3 Customer 360 Unified View
+ * 7.3 Customer 360 Operations Workspace Unified View
  */
 operatorRouter.get('/customers/:id/360', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -257,6 +257,79 @@ operatorRouter.get('/customers/:id/360', async (req: AuthenticatedRequest, res: 
     return res.json({ success: true, data: customer360 });
   } catch (error: any) {
     return res.status(404).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 7.4 Customer Document Upload (KYC / Installation Photos)
+ */
+operatorRouter.post('/customers/:id/documents', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { name, category, url, fileSizeBytes } = req.body;
+    if (!name || !url) {
+      return res.status(400).json({ success: false, error: 'Document name and URL are required.' });
+    }
+
+    const doc = await CustomerService.addCustomerDocument(
+      req.params.id,
+      { name, category: category || 'OTHER', url, fileSizeBytes },
+      { id: req.user?.id || 'admin', email: req.user?.email || 'operator@isp.com', role: req.user?.role || 'operator_admin' }
+    );
+
+    return res.json({ success: true, document: doc });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 7.5 Customer Document Delete
+ */
+operatorRouter.delete('/customers/:id/documents/:docId', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await CustomerService.removeCustomerDocument(
+      req.params.id,
+      req.params.docId,
+      { id: req.user?.id || 'admin', email: req.user?.email || 'operator@isp.com', role: req.user?.role || 'operator_admin' }
+    );
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 7.6 Assign Warehouse Hardware Asset to Customer
+ */
+operatorRouter.post('/customers/:id/assets/assign', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const asset = await CustomerService.assignCustomerAsset(
+      req.params.id,
+      req.body,
+      { id: req.user?.id || 'admin', email: req.user?.email || 'operator@isp.com', role: req.user?.role || 'operator_admin' }
+    );
+    return res.json({ success: true, asset });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 7.7 Log PII / Password Unmask Audit Event
+ */
+operatorRouter.post('/customers/:id/unmask-audit', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { fieldName } = req.body;
+    const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+    const result = await CustomerService.logUnmaskAudit(
+      req.params.id,
+      fieldName || 'CREDENTIALS',
+      { id: req.user?.id || 'admin', email: req.user?.email || 'operator@isp.com', role: req.user?.role || 'operator_admin' },
+      clientIp
+    );
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
   }
 });
 

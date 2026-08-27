@@ -50,6 +50,18 @@ export interface ICustomerKyc {
   verifiedAt?: Date;
 }
 
+export interface ICustomerDocument {
+  documentId: string;
+  name: string;
+  category: 'AADHAAR_FRONT' | 'AADHAAR_BACK' | 'PAN_CARD' | 'CAF_FORM' | 'INSTALLATION_PHOTO' | 'OPTICAL_TERMINATION' | 'OTHER';
+  url: string;
+  fileSizeBytes?: number;
+  uploadedAt: Date;
+  uploadedByActorId?: string;
+  uploadedByEmail?: string;
+  isVerified?: boolean;
+}
+
 export interface ICustomer extends Document {
   _id: Types.ObjectId;
   tenantId: Types.ObjectId;
@@ -72,6 +84,7 @@ export interface ICustomer extends Document {
     };
   };
   kyc?: ICustomerKyc;
+  documents?: ICustomerDocument[];
   assignedDeviceId?: Types.ObjectId; // References Device (ONT)
   fiberDropInfo: {
     fatBoxId?: Types.ObjectId; // References FiberNode (FAT/NAP)
@@ -120,6 +133,31 @@ const CustomerSchema = new Schema<ICustomer>(
       status: { type: String, enum: ['verified', 'pending', 'rejected'], default: 'verified' },
       verifiedAt: { type: Date, default: Date.now },
     },
+    documents: [
+      {
+        documentId: { type: String, required: true },
+        name: { type: String, required: true },
+        category: {
+          type: String,
+          enum: [
+            'AADHAAR_FRONT',
+            'AADHAAR_BACK',
+            'PAN_CARD',
+            'CAF_FORM',
+            'INSTALLATION_PHOTO',
+            'OPTICAL_TERMINATION',
+            'OTHER',
+          ],
+          default: 'OTHER',
+        },
+        url: { type: String, required: true },
+        fileSizeBytes: { type: Number },
+        uploadedAt: { type: Date, default: () => new Date() },
+        uploadedByActorId: { type: String },
+        uploadedByEmail: { type: String },
+        isVerified: { type: Boolean, default: true },
+      },
+    ],
     assignedDeviceId: { type: Schema.Types.ObjectId, ref: 'Device', index: true },
     fiberDropInfo: {
       fatBoxId: { type: Schema.Types.ObjectId, ref: 'FiberNode' },
