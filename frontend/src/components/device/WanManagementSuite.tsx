@@ -693,7 +693,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                 </div>
 
                 {/* Row 5: Binding Options (FE, GE, SSID1, SSID2, SSID3, SSID4) - Only for INTERNET / Bridge */}
-                {!isTr069Service && (
+                {!isTr069Service && !isVoipService && (
                   <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 pt-2 border-t border-slate-200">
                     <label className="text-xs font-bold text-slate-700 pt-1">Binding Option:</label>
                     <div className="sm:col-span-2 space-y-2">
@@ -727,7 +727,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                 )}
 
                 {/* Row 6: Enable DHCP Server (Route Mode Only) */}
-                {!isBridgeMode && !isTr069Service && (
+                {!isBridgeMode && !isTr069Service && !isVoipService && (
                   <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
                     <label className="text-xs font-bold text-slate-700">Enable DHCP Server:</label>
                     <div className="sm:col-span-2">
@@ -925,7 +925,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                       />
                     </div>
 
-                    {!isBridgeMode && !isTr069Service && (
+                    {!isBridgeMode && !isTr069Service && !isVoipService && (
                       <div className="flex items-end pb-1.5">
                         <label className="flex items-center space-x-2 cursor-pointer">
                           <input
