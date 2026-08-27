@@ -5116,6 +5116,62 @@ operatorRouter.get('/tickets', async (req: AuthenticatedRequest, res: Response) 
   }
 });
 
+operatorRouter.post('/customers/:id/tickets', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+    const { subject, description, category, priority, assignedToUserId } = req.body;
+
+    const customer = await Customer.findOne({ _id: id, tenantId });
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+
+    const ticketNumber = `TICK-${Date.now().toString().slice(-6)}`;
+
+    const ticket = await Ticket.create({
+      tenantId,
+      ticketNumber,
+      customerId: customer._id,
+      subject: subject || 'Customer Support Request',
+      description: description || 'Call support complaint logged.',
+      category: category || 'NO_INTERNET',
+      priority: priority || 'medium',
+      status: 'open',
+      assignedToUserId: assignedToUserId ? new Types.ObjectId(assignedToUserId) : undefined,
+      slaDueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      comments: [
+        {
+          authorId: new Types.ObjectId(req.user!.id),
+          authorRole: req.user!.role,
+          authorName: req.user!.email,
+          message: `Ticket opened during live call support: ${description || subject}`,
+          isInternalOnly: false,
+          createdAt: new Date(),
+        },
+      ],
+    });
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: 'TICKET_CREATED',
+      targetResource: 'Ticket',
+      targetId: ticket._id.toString(),
+      targetIdentifier: `${ticket.ticketNumber} (${customer.fullName})`,
+      correlationId: req.correlationId || `tick_${Date.now()}`,
+    });
+
+    return res.status(201).json({
+      success: true,
+      ticket,
+      message: `Support ticket ${ticket.ticketNumber} logged successfully.`,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 /**
  * Technicians Fleet
  */

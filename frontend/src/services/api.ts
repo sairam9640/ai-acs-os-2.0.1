@@ -462,6 +462,13 @@ class ApiService {
     return this.request(`/operator/customers/${customerId}/360`);
   }
 
+  async createOperatorCustomerTicket(customerId: string, payload: any) {
+    return this.request(`/operator/customers/${customerId}/tickets`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getDevices(params?: any) {
     const query = new URLSearchParams(params as any).toString();
     return this.request(`/operator/devices?${query}`);
