@@ -1292,36 +1292,33 @@ function buildTr069WanParams(profile: any, device: any): Array<[string, any, str
     }
   } else {
     // 100% Safe Broadband Forum TR-098 Standard Data Model (Zero Fault 9005 / Fault 9003 risk)
-    const isPppoe = profile.connectionType === 'PPPoE' || profile.linkMode === 'PPP' || (!profile.connectionType && !profile.linkMode);
+    const isPppoe = profile.connectionType === 'PPPoE' || profile.linkMode === 'PPP';
     const baseConn = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
     const basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.${baseConn}`;
 
-    if (profile.enableWan !== undefined) {
-      params.push([`${basePath}.Enable`, Boolean(profile.enableWan), 'xsd:boolean']);
-    }
-
     if (isPppoe) {
       if (profile.pppoeUsername) {
-        params.push([`${basePath}.Username`, profile.pppoeUsername, 'xsd:string']);
+        params.push([`${basePath}.Username`, String(profile.pppoeUsername), 'xsd:string']);
       }
       if (profile.pppoePasswordEncrypted || profile.pppoePassword) {
-        params.push([`${basePath}.Password`, profile.pppoePasswordEncrypted || profile.pppoePassword, 'xsd:string']);
+        params.push([`${basePath}.Password`, String(profile.pppoePasswordEncrypted || profile.pppoePassword), 'xsd:string']);
       }
-      params.push([`${basePath}.NATEnabled`, profile.natEnabled !== false, 'xsd:boolean']);
-      params.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
-
+      if (profile.natEnabled !== undefined) {
+        params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
+      }
       if (profile.vlanEnabled !== false && profile.vlanId) {
         params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
       }
     } else {
-      // IP Mode (Static IP or DHCP)
-      params.push([`${basePath}.NATEnabled`, profile.natEnabled !== false, 'xsd:boolean']);
-      params.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
+      // IP Connection Mode (DHCP / Static IP / TR-069 Management)
+      if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069') {
+        params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
+      }
 
       if (profile.connectionType === 'Static' || profile.ipAssignment === 'Static') {
-        if (profile.ipAddress) params.push([`${basePath}.ExternalIPAddress`, profile.ipAddress, 'xsd:string']);
-        if (profile.subnetMask) params.push([`${basePath}.SubnetMask`, profile.subnetMask, 'xsd:string']);
-        if (profile.gateway) params.push([`${basePath}.DefaultGateway`, profile.gateway, 'xsd:string']);
+        if (profile.ipAddress) params.push([`${basePath}.ExternalIPAddress`, String(profile.ipAddress), 'xsd:string']);
+        if (profile.subnetMask) params.push([`${basePath}.SubnetMask`, String(profile.subnetMask), 'xsd:string']);
+        if (profile.gateway) params.push([`${basePath}.DefaultGateway`, String(profile.gateway), 'xsd:string']);
         if (profile.primaryDns) {
           const dnsStr = `${profile.primaryDns}${profile.secondaryDns ? `,${profile.secondaryDns}` : ''}`;
           params.push([`${basePath}.DNSServers`, dnsStr, 'xsd:string']);
