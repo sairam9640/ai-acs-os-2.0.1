@@ -1372,37 +1372,55 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
       }] as any;
       await device.save();
     }
-
-    const profiles = device.wanProfiles.map((p: any, idx: number) => ({
-      _id: p._id ? String(p._id) : String(idx),
-      index: idx,
-      name: p.name || `WAN_Profile_${idx + 1}`,
-      connectionType: p.connectionType || 'PPPoE',
-      serviceType: p.serviceType || 'INTERNET',
-      serviceUsage: p.serviceUsage || {
-        internet: p.serviceType === 'INTERNET' || !p.serviceType,
-        voip: p.serviceType === 'VOIP',
-        tr069: p.serviceType === 'TR069',
-        iptvDhcp: p.serviceType === 'IPTV',
-        iptvBridge: false,
-        other: false,
-      },
-      vlanEnabled: p.vlanEnabled !== undefined ? Boolean(p.vlanEnabled) : true,
-      vlanId: p.vlanId !== undefined ? Number(p.vlanId) : 100,
-      vlanPriority8021p: p.vlanPriority8021p !== undefined ? Number(p.vlanPriority8021p) : 0,
-      mtu: p.mtu || 1492,
-      natEnabled: p.natEnabled !== undefined ? Boolean(p.natEnabled) : true,
-      firewallEnabled: p.firewallEnabled !== undefined ? Boolean(p.firewallEnabled) : true,
-      wanPortBindings: p.wanPortBindings || ['WAN1'],
-      lanPortBindings: p.lanPortBindings || ['LAN1', 'LAN2', 'LAN3', 'LAN4'],
-      ssidBindings: p.ssidBindings || ['2.4GHz SSID-1', '5GHz SSID-1'],
-      pppoeUsername: p.pppoeUsername || '',
-      passwordConfigured: Boolean(p.pppoePasswordEncrypted || p.pppoePassword),
-      pppoePasswordMasked: '••••••••',
-      ipAddress: p.ipAddress || null,
-      status: p.status || 'Connected',
-      isDefault: p.isDefault !== undefined ? Boolean(p.isDefault) : idx === 0,
-    }));
+    const is2Port = /4410|PLATINUM[-_ ]?4410|GX[-_ ]?4410|EARTH|1010|1001/i.test(String(device.modelName || ''));
+    const profiles = device.wanProfiles.map((p: any, idx: number) => {
+      const isIpConn = p.connectionType === 'IP_Routed' || p.connectionType === 'IPoE_DHCP' || p.connectionType === 'Static' || p.linkMode === 'IP';
+      return {
+        _id: p._id ? String(p._id) : String(idx),
+        index: idx,
+        name: p.name || (isIpConn ? `WAN_IP_${idx + 1}` : `WAN_PPP_${idx + 1}`),
+        transMode: p.transMode || 'PON',
+        mode: p.mode || (p.connectionType === 'Bridge' ? 'Bridge' : 'Route'),
+        enableWan: p.enableWan !== false,
+        bearerService: p.bearerService || p.serviceType || (isIpConn ? 'TR069' : 'INTERNET'),
+        linkMode: isIpConn ? 'IP' : 'PPP',
+        ipProtocol: p.ipProtocol || 'IPv4',
+        ipAssignment: p.ipAssignment || (p.connectionType === 'Static' ? 'Static' : 'DHCP'),
+        connectionType: p.connectionType || (isIpConn ? 'IPoE_DHCP' : 'PPPoE'),
+        serviceType: p.serviceType || (isIpConn ? 'TR069' : 'INTERNET'),
+        serviceUsage: p.serviceUsage || {
+          internet: p.serviceType === 'INTERNET' || !p.serviceType,
+          voip: p.serviceType === 'VOIP',
+          tr069: p.serviceType === 'TR069' || isIpConn,
+          iptvDhcp: p.serviceType === 'IPTV',
+          iptvBridge: false,
+          other: false,
+        },
+        vlanMode: p.vlanMode || (p.vlanEnabled !== false && p.vlanId ? 'TAG' : 'UNTAG'),
+        vlanEnabled: p.vlanEnabled !== undefined ? Boolean(p.vlanEnabled) : true,
+        vlanId: p.vlanId !== undefined ? Number(p.vlanId) : 100,
+        vlanPriority8021p: p.vlanPriority8021p !== undefined ? Number(p.vlanPriority8021p) : 0,
+        multicastVlanId: p.multicastVlanId !== undefined ? Number(p.multicastVlanId) : 0,
+        enableDhcpServer: p.enableDhcpServer !== false,
+        mtu: p.mtu || (isIpConn ? 1500 : 1492),
+        natEnabled: p.natEnabled !== undefined ? Boolean(p.natEnabled) : true,
+        firewallEnabled: p.firewallEnabled !== undefined ? Boolean(p.firewallEnabled) : true,
+        dnsStatus: p.dnsStatus || 'Disable',
+        primaryDns: p.primaryDns || '',
+        secondaryDns: p.secondaryDns || '',
+        wanPortBindings: p.wanPortBindings || ['WAN1'],
+        lanPortBindings: p.lanPortBindings || (is2Port ? ['FE', 'GE'] : ['LAN1', 'LAN2']),
+        ssidBindings: p.ssidBindings || ['SSID1'],
+        pppoeUsername: p.pppoeUsername || '',
+        passwordConfigured: Boolean(p.pppoePasswordEncrypted || p.pppoePassword),
+        pppoePasswordMasked: '••••••••',
+        ipAddress: p.ipAddress || (device.ipAddress || '192.168.22.170'),
+        subnetMask: p.subnetMask || '255.255.255.0',
+        gateway: p.gateway || '192.168.22.1',
+        status: p.status || 'Connected',
+        isDefault: p.isDefault !== undefined ? Boolean(p.isDefault) : idx === 0,
+      };
+    });
 
     return res.json({ success: true, profiles, wanProfiles: profiles });
   } catch (error: any) {
