@@ -150,9 +150,10 @@ export class CwmpVendorProfiles {
    */
   static isDualBandModel(vendor?: string, modelName?: string, productClass?: string): boolean {
     const text = `${vendor || ''} ${modelName || ''} ${productClass || ''}`.toLowerCase();
-    if (/earth[-_ ]?2022/i.test(text)) return false; // Genexis Earth-2022 is single-band 2.4 GHz
-    if (/titanium[-_ ]?2122|2122a|platinum|genexis/i.test(text)) return true;
-    if (/eg8145|hg8145|optixstar|f670|f680|v2804|archer|xc220|g-140w|g-240w/i.test(text)) return true;
+    // Single-Band 2.4 GHz Models:
+    if (/4410|gx[-_ ]?4410|platinum[-_ ]?4410|earth[-_ ]?2022|st[-_ ]?1001|sy[-_ ]?gpon[-_ ]?1010|single/i.test(text)) return false;
+    // Dual-Band 2.4G + 5G Models:
+    if (/titanium[-_ ]?2122|2122a|platinum[-_ ]?4420|eg8145|hg8145|optixstar|f670|f680|v2804|archer|xc220|g-140w|g-240w/i.test(text)) return true;
     return false;
   }
 
