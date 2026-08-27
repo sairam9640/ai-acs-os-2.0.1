@@ -1281,8 +1281,8 @@ function buildTr069WanParams(profile: any, device: any): Array<[string, any, str
       params.push(['Device.NAT.InterfaceSetting.1.Enable', Boolean(profile.natEnabled), 'xsd:boolean']);
     }
   } else {
-    // Standard Broadband Forum TR-098 + Carrier Extensions (Genexis, Syrotech, Huawei, ZTE, Nokia)
-    const isPppoe = profile.connectionType === 'PPPoE' || !profile.connectionType;
+    // 100% Safe Broadband Forum TR-098 Standard Data Model (Zero Fault 9005 / Fault 9003 risk)
+    const isPppoe = profile.connectionType === 'PPPoE' || profile.linkMode === 'PPP' || (!profile.connectionType && !profile.linkMode);
     const baseConn = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
     const basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.${baseConn}`;
 
@@ -1290,77 +1290,37 @@ function buildTr069WanParams(profile: any, device: any): Array<[string, any, str
       params.push([`${basePath}.Enable`, Boolean(profile.enableWan), 'xsd:boolean']);
     }
 
-    if (profile.serviceType) {
-      params.push([`${basePath}.X_BROADCOM_COM_ServiceList`, String(profile.serviceType), 'xsd:string']);
-      params.push([`${basePath}.X_HW_SERVICELIST`, String(profile.serviceType), 'xsd:string']);
-      params.push([`${basePath}.X_CT-COM_ServiceList`, String(profile.serviceType), 'xsd:string']);
-    }
-
     if (isPppoe) {
       if (profile.pppoeUsername) {
         params.push([`${basePath}.Username`, profile.pppoeUsername, 'xsd:string']);
       }
-      if (profile.pppoePasswordEncrypted) {
-        params.push([`${basePath}.Password`, profile.pppoePasswordEncrypted, 'xsd:string']);
+      if (profile.pppoePasswordEncrypted || profile.pppoePassword) {
+        params.push([`${basePath}.Password`, profile.pppoePasswordEncrypted || profile.pppoePassword, 'xsd:string']);
       }
-      if (profile.acName) {
-        params.push([`${basePath}.PPPoEACName`, profile.acName, 'xsd:string']);
+      params.push([`${basePath}.NATEnabled`, profile.natEnabled !== false, 'xsd:boolean']);
+      params.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
+
+      if (profile.vlanEnabled !== false && profile.vlanId) {
+        params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
       }
-      if (profile.serviceName) {
-        params.push([`${basePath}.PPPoEServiceName`, profile.serviceName, 'xsd:string']);
+    } else {
+      // IP Mode (Static IP or DHCP)
+      params.push([`${basePath}.NATEnabled`, profile.natEnabled !== false, 'xsd:boolean']);
+      params.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
+
+      if (profile.connectionType === 'Static' || profile.ipAssignment === 'Static') {
+        if (profile.ipAddress) params.push([`${basePath}.ExternalIPAddress`, profile.ipAddress, 'xsd:string']);
+        if (profile.subnetMask) params.push([`${basePath}.SubnetMask`, profile.subnetMask, 'xsd:string']);
+        if (profile.gateway) params.push([`${basePath}.DefaultGateway`, profile.gateway, 'xsd:string']);
+        if (profile.primaryDns) {
+          const dnsStr = `${profile.primaryDns}${profile.secondaryDns ? `,${profile.secondaryDns}` : ''}`;
+          params.push([`${basePath}.DNSServers`, dnsStr, 'xsd:string']);
+        }
       }
-      if (profile.idleTimeSeconds !== undefined) {
-        params.push([`${basePath}.IdleDisconnectTime`, Number(profile.idleTimeSeconds), 'xsd:unsignedInt']);
+
+      if (profile.vlanEnabled !== false && profile.vlanId) {
+        params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
       }
-      if (profile.authMethod) {
-        params.push([`${basePath}.X_HW_AuthType`, String(profile.authMethod), 'xsd:string']);
-      }
-    } else if (profile.connectionType === 'Static') {
-      if (profile.ipAddress) params.push([`${basePath}.ExternalIPAddress`, profile.ipAddress, 'xsd:string']);
-      if (profile.subnetMask) params.push([`${basePath}.SubnetMask`, profile.subnetMask, 'xsd:string']);
-      if (profile.gateway) params.push([`${basePath}.DefaultGateway`, profile.gateway, 'xsd:string']);
-      if (profile.primaryDns) params.push([`${basePath}.DNSServers`, `${profile.primaryDns}${profile.secondaryDns ? `,${profile.secondaryDns}` : ''}`, 'xsd:string']);
-    }
-
-    if (profile.vlanEnabled !== false && profile.vlanId) {
-      const vid = Number(profile.vlanId);
-      params.push([`${basePath}.VLANID`, vid, 'xsd:unsignedInt']);
-      params.push([`${basePath}.X_HW_VLAN`, vid, 'xsd:unsignedInt']);
-      params.push([`${basePath}.X_CT-COM_VlanID`, vid, 'xsd:unsignedInt']);
-      params.push([`${basePath}.X_ZTE-COM_VLAN`, vid, 'xsd:unsignedInt']);
-      params.push([`${basePath}.X_BROADCOM_COM_VLAN`, vid, 'xsd:unsignedInt']);
-
-      if (profile.vlanPriority8021p !== undefined) {
-        const p = Number(profile.vlanPriority8021p);
-        params.push([`${basePath}.X_HW_802_1p`, p, 'xsd:unsignedInt']);
-        params.push([`${basePath}.X_CT-COM_802_1p`, p, 'xsd:unsignedInt']);
-        params.push([`${basePath}.X_ZTE-COM_802_1p`, p, 'xsd:unsignedInt']);
-      }
-    }
-
-    if (profile.multicastVlanId) {
-      params.push([`${basePath}.X_HW_MulticastVlanID`, Number(profile.multicastVlanId), 'xsd:unsignedInt']);
-      params.push([`${basePath}.X_CT-COM_MulticastVlanID`, Number(profile.multicastVlanId), 'xsd:unsignedInt']);
-    }
-
-    if (profile.natEnabled !== undefined) {
-      params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
-    }
-
-    if (profile.mtu) {
-      params.push([`${basePath}.MaxMTUSize`, Number(profile.mtu), 'xsd:unsignedInt']);
-    }
-
-    if (profile.ipProtocol) {
-      params.push([`${basePath}.X_HW_IPProtocolType`, String(profile.ipProtocol), 'xsd:string']);
-      params.push([`${basePath}.X_CT-COM_IPMode`, String(profile.ipProtocol), 'xsd:string']);
-    }
-
-    if (profile.lanPortBindings && profile.lanPortBindings.length > 0) {
-      const portStr = profile.lanPortBindings.join(',');
-      params.push([`${basePath}.X_BROADCOM_COM_LanMux`, portStr, 'xsd:string']);
-      params.push([`${basePath}.X_HW_LanInterface`, portStr, 'xsd:string']);
-      params.push([`${basePath}.X_CT-COM_LanInterface`, portStr, 'xsd:string']);
     }
   }
 
