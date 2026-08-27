@@ -224,6 +224,15 @@ export class CwmpVendorProfiles {
    */
   static getOpticalCandidates(vendor: CpeVendor): string[] {
     switch (vendor) {
+      case 'SYROTECH':
+        return [
+          'InternetGatewayDevice.X_SyroTech.GPON.OpticalRxPower',
+          'InternetGatewayDevice.WANDevice.1.X_SYROTECH_OpticalInfo.RxPower',
+          'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
+          'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower',
+          'InternetGatewayDevice.WANDevice.1.WANGponInterfaceConfig.RXPower',
+        ];
+
       case 'HUAWEI':
         return [
           'InternetGatewayDevice.WANDevice.1.X_HW_DEBUG.SMP.ONT.OpticalRxPower',
@@ -233,6 +242,7 @@ export class CwmpVendorProfiles {
 
       case 'ZTE':
         return [
+          'InternetGatewayDevice.X_ZTE-COM_Gpon.OpticalPowerRx',
           'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_WANPONInterfaceConfig.RXPower',
           'InternetGatewayDevice.WANDevice.1.X_ZTE-COM_GponInterfaceConfig.RXPower',
         ];
@@ -253,6 +263,7 @@ export class CwmpVendorProfiles {
 
       case 'NOKIA':
         return [
+          'InternetGatewayDevice.X_00000C_Gpon.OpticalPowerRx',
           'InternetGatewayDevice.WANDevice.1.X_NOKIA_OpticalInfo.RxPower',
           'InternetGatewayDevice.WANDevice.1.X_ALU_COM_OntOpticalInfo.ReceivePower',
           'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
@@ -265,8 +276,12 @@ export class CwmpVendorProfiles {
 
       case 'CHINA_TELECOM':
       default:
-        // Syrotech, Netlink, Genexis, C-Data, DBC, Realtek, Econet
+        // Syrotech, Netlink, Genexis, C-Data, DBC, Realtek, Econet, RL Tech
         return [
+          'InternetGatewayDevice.X_SyroTech.GPON.OpticalRxPower',
+          'InternetGatewayDevice.X_DBC.GPON.OpticalRxPower',
+          'InternetGatewayDevice.X_Netlink.GPON.OpticalRxPower',
+          'InternetGatewayDevice.X_RL_Tech.GPON.OpticalRxPower',
           'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower',
           'InternetGatewayDevice.WANDevice.1.X_CMCC_EponInterfaceConfig.RXPower',
           'InternetGatewayDevice.WANDevice.1.WANGponInterfaceConfig.RXPower',
@@ -288,6 +303,69 @@ export class CwmpVendorProfiles {
    * Given a confirmed working optical RX path, returns the corresponding companion metrics in that same tree.
    */
   static getOpticalCompanionPaths(rxPath: string): string[] {
+    if (rxPath.includes('X_SyroTech.GPON')) {
+      return [
+        'InternetGatewayDevice.X_SyroTech.GPON.OpticalTxPower',
+        'InternetGatewayDevice.X_SyroTech.GPON.ONU_ID',
+        'InternetGatewayDevice.X_SyroTech.GPON.GEM_Port',
+        'InternetGatewayDevice.X_SyroTech.GPON.LOID',
+        'InternetGatewayDevice.X_SyroTech.GPON.PLOAMStatus',
+      ];
+    }
+
+    if (rxPath.includes('X_DBC.GPON')) {
+      return [
+        'InternetGatewayDevice.X_DBC.GPON.OpticalTxPower',
+        'InternetGatewayDevice.X_DBC.GPON.ONU_ID',
+        'InternetGatewayDevice.X_DBC.GPON.GEM_Port',
+        'InternetGatewayDevice.X_DBC.GPON.LOID',
+        'InternetGatewayDevice.X_DBC.GPON.PLOAMStatus',
+      ];
+    }
+
+    if (rxPath.includes('X_Netlink.GPON')) {
+      return [
+        'InternetGatewayDevice.X_Netlink.GPON.OpticalTxPower',
+        'InternetGatewayDevice.X_Netlink.GPON.ONU_ID',
+        'InternetGatewayDevice.X_Netlink.GPON.GEM_Port',
+        'InternetGatewayDevice.X_Netlink.GPON.LOID',
+        'InternetGatewayDevice.X_Netlink.GPON.PLOAMStatus',
+      ];
+    }
+
+    if (rxPath.includes('X_RL_Tech.GPON')) {
+      return [
+        'InternetGatewayDevice.X_RL_Tech.GPON.OpticalTxPower',
+        'InternetGatewayDevice.X_RL_Tech.GPON.ONU_ID',
+        'InternetGatewayDevice.X_RL_Tech.GPON.GEM_Port',
+        'InternetGatewayDevice.X_RL_Tech.GPON.LOID',
+        'InternetGatewayDevice.X_RL_Tech.GPON.PLOAMStatus',
+      ];
+    }
+
+    if (rxPath.includes('X_00000C_Gpon')) {
+      return [
+        'InternetGatewayDevice.X_00000C_Gpon.OpticalPowerTx',
+        'InternetGatewayDevice.X_00000C_Gpon.ONU_ID',
+        'InternetGatewayDevice.X_00000C_Gpon.GEM_Port',
+        'InternetGatewayDevice.X_00000C_Gpon.LOID',
+        'InternetGatewayDevice.X_00000C_Gpon.PLOAMState',
+      ];
+    }
+
+    if (rxPath.includes('X_ZTE-COM_Gpon')) {
+      return [
+        'InternetGatewayDevice.X_ZTE-COM_Gpon.OpticalPowerTx',
+        'InternetGatewayDevice.X_ZTE-COM_Gpon.ONU_ID',
+        'InternetGatewayDevice.X_ZTE-COM_Gpon.GEM_Port',
+        'InternetGatewayDevice.X_ZTE-COM_Gpon.LOID',
+        'InternetGatewayDevice.X_ZTE-COM_Gpon.PLOAMState',
+        'InternetGatewayDevice.X_ZTE-COM_Gpon.Temperature',
+        'InternetGatewayDevice.X_ZTE-COM_Gpon.Voltage',
+        'InternetGatewayDevice.X_ZTE-COM_Gpon.BiasCurrent',
+      ];
+    }
+
     if (rxPath.includes('X_CT-COM_EponInterfaceConfig')) {
       return [
         'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.TXPower',

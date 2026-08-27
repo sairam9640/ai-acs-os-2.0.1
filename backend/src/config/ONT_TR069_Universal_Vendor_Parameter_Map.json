@@ -1,0 +1,948 @@
+{
+  "_meta": {
+    "version": "2.0",
+    "description": "Universal + Vendor-Specific TR-069 Parameter Map for ONT/ONU \u2014 Anti-Gravity ACS Engine",
+    "date": "2026-08-27",
+    "note": "UNIVERSAL = 100% safe on all TR-098 IGD (zero Fault 9005). VENDOR = common paths \u2014 validate via GetParameterNames before bulk use.",
+    "vendors": [
+      "Syro Tech",
+      "DBC",
+      "Netlink Genesis",
+      "Nokia",
+      "ZTE",
+      "R L Tech"
+    ]
+  },
+  "universal_baseline": {
+    "description": "Mandatory TR-098 parameters. Every IGD MUST implement these. Safe to query blindly.",
+    "device_identity": [
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.Manufacturer",
+        "type": "string",
+        "access": "R",
+        "category": "device_info"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.ManufacturerOUI",
+        "type": "string",
+        "access": "R",
+        "category": "device_info"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.ModelName",
+        "type": "string",
+        "access": "R",
+        "category": "device_info"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.Description",
+        "type": "string",
+        "access": "R",
+        "category": "device_info"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.SerialNumber",
+        "type": "string",
+        "access": "R",
+        "category": "device_info"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.HardwareVersion",
+        "type": "string",
+        "access": "R",
+        "category": "device_info"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.SoftwareVersion",
+        "type": "string",
+        "access": "R",
+        "category": "device_info"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.UpTime",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "device_info"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.DeviceStatus",
+        "type": "string",
+        "access": "R",
+        "category": "device_info"
+      }
+    ],
+    "management_server": [
+      {
+        "path": "InternetGatewayDevice.ManagementServer.URL",
+        "type": "string",
+        "access": "W",
+        "category": "acs"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.Username",
+        "type": "string",
+        "access": "W",
+        "category": "acs"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.PeriodicInformEnable",
+        "type": "boolean",
+        "access": "W",
+        "category": "acs"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.PeriodicInformInterval",
+        "type": "unsignedInt",
+        "access": "W",
+        "category": "acs"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.ConnectionRequestURL",
+        "type": "string",
+        "access": "R",
+        "category": "acs"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.ParameterKey",
+        "type": "string",
+        "access": "R",
+        "category": "acs"
+      }
+    ],
+    "wan_common": [
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.EnabledForInternet",
+        "type": "boolean",
+        "access": "W",
+        "category": "wan"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.WANAccessType",
+        "type": "string",
+        "access": "R",
+        "category": "wan"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.Layer1UpstreamMaxBitRate",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.Layer1DownstreamMaxBitRate",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.PhysicalLinkStatus",
+        "type": "string",
+        "access": "R",
+        "category": "wan"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalBytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalBytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalPacketsSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalPacketsReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.NumberOfActiveConnections",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan"
+      }
+    ],
+    "wan_ip_connection": [
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Enable",
+        "type": "boolean",
+        "access": "W",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionType",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.NATEnabled",
+        "type": "boolean",
+        "access": "W",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.AddressingType",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSEnabled",
+        "type": "boolean",
+        "access": "W",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.DNSServers",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.MACAddress",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ip"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.PortMappingNumberOfEntries",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_ip"
+      }
+    ],
+    "wan_ppp_connection": [
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Enable",
+        "type": "boolean",
+        "access": "W",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionType",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Name",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.NATEnabled",
+        "type": "boolean",
+        "access": "W",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Password",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.RemoteIPAddress",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.DNSServers",
+        "type": "string",
+        "access": "W",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.PPPAuthenticationProtocol",
+        "type": "string",
+        "access": "R",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.PPPLCPEcho",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_ppp"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.PPPLCPEchoRetry",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_ppp"
+      }
+    ],
+    "wan_stats": [
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Stats.EthernetBytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Stats.EthernetBytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Stats.EthernetPacketsSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Stats.EthernetPacketsReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Stats.EthernetBytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Stats.EthernetBytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Stats.EthernetPacketsSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Stats.EthernetPacketsReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wan_stats"
+      }
+    ],
+    "lan_ethernet": [
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceNumberOfEntries",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Enable",
+        "type": "boolean",
+        "access": "W",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Status",
+        "type": "string",
+        "access": "R",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress",
+        "type": "string",
+        "access": "R",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MaxBitRate",
+        "type": "string",
+        "access": "W",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.DuplexMode",
+        "type": "string",
+        "access": "W",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.BytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.BytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.PacketsSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.PacketsReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.ErrorsSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.ErrorsReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2.Status",
+        "type": "string",
+        "access": "R",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2.Stats.BytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2.Stats.BytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3.Status",
+        "type": "string",
+        "access": "R",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3.Stats.BytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3.Stats.BytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4.Status",
+        "type": "string",
+        "access": "R",
+        "category": "lan_eth"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4.Stats.BytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4.Stats.BytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_stats"
+      }
+    ],
+    "lan_hosts": [
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "lan_hosts"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.IPAddress",
+        "type": "string",
+        "access": "R",
+        "category": "lan_hosts"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.MACAddress",
+        "type": "string",
+        "access": "R",
+        "category": "lan_hosts"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.HostName",
+        "type": "string",
+        "access": "R",
+        "category": "lan_hosts"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.InterfaceType",
+        "type": "string",
+        "access": "R",
+        "category": "lan_hosts"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.Active",
+        "type": "boolean",
+        "access": "R",
+        "category": "lan_hosts"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.AddressSource",
+        "type": "string",
+        "access": "R",
+        "category": "lan_hosts"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.LeaseTimeRemaining",
+        "type": "int",
+        "access": "R",
+        "category": "lan_hosts"
+      }
+    ],
+    "wifi": [
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANWLANConfigurationNumberOfEntries",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable",
+        "type": "boolean",
+        "access": "W",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Status",
+        "type": "string",
+        "access": "R",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BSSID",
+        "type": "string",
+        "access": "R",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID",
+        "type": "string",
+        "access": "W",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel",
+        "type": "unsignedInt",
+        "access": "W",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Standard",
+        "type": "string",
+        "access": "R",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType",
+        "type": "string",
+        "access": "W",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.RadioEnabled",
+        "type": "boolean",
+        "access": "W",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalBytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalBytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalPacketsSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalPacketsReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalAssociations",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Enable",
+        "type": "boolean",
+        "access": "W",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Status",
+        "type": "string",
+        "access": "R",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID",
+        "type": "string",
+        "access": "W",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel",
+        "type": "unsignedInt",
+        "access": "W",
+        "category": "wifi"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.TotalBytesSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.TotalBytesReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_stats"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.TotalAssociations",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi"
+      }
+    ],
+    "wifi_associated_devices": [
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.AssociatedDeviceMACAddress",
+        "type": "string",
+        "access": "R",
+        "category": "wifi_client"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.AssociatedDeviceIPAddress",
+        "type": "string",
+        "access": "R",
+        "category": "wifi_client"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.LastDataTransmitRate",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_client"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.LastPacketsSent",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_client"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.LastPacketsReceived",
+        "type": "unsignedInt",
+        "access": "R",
+        "category": "wifi_client"
+      }
+    ],
+    "lan_config": [
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANHostConfigManagement.IPInterface.1.IPInterfaceIPAddress",
+        "type": "string",
+        "access": "W",
+        "category": "lan_config"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANHostConfigManagement.IPInterface.1.IPInterfaceSubnetMask",
+        "type": "string",
+        "access": "W",
+        "category": "lan_config"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANHostConfigManagement.DHCPServerEnable",
+        "type": "boolean",
+        "access": "W",
+        "category": "lan_config"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANHostConfigManagement.MinAddress",
+        "type": "string",
+        "access": "W",
+        "category": "lan_config"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANHostConfigManagement.MaxAddress",
+        "type": "string",
+        "access": "W",
+        "category": "lan_config"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANHostConfigManagement.DNSServers",
+        "type": "string",
+        "access": "W",
+        "category": "lan_config"
+      }
+    ],
+    "time": [
+      {
+        "path": "InternetGatewayDevice.Time.NTPServer1",
+        "type": "string",
+        "access": "W",
+        "category": "time"
+      },
+      {
+        "path": "InternetGatewayDevice.Time.NTPServer2",
+        "type": "string",
+        "access": "W",
+        "category": "time"
+      },
+      {
+        "path": "InternetGatewayDevice.Time.CurrentLocalTime",
+        "type": "dateTime",
+        "access": "R",
+        "category": "time"
+      },
+      {
+        "path": "InternetGatewayDevice.Time.LocalTimeZoneName",
+        "type": "string",
+        "access": "W",
+        "category": "time"
+      }
+    ]
+  },
+  "vendor_profiles": {
+    "syro_tech": {
+      "vendor_name": "Syro Tech",
+      "oui_patterns": [
+        "C0:XX:XX"
+      ],
+      "product_classes": [
+        "ST-1001G",
+        "ST-2001G",
+        "ST-3001G",
+        "ST-4001G",
+        "ST-GPON-1GE"
+      ],
+      "prefix": "InternetGatewayDevice.X_SyroTech.",
+      "optical_rx": "InternetGatewayDevice.X_SyroTech.GPON.OpticalRxPower",
+      "optical_tx": "InternetGatewayDevice.X_SyroTech.GPON.OpticalTxPower"
+    },
+    "dbc": {
+      "vendor_name": "DBC",
+      "oui_patterns": [
+        "XX:XX:XX"
+      ],
+      "product_classes": [
+        "DBC-1001G",
+        "DBC-2001G",
+        "DBC-1GE",
+        "DBC-GPON-ONT",
+        "DBC-4GE-1W"
+      ],
+      "prefix": "InternetGatewayDevice.X_DBC.",
+      "optical_rx": "InternetGatewayDevice.X_DBC.GPON.OpticalRxPower",
+      "optical_tx": "InternetGatewayDevice.X_DBC.GPON.OpticalTxPower"
+    },
+    "netlink_genesis": {
+      "vendor_name": "Netlink Genesis",
+      "oui_patterns": [
+        "XX:XX:XX"
+      ],
+      "product_classes": [
+        "NLG-1001G",
+        "NLG-2001G",
+        "NLG-GPON-1GE",
+        "NLG-4GE-1W",
+        "Genesis-1000"
+      ],
+      "prefix": "InternetGatewayDevice.X_Netlink.",
+      "optical_rx": "InternetGatewayDevice.X_Netlink.GPON.OpticalRxPower",
+      "optical_tx": "InternetGatewayDevice.X_Netlink.GPON.OpticalTxPower"
+    },
+    "rl_tech": {
+      "vendor_name": "R L Tech",
+      "oui_patterns": [
+        "XX:XX:XX"
+      ],
+      "product_classes": [
+        "RLT-1001G",
+        "RLT-2001G",
+        "RLT-GPON-1GE",
+        "RLT-4GE-1W",
+        "RLT-1000"
+      ],
+      "prefix": "InternetGatewayDevice.X_RL_Tech.",
+      "optical_rx": "InternetGatewayDevice.X_RL_Tech.GPON.OpticalRxPower",
+      "optical_tx": "InternetGatewayDevice.X_RL_Tech.GPON.OpticalTxPower"
+    },
+    "nokia": {
+      "vendor_name": "Nokia (Alcatel-Lucent)",
+      "oui_patterns": [
+        "D0:XX:XX",
+        "00:1A:2B",
+        "00:25:XX"
+      ],
+      "product_classes": [
+        "G-240W-G",
+        "G-240W-B",
+        "G-140W-C",
+        "G-140W-MD",
+        "G-240W-A",
+        "3FE46398AAAA"
+      ],
+      "prefix": "InternetGatewayDevice.X_00000C_",
+      "optical_rx": "InternetGatewayDevice.X_00000C_Gpon.OpticalPowerRx",
+      "optical_tx": "InternetGatewayDevice.X_00000C_Gpon.OpticalPowerTx"
+    },
+    "zte": {
+      "vendor_name": "ZTE",
+      "oui_patterns": [
+        "00:19:CB",
+        "00:1A:2B",
+        "00:25:XX",
+        "D0:XX:XX"
+      ],
+      "product_classes": [
+        "F670L",
+        "F670",
+        "F660",
+        "F601",
+        "F609",
+        "F6600",
+        "F6700",
+        "ZXHN F670L",
+        "ZXHN F660"
+      ],
+      "prefix": "InternetGatewayDevice.X_ZTE-COM_",
+      "optical_rx": "InternetGatewayDevice.X_ZTE-COM_Gpon.OpticalPowerRx",
+      "optical_tx": "InternetGatewayDevice.X_ZTE-COM_Gpon.OpticalPowerTx"
+    }
+  },
+  "quick_reference": {
+    "device_info": [
+      "InternetGatewayDevice.DeviceInfo.Manufacturer",
+      "InternetGatewayDevice.DeviceInfo.ModelName",
+      "InternetGatewayDevice.DeviceInfo.SerialNumber",
+      "InternetGatewayDevice.DeviceInfo.HardwareVersion",
+      "InternetGatewayDevice.DeviceInfo.SoftwareVersion",
+      "InternetGatewayDevice.DeviceInfo.UpTime"
+    ],
+    "wan_info": [
+      "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.PhysicalLinkStatus",
+      "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalBytesSent",
+      "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalBytesReceived",
+      "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus",
+      "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress",
+      "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway",
+      "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers"
+    ],
+    "wan_stats": [
+      "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalBytesSent",
+      "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalBytesReceived",
+      "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalPacketsSent",
+      "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalPacketsReceived",
+      "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Stats.EthernetBytesSent",
+      "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Stats.EthernetBytesReceived"
+    ],
+    "lan_hosts": [
+      "InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries",
+      "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.IPAddress",
+      "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.MACAddress",
+      "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.HostName",
+      "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.Active",
+      "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.InterfaceType"
+    ],
+    "wifi_info": [
+      "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID",
+      "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel",
+      "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Status",
+      "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalAssociations",
+      "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalBytesSent",
+      "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalBytesReceived"
+    ],
+    "wifi_clients": [
+      "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.AssociatedDeviceMACAddress",
+      "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.AssociatedDevice.1.AssociatedDeviceIPAddress"
+    ],
+    "lan_stats": [
+      "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.BytesSent",
+      "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.BytesReceived",
+      "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.PacketsSent",
+      "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Stats.PacketsReceived"
+    ]
+  }
+}
