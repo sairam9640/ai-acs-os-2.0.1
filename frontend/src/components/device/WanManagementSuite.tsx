@@ -678,7 +678,34 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                   <div className="sm:col-span-2 space-y-1">
                     <select
                       value={activeForm.bearerService || 'INTERNET'}
-                      onChange={(e: any) => setActiveForm({ ...activeForm, bearerService: e.target.value })}
+                      onChange={(e: any) => {
+                        const s = e.target.value;
+                        if (s === 'VOIP' || s === 'TR069') {
+                          setActiveForm({
+                            ...activeForm,
+                            bearerService: s,
+                            serviceType: s,
+                            linkMode: 'IP',
+                            connectionType: 'IPoE_DHCP',
+                            ipAssignment: 'DHCP',
+                            mtu: 1500,
+                            natEnabled: false,
+                            pppoeUsername: '',
+                            pppoePassword: '',
+                            serviceName: '',
+                          });
+                        } else {
+                          setActiveForm({
+                            ...activeForm,
+                            bearerService: s,
+                            serviceType: s,
+                            linkMode: 'PPP',
+                            connectionType: 'PPPoE',
+                            mtu: 1492,
+                            natEnabled: true,
+                          });
+                        }
+                      }}
                       className="w-full sm:w-64 px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
                     >
                       <option value="INTERNET">INTERNET</option>
@@ -746,18 +773,20 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                   <label className="text-xs font-bold text-slate-700">Link Mode:</label>
                   <div className="sm:col-span-2">
                     <select
-                      value={activeForm.linkMode || 'PPP'}
+                      value={activeForm.linkMode || (isVoipService || isTr069Service ? 'IP' : 'PPP')}
+                      disabled={isVoipService || isTr069Service}
                       onChange={(e: any) =>
                         setActiveForm({
                           ...activeForm,
                           linkMode: e.target.value,
+                          connectionType: e.target.value === 'PPP' ? 'PPPoE' : (activeForm.ipAssignment === 'Static' ? 'Static' : 'IPoE_DHCP'),
                           mtu: e.target.value === 'PPP' ? 1492 : 1500,
                         })
                       }
-                      className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
+                      className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA] disabled:bg-slate-100"
                     >
-                      <option value="PPP">PPP</option>
-                      <option value="IP">IP</option>
+                      {!isVoipService && !isTr069Service && <option value="PPP">PPP</option>}
+                      <option value="IP">IP (Auto DHCP / Static)</option>
                     </select>
                   </div>
                 </div>
@@ -878,8 +907,9 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                           type="number"
                           min="1"
                           max="4094"
-                          value={activeForm.vlanId}
-                          onChange={(e) => setActiveForm({ ...activeForm, vlanId: Number(e.target.value) })}
+                          value={activeForm.vlanId && activeForm.vlanId !== 0 ? activeForm.vlanId : ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, vlanId: e.target.value ? Number(e.target.value) : ('' as any) })}
+                          placeholder="e.g. 100"
                           className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
                           required
                         />
@@ -997,8 +1027,8 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                   </div>
                 </div>
 
-                {/* SECTION: PPPoE CREDENTIALS (When Link Mode == PPP) */}
-                {isPppMode && (
+                {/* SECTION: PPPoE CREDENTIALS (When Link Mode == PPP and Service is INTERNET) */}
+                {isPppMode && !isVoipService && !isTr069Service && (
                   <div className="p-4 bg-purple-50/60 rounded-xl border border-purple-200 space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
