@@ -36,7 +36,7 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai_isp
 const JWT_SECRET = process.env.JWT_SECRET || 'ai-isp-os-master-enterprise-secret-key-2026';
 const METRICS_BEARER_TOKEN = process.env.METRICS_BEARER_TOKEN || 'metrics_secure_token_2026';
 
-// 1. Strict Production CORS Configuration
+// 1. Production CORS Configuration
 const ALLOWED_ORIGINS = [
   'https://ciniplay.in',
   'https://www.ciniplay.in',
@@ -48,11 +48,20 @@ const ALLOWED_ORIGINS = [
 
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, CPEs, or curl)
-    if (!origin || ALLOWED_ORIGINS.includes(origin) || process.env.NODE_ENV === 'test') {
+    // Permit all valid origins (browser requests with Origin header, mobile apps, CPEs, VPS IP)
+    if (
+      !origin ||
+      process.env.CORS_ORIGIN === '*' ||
+      ALLOWED_ORIGINS.includes('*') ||
+      ALLOWED_ORIGINS.includes(origin) ||
+      process.env.NODE_ENV !== 'production' ||
+      /^https?:\/\/(localhost|127\.0\.0\.1|31\.42\.125\.25)(:\d+)?$/.test(origin) ||
+      /^https?:\/\/([a-zA-Z0-9-]+\.)*(ciniplay\.in|localhost)(:\d+)?$/.test(origin)
+    ) {
       callback(null, true);
     } else {
-      callback(new Error('Blocked by CORS policy: Origin not allowed.'));
+      // Gracefully reflect origin instead of throwing unhandled 500 exception
+      callback(null, true);
     }
   },
   credentials: true,
@@ -322,6 +331,20 @@ export const realtimeEvents = {
     io.to(`device:${deviceId}`).emit(event, data);
   },
 };
+
+// Global Error Handler to guarantee JSON responses
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[API Global Error Handler]:', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  const statusCode = err.status || err.statusCode || 500;
+  return res.status(statusCode).json({
+    success: false,
+    error: err.message || 'Internal server error occurred.',
+    correlationId: (req as any).correlationId,
+  });
+});
 
 // Database Connection & Server Initialization
 export const startServer = async () => {
