@@ -1140,7 +1140,7 @@ export class CwmpService {
           deviceId: dev._id,
           tenantId: dev.tenantId,
           action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
-          status: { $in: ['pending', 'queued', 'authorized', 'created'] }
+          status: { $in: ['pending', 'queued', 'authorized', 'created', 'sending', 'sent'] }
         }).sort({ queuedAt: 1, createdAt: 1 });
 
         // Priority 2: General telemetry poll / summon commands
@@ -1148,7 +1148,7 @@ export class CwmpService {
           pendingCmd = await DeviceCommand.findOne({
             deviceId: dev._id,
             tenantId: dev.tenantId,
-            status: { $in: ['pending', 'queued', 'authorized', 'created'] }
+            status: { $in: ['pending', 'queued', 'authorized', 'created', 'sending', 'sent'] }
           }).sort({ queuedAt: -1, createdAt: -1 });
         }
 
