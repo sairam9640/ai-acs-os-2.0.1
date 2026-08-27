@@ -178,30 +178,7 @@ export class CwmpVendorProfiles {
       ];
     }
 
-    if (vendor === 'GENEXIS' && !/earth/i.test(modelName || '')) {
-      return [
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_WPSKeyWord',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.X_RFBand',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.PreSharedKey',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_WPSKeyWord',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.BeaconType',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.X_RFBand',
-        'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
-        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
-        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
-        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
-      ];
-    }
-
-    // Standard Universal TR-098 / IGD Parameters guaranteed on 100% of devices (TR-098 Issue 1 & 2)
+    // Universal TR-098 / IGD Parameters guaranteed on 100% of devices (TR-098 Issue 1 & 2)
     return [
       'InternetGatewayDevice.DeviceInfo.Manufacturer',
       'InternetGatewayDevice.DeviceInfo.ManufacturerOUI',
