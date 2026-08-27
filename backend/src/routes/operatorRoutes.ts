@@ -708,7 +708,7 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
 
           tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.SSID`, device.additionalSsids[idx].ssid, 'xsd:string']);
           if (data.password) {
-            tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.KeyPassphrase`, data.password, 'xsd:string']);
+            tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.PreSharedKey.1.KeyPassphrase`, data.password, 'xsd:string']);
           }
           if (data.enabled !== undefined) {
             tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.Enable`, Boolean(data.enabled), 'xsd:boolean']);
@@ -728,7 +728,6 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
       if (wifi24.password && wifi24.password.length >= 8) {
         auditChanges['wifi24.password'] = { old: '********', new: '********' };
         device.wifi24.password = wifi24.password;
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase', wifi24.password, 'xsd:string']);
         tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase', wifi24.password, 'xsd:string']);
       }
       if (wifi24.channel !== undefined) {
@@ -745,22 +744,22 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
 
     // 2. Wi-Fi 5.0 GHz Changes
     if (wifi5g && (ssidInstance === undefined || ssidInstance === 2 || ssidInstance === 5)) {
+      const inst5g = ssidInstance === 5 ? 5 : 2;
       if (wifi5g.ssid !== undefined && wifi5g.ssid.trim()) {
         auditChanges['wifi5g.ssid'] = { old: device.wifi5g?.ssid, new: wifi5g.ssid.trim() };
         if (!device.wifi5g) device.wifi5g = {} as any;
         device.wifi5g.ssid = wifi5g.ssid.trim();
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID', wifi5g.ssid.trim(), 'xsd:string']);
+        tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.SSID`, wifi5g.ssid.trim(), 'xsd:string']);
       }
       if (wifi5g.password && wifi5g.password.length >= 8) {
         auditChanges['wifi5g.password'] = { old: '********', new: '********' };
         device.wifi5g.password = wifi5g.password;
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase', wifi5g.password, 'xsd:string']);
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase', wifi5g.password, 'xsd:string']);
+        tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.PreSharedKey.1.KeyPassphrase`, wifi5g.password, 'xsd:string']);
       }
       if (wifi5g.channel !== undefined) {
         auditChanges['wifi5g.channel'] = { old: device.wifi5g?.channel, new: Number(wifi5g.channel) };
         device.wifi5g.channel = Number(wifi5g.channel);
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel', Number(wifi5g.channel), 'xsd:unsignedInt']);
+        tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.Channel`, Number(wifi5g.channel), 'xsd:unsignedInt']);
       }
       if (wifi5g.enabled !== undefined) {
         auditChanges['wifi5g.enabled'] = { old: device.wifi5g?.enabled, new: Boolean(wifi5g.enabled) };
@@ -1150,7 +1149,6 @@ operatorRouter.post('/devices/:id/wifi/ssid', async (req: AuthenticatedRequest, 
       [`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${nextInstance}.BeaconType`, 'WPA2-PSK', 'xsd:string'],
     ];
     if (newSsidObj.password) {
-      tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${nextInstance}.KeyPassphrase`, newSsidObj.password, 'xsd:string']);
       tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${nextInstance}.PreSharedKey.1.KeyPassphrase`, newSsidObj.password, 'xsd:string']);
     }
 
