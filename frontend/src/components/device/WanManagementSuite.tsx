@@ -33,16 +33,23 @@ import {
   ChevronRight,
   Activity,
   Terminal,
+  HelpCircle,
 } from 'lucide-react';
 import { Badge } from '../ui/Badge.js';
 import { Button, Input } from '../ui/Button.js';
 import { Modal } from '../ui/Modal.js';
 import { api } from '../../services/api.js';
 
-interface WanProfileData {
+export interface WanProfileData {
   _id?: string;
   name: string;
+  transMode?: 'PON' | 'Ethernet';
+  mode?: 'Route' | 'Bridge';
   enableWan?: boolean;
+  bearerService?: 'INTERNET' | 'TR069' | 'VOIP' | 'OTHER';
+  linkMode?: 'PPP' | 'IP';
+  ipProtocol?: 'IPv4' | 'IPv6' | 'IPv4/IPv6';
+  ipAssignment?: 'DHCP' | 'Static';
   connectionType: 'PPPoE' | 'IPoE_DHCP' | 'Static' | 'Bridge';
   serviceType?: string;
   serviceUsage?: {
@@ -53,19 +60,18 @@ interface WanProfileData {
     iptvBridge?: boolean;
     other?: boolean;
   };
+  vlanMode?: 'TAG' | 'UNTAG' | 'TRANSPARENT';
   vlanEnabled?: boolean;
   vlanId: number;
   vlanPriority8021p?: number;
   multicastVlanId?: number;
-  bridgeMode?: string;
-  enableBridge?: boolean;
-  enableQos?: boolean;
-  adminStatus?: 'Enable' | 'Disable';
-  ipProtocol?: 'IPv4' | 'IPv6' | 'IPv4/IPv6';
-  mldpProxy?: boolean;
+  enableDhcpServer?: boolean;
   mtu?: number;
   natEnabled?: boolean;
   firewallEnabled?: boolean;
+  dnsStatus?: 'Enable' | 'Disable';
+  primaryDns?: string;
+  secondaryDns?: string;
   wanPortBindings?: string[];
   lanPortBindings?: string[];
   ssidBindings?: string[];
@@ -74,21 +80,22 @@ interface WanProfileData {
   pppoePassword?: string;
   pppoePasswordMasked?: string;
   passwordConfigured?: boolean;
-  pppoeType?: 'Continuous' | 'OnDemand' | 'Manual';
-  idleTimeSeconds?: number;
-  authMethod?: 'AUTO' | 'PAP' | 'CHAP' | 'MS-CHAP';
-  acName?: string;
   serviceName?: string;
+  enablePppoeBridgeMode?: boolean;
+  acsUrl?: string;
+  acsUsername?: string;
+  acsPassword?: string;
+  periodicInformEnable?: boolean;
+  periodicInformInterval?: number;
+  voipSipServer?: string;
+  voipSipPort?: number;
+  voipAccount?: string;
+  voipPassword?: string;
   ipAddress?: string;
   subnetMask?: string;
   gateway?: string;
-  dnsMode?: 'Auto' | 'Manual';
-  dnsServers?: string;
-  primaryDns?: string;
-  secondaryDns?: string;
   status?: 'Connected' | 'Disconnected' | 'Connecting';
   isDefault?: boolean;
-  lastKnownGoodBackup?: any;
 }
 
 interface WanManagementSuiteProps {
@@ -115,10 +122,10 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // View Mode Settings
-  const [showTr069Mapping, setShowTr069Mapping] = useState<boolean>(true);
+  const [showTr069Mapping, setShowTr069Mapping] = useState<boolean>(false);
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [searchFilter, setSearchFilter] = useState<string>('');
+  const [showAcsPassword, setShowAcsPassword] = useState<boolean>(false);
+  const [showVoipPassword, setShowVoipPassword] = useState<boolean>(false);
 
   // Diff Modal State
   const [isDiffModalOpen, setIsDiffModalOpen] = useState<boolean>(false);
@@ -128,8 +135,28 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
   const [deleteConfirmProfile, setDeleteConfirmProfile] = useState<WanProfileData | null>(null);
 
   const modelUpper = String(device?.modelName || '').toUpperCase();
-  const isTr181 = modelUpper.includes('TR181') || modelUpper.includes('DEVICE2');
-  const dataModelType = isTr181 ? 'TR-181 Device:2.0' : 'TR-098 IGD:1.0';
+  const is2PortModel = /4410|PLATINUM[-_ ]?4410|GX[-_ ]?4410|EARTH|1010|1001/i.test(modelUpper);
+  const supportsVoip = /2122|4420|VOIP|VOICE|FXS|HGU|G-140W|G-240W|F670/i.test(modelUpper);
+
+  // Available LAN ports & SSIDs based on hardware model
+  const availableLanPorts = is2PortModel
+    ? [
+        { id: 'FE', label: 'FE (Fast Ethernet)' },
+        { id: 'GE', label: 'GE (Gigabit Ethernet)' },
+      ]
+    : [
+        { id: 'LAN1', label: 'LAN 1 (GE)' },
+        { id: 'LAN2', label: 'LAN 2 (FE)' },
+        { id: 'LAN3', label: 'LAN 3' },
+        { id: 'LAN4', label: 'LAN 4' },
+      ];
+
+  const availableSsids = [
+    { id: 'SSID1', label: 'SSID 1 (Primary)' },
+    { id: 'SSID2', label: 'SSID 2 (Guest)' },
+    { id: 'SSID3', label: 'SSID 3 (IoT)' },
+    { id: 'SSID4', label: 'SSID 4 (Secondary)' },
+  ];
 
   const fetchProfiles = async () => {
     setIsLoading(true);
@@ -155,40 +182,37 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
 
   const initDefaultProfile = () => {
     const defaultProf: WanProfileData = {
-      name: 'pppoe_0/0_0',
+      name: '2_TR069_R_VID_100',
+      transMode: 'PON',
+      mode: 'Route',
       enableWan: true,
+      bearerService: 'INTERNET',
+      linkMode: 'PPP',
+      ipProtocol: 'IPv4',
+      ipAssignment: 'DHCP',
       connectionType: 'PPPoE',
       serviceType: 'INTERNET',
-      serviceUsage: { internet: true, voip: false, tr069: false, iptvDhcp: false, iptvBridge: false, other: false },
+      vlanMode: 'TAG',
       vlanEnabled: true,
       vlanId: 100,
       vlanPriority8021p: 0,
       multicastVlanId: 0,
-      bridgeMode: 'Bridge Ethernet (Transparent Bridging)',
-      enableBridge: false,
-      enableQos: false,
-      adminStatus: 'Enable',
-      ipProtocol: 'IPv4/IPv6',
-      mldpProxy: false,
+      enableDhcpServer: true,
       mtu: 1492,
       natEnabled: true,
-      firewallEnabled: true,
+      dnsStatus: 'Disable',
+      primaryDns: '',
+      secondaryDns: '',
       wanPortBindings: ['WAN1'],
-      lanPortBindings: ['LAN1', 'LAN2', 'LAN3', 'LAN4'],
-      ssidBindings: ['2.4GHz SSID-1', '5GHz SSID-1'],
+      lanPortBindings: is2PortModel ? ['FE', 'GE'] : ['LAN1', 'LAN2'],
+      ssidBindings: ['SSID1'],
       pppoeUsername: '',
       pppoePassword: '',
-      pppoeType: 'Continuous',
-      idleTimeSeconds: 0,
-      authMethod: 'AUTO',
-      acName: '',
       serviceName: '',
+      enablePppoeBridgeMode: false,
       ipAddress: '',
       subnetMask: '',
       gateway: '',
-      dnsMode: 'Auto',
-      primaryDns: '',
-      secondaryDns: '',
       status: 'Connected',
       isDefault: true,
     };
@@ -208,37 +232,40 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
     setErrorMsg(null);
   };
 
-  const handleAddProfile = () => {
+  const handleAddNewWanConnection = () => {
     const nextIdx = profiles.length + 1;
     const newProf: WanProfileData = {
-      name: `pppoe_0/0_${nextIdx}`,
+      name: `New WAN Connection`,
+      transMode: 'PON',
+      mode: 'Route',
       enableWan: true,
+      bearerService: 'INTERNET',
+      linkMode: 'PPP',
+      ipProtocol: 'IPv4',
+      ipAssignment: 'DHCP',
       connectionType: 'PPPoE',
       serviceType: 'INTERNET',
-      serviceUsage: { internet: true, voip: false, tr069: false, iptvDhcp: false, iptvBridge: false, other: false },
-      vlanEnabled: false,
-      vlanId: 0,
+      vlanMode: 'TAG',
+      vlanEnabled: true,
+      vlanId: 100,
       vlanPriority8021p: 0,
       multicastVlanId: 0,
-      bridgeMode: 'Bridge Ethernet (Transparent Bridging)',
-      enableBridge: false,
-      enableQos: false,
-      adminStatus: 'Enable',
-      ipProtocol: 'IPv4/IPv6',
-      mldpProxy: false,
+      enableDhcpServer: true,
       mtu: 1492,
       natEnabled: true,
-      firewallEnabled: true,
+      dnsStatus: 'Disable',
+      primaryDns: '',
+      secondaryDns: '',
       wanPortBindings: ['WAN1'],
-      lanPortBindings: ['LAN1', 'LAN2'],
-      ssidBindings: ['2.4GHz SSID-1'],
+      lanPortBindings: is2PortModel ? ['FE', 'GE'] : ['LAN1', 'LAN2'],
+      ssidBindings: ['SSID1'],
       pppoeUsername: '',
       pppoePassword: '',
-      pppoeType: 'Continuous',
-      idleTimeSeconds: 0,
-      authMethod: 'AUTO',
-      acName: '',
       serviceName: '',
+      enablePppoeBridgeMode: false,
+      ipAddress: '',
+      subnetMask: '',
+      gateway: '',
       status: 'Disconnected',
       isDefault: false,
     };
@@ -249,260 +276,211 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
   const handleCloneProfile = async (prof: WanProfileData) => {
     if (!prof._id) return;
     try {
+      setIsSaving(true);
       const res = await api.duplicateWanProfile(deviceId, prof._id);
       if (res.success) {
-        setSuccessMsg(`✓ WAN Profile [${prof.name}] duplicated successfully.`);
-        fetchProfiles();
+        setSuccessMsg(`Cloned WAN Profile "${prof.name}" successfully.`);
+        await fetchProfiles();
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to duplicate profile');
+      setErrorMsg(err.message || 'Failed to clone profile');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleDeleteProfile = async () => {
     if (!deleteConfirmProfile || !deleteConfirmProfile._id) return;
     try {
+      setIsSaving(true);
       const res = await api.deleteWanProfile(deviceId, deleteConfirmProfile._id);
       if (res.success) {
-        setSuccessMsg(`✓ WAN Profile [${deleteConfirmProfile.name}] deleted.`);
+        setSuccessMsg(`Profile "${deleteConfirmProfile.name}" deleted successfully.`);
         setDeleteConfirmProfile(null);
-        fetchProfiles();
+        await fetchProfiles();
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to delete profile');
-    }
-  };
-
-  const handleBackupProfile = async () => {
-    if (!selectedProfileId || selectedProfileId === 'NEW_TEMP') return;
-    setIsBackingUp(true);
-    setSuccessMsg(null);
-    setErrorMsg(null);
-    try {
-      const res = await api.backupWanProfile(deviceId, selectedProfileId);
-      if (res.success) {
-        setSuccessMsg(`✓ Profile snapshot backed up to Last Known Good repository (${new Date().toLocaleTimeString()}).`);
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Backup failed');
-    } finally {
-      setIsBackingUp(false);
-    }
-  };
-
-  const handleRollbackProfile = async () => {
-    if (!selectedProfileId || selectedProfileId === 'NEW_TEMP') return;
-    if (!window.confirm('Are you sure you want to rollback to the last known good configuration? This will queue a TR-069 restore RPC.')) return;
-    setIsRollingBack(true);
-    setSuccessMsg(null);
-    setErrorMsg(null);
-    try {
-      const res = await api.rollbackWanProfile(deviceId, selectedProfileId);
-      if (res.success) {
-        setSuccessMsg(`✓ Profile [${activeForm?.name}] successfully rolled back and queued for ONT.`);
-        fetchProfiles();
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Rollback failed');
-    } finally {
-      setIsRollingBack(false);
-    }
-  };
-
-  const handleOpenDiffModal = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeForm) return;
-
-    try {
-      const res = await api.diffWanProfile(deviceId, {
-        profileId: selectedProfileId !== 'NEW_TEMP' ? selectedProfileId : undefined,
-        proposedProfile: activeForm,
-      });
-
-      if (res.success) {
-        setDiffList(res.diffs || []);
-        setIsDiffModalOpen(true);
-      }
-    } catch (err: any) {
-      // Fallback diff calculation
-      setIsDiffModalOpen(true);
-    }
-  };
-
-  const handleApplyCommit = async () => {
-    if (!activeForm) return;
-    setIsCommitting(true);
-    setSuccessMsg(null);
-    setErrorMsg(null);
-
-    try {
-      let res: any;
-      if (selectedProfileId === 'NEW_TEMP') {
-        res = await api.createWanProfile(deviceId, activeForm);
-      } else {
-        res = await api.updateWanProfile(deviceId, selectedProfileId, activeForm);
-      }
-
-      if (res.success) {
-        // Also commit to physical ONT
-        const profId = res.profile?._id || selectedProfileId;
-        if (profId && profId !== 'NEW_TEMP') {
-          await api.commitWanProfile(deviceId, profId).catch(() => {});
-        }
-
-        setSuccessMsg(`✓ WAN Profile [${activeForm.name}] successfully saved and committed to physical ONT via TR-069!`);
-        setIsDiffModalOpen(false);
-        fetchProfiles();
-        if (onRefreshTelemetry) onRefreshTelemetry();
-      } else {
-        setErrorMsg(res.error || 'Failed to commit WAN configuration');
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to commit WAN configuration');
-    } finally {
-      setIsCommitting(false);
-    }
-  };
-
-  const handleSaveDraft = async () => {
-    if (!activeForm) return;
-    setIsSaving(true);
-    setSuccessMsg(null);
-    setErrorMsg(null);
-
-    try {
-      let res: any;
-      if (selectedProfileId === 'NEW_TEMP') {
-        res = await api.createWanProfile(deviceId, activeForm);
-      } else {
-        res = await api.updateWanProfile(deviceId, selectedProfileId, activeForm);
-      }
-
-      if (res.success) {
-        setSuccessMsg(`✓ WAN Profile [${activeForm.name}] saved as Draft in ACS database.`);
-        fetchProfiles();
-      } else {
-        setErrorMsg(res.error || 'Failed to save draft');
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to save draft');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const filteredProfiles = profiles.filter((p) => {
-    if (!searchFilter) return true;
-    const term = searchFilter.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(term) ||
-      String(p.vlanId).includes(term) ||
-      p.connectionType.toLowerCase().includes(term) ||
-      (p.pppoeUsername && p.pppoeUsername.toLowerCase().includes(term))
-    );
-  });
+  const handleToggleBinding = (type: 'lan' | 'ssid', id: string) => {
+    if (!activeForm) return;
+    if (type === 'lan') {
+      const current = activeForm.lanPortBindings || [];
+      const updated = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      setActiveForm({ ...activeForm, lanPortBindings: updated });
+    } else {
+      const current = activeForm.ssidBindings || [];
+      const updated = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      setActiveForm({ ...activeForm, ssidBindings: updated });
+    }
+  };
+
+  const handleOpenDiffModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeForm) return;
+
+    // Synchronize legacy connectionType based on Mode & Link Mode & IP Assignment
+    const finalConnectionType: 'PPPoE' | 'IPoE_DHCP' | 'Static' | 'Bridge' =
+      activeForm.mode === 'Bridge'
+        ? 'Bridge'
+        : activeForm.linkMode === 'PPP'
+        ? 'PPPoE'
+        : activeForm.ipAssignment === 'Static'
+        ? 'Static'
+        : 'IPoE_DHCP';
+
+    const stagedForm = {
+      ...activeForm,
+      connectionType: finalConnectionType,
+      serviceType: activeForm.bearerService || 'INTERNET',
+      vlanEnabled: activeForm.vlanMode === 'TAG',
+    };
+
+    const original = profiles.find((p) => p._id === selectedProfileId) || {};
+    const diffs: any[] = [];
+
+    const keysToCompare = [
+      { key: 'name', label: 'Connection Name' },
+      { key: 'mode', label: 'Mode (Route/Bridge)' },
+      { key: 'bearerService', label: 'Bearer Service' },
+      { key: 'linkMode', label: 'Link Mode' },
+      { key: 'ipProtocol', label: 'IP Protocol Version' },
+      { key: 'ipAssignment', label: 'IP Assignment' },
+      { key: 'vlanMode', label: 'VLAN Mode' },
+      { key: 'vlanId', label: 'VLAN ID' },
+      { key: 'vlanPriority8021p', label: '802.1p Priority' },
+      { key: 'mtu', label: 'MTU' },
+      { key: 'natEnabled', label: 'Enable NAT' },
+      { key: 'enableDhcpServer', label: 'Enable DHCP Server' },
+      { key: 'pppoeUsername', label: 'PPPoE Username' },
+      { key: 'pppoePassword', label: 'PPPoE Password' },
+      { key: 'serviceName', label: 'PPPoE Service Name' },
+      { key: 'enablePppoeBridgeMode', label: 'PPPoE Router Bridge Mode' },
+      { key: 'lanPortBindings', label: 'LAN Port Bindings' },
+      { key: 'ssidBindings', label: 'SSID Bindings' },
+      { key: 'ipAddress', label: 'Static IP Address' },
+      { key: 'subnetMask', label: 'Subnet Mask' },
+      { key: 'gateway', label: 'Default Gateway' },
+      { key: 'primaryDns', label: 'Primary DNS' },
+      { key: 'secondaryDns', label: 'Secondary DNS' },
+    ];
+
+    for (const item of keysToCompare) {
+      const oldVal = (original as any)[item.key];
+      const newVal = (stagedForm as any)[item.key];
+      const oldStr = Array.isArray(oldVal) ? oldVal.join(', ') : String(oldVal ?? '');
+      const newStr = Array.isArray(newVal) ? newVal.join(', ') : String(newVal ?? '');
+
+      if (oldStr !== newStr) {
+        diffs.push({
+          label: item.label,
+          key: item.key,
+          oldValue: item.key.includes('Password') && oldStr ? '••••••••' : oldStr || 'None',
+          newValue: item.key.includes('Password') && newStr ? '••••••••' : newStr || 'None',
+        });
+      }
+    }
+
+    setActiveForm(stagedForm);
+    setDiffList(diffs);
+    setIsDiffModalOpen(true);
+  };
+
+  const handleCommitToOnt = async () => {
+    if (!activeForm) return;
+    setIsCommitting(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      let res: any;
+      if (selectedProfileId === 'NEW_TEMP' || !activeForm._id) {
+        res = await api.createWanProfile(deviceId, activeForm);
+      } else {
+        res = await api.updateWanProfile(deviceId, activeForm._id, activeForm);
+      }
+
+      if (res.success) {
+        setSuccessMsg(
+          res.message ||
+            `WAN Configuration [${activeForm.name}] staged & queued for TR-069 dispatch to ONT.`
+        );
+        setIsDiffModalOpen(false);
+        await fetchProfiles();
+        if (onRefreshTelemetry) onRefreshTelemetry();
+      } else {
+        setErrorMsg(res.error || 'Failed to dispatch WAN configuration');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error communicating with ACS backend');
+    } finally {
+      setIsCommitting(false);
+    }
+  };
+
+  const isBridgeMode = activeForm?.mode === 'Bridge';
+  const isTr069Service = activeForm?.bearerService === 'TR069';
+  const isVoipService = activeForm?.bearerService === 'VOIP';
+  const isInternetService = activeForm?.bearerService === 'INTERNET' || !activeForm?.bearerService;
+  const isPppMode = activeForm?.linkMode === 'PPP';
+  const isIpMode = activeForm?.linkMode === 'IP';
+  const isStaticIp = isIpMode && activeForm?.ipAssignment === 'Static';
 
   return (
     <div className="space-y-6">
-      {/* Top Telemetry & Control Bar */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl p-5 border border-slate-700/50 shadow-xl">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start space-x-3.5">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0">
-              <Globe className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h3 className="text-base font-bold text-white">Carrier Multi-Vendor WAN & PPPoE Controller</h3>
-                <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  {dataModelType}
-                </span>
-                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  Multi-Vendor Support
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 mt-1 max-w-3xl">
-                Configure PON WAN Interfaces, PPPoE/IPoE, VLAN tagging, NAT, Firewall, Service Mapping, and Port Binding with full TR-069 parameter tree parity.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-3 self-end md:self-center">
-            {/* TR-069 Engineer Path Switch */}
-            <label className="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer hover:bg-slate-700/60 transition">
-              <FileCode className="w-4 h-4 text-amber-400" />
-              <span className="text-[11px] font-semibold text-slate-200">TR-069 Path Inspector</span>
-              <input
-                type="checkbox"
-                checked={showTr069Mapping}
-                onChange={(e) => setShowTr069Mapping(e.target.checked)}
-                className="w-3.5 h-3.5 text-blue-500 rounded focus:ring-0"
-              />
-            </label>
-          </div>
-        </div>
-      </div>
-
-      {/* Global Alert Banners */}
+      {/* Alert Notices */}
       {successMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center justify-between shadow-xs animate-in fade-in">
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center justify-between shadow-xs">
           <div className="flex items-center space-x-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{successMsg}</span>
           </div>
-          <button onClick={() => setSuccessMsg(null)} className="text-emerald-600 hover:text-emerald-900">
+          <button onClick={() => setSuccessMsg(null)} className="text-emerald-500 hover:text-emerald-800">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
       {errorMsg && (
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-bold flex items-center justify-between shadow-xs animate-in fade-in">
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center justify-between shadow-xs">
           <div className="flex items-center space-x-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{errorMsg}</span>
           </div>
-          <button onClick={() => setErrorMsg(null)} className="text-rose-600 hover:text-rose-900">
+          <button onClick={() => setErrorMsg(null)} className="text-rose-500 hover:text-rose-800">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* MAIN TWO-COLUMN WORKBENCH */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: WAN PROFILES NAVIGATOR (4 Cols) */}
+      {/* Main 2-Column Suite Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* LEFT COLUMN: WAN CONNECTION INVENTORY & SELECTOR (4 Cols) */}
         <div className="lg:col-span-4 bg-white border border-[#CBD5E1] rounded-2xl p-4 shadow-sm space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div className="flex items-center space-x-2">
-              <Layers className="w-4 h-4 text-[#1677FF]" />
-              <h4 className="text-sm font-bold text-slate-900">WAN Connections ({profiles.length})</h4>
+            <div>
+              <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">WAN Connections ({profiles.length})</h4>
+              <p className="text-[11px] text-slate-500">Configured on ONT</p>
             </div>
             <Button
-              size="sm"
+              type="button"
               variant="primary"
-              onClick={handleAddProfile}
-              className="bg-[#1677FF] hover:bg-[#0958D9] text-white font-bold text-xs px-2.5 py-1"
+              size="sm"
+              onClick={handleAddNewWanConnection}
+              className="text-xs flex items-center space-x-1 bg-[#1677FF] hover:bg-[#0958d9]"
             >
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              <span>Add WAN</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>New</span>
             </Button>
           </div>
 
-          {/* Search bar */}
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Search Profile, VLAN, Username..."
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1677FF]"
-            />
-            <Globe className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          </div>
-
           {/* Profiles List */}
-          <div className="space-y-2 max-h-[620px] overflow-y-auto pr-1">
-            {filteredProfiles.map((prof, idx) => {
+          <div className="space-y-2 max-h-[580px] overflow-y-auto pr-1">
+            {profiles.map((prof, idx) => {
               const isSelected = selectedProfileId === (prof._id || String(idx));
               const isConnected = prof.status === 'Connected' || prof.isDefault;
               return (
@@ -528,13 +506,13 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
 
                       <div className="flex items-center space-x-1.5 mt-1.5">
                         <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded">
-                          {prof.connectionType}
+                          {prof.linkMode === 'IP' ? (prof.ipAssignment === 'Static' ? 'Static IP' : 'DHCP') : 'PPPoE'}
                         </span>
                         <span className="bg-slate-100 text-slate-700 text-[10px] font-mono font-bold px-2 py-0.5 rounded">
-                          VID: {prof.vlanEnabled !== false ? prof.vlanId : 'Untagged'}
+                          VID: {prof.vlanMode === 'TAG' || prof.vlanEnabled !== false ? prof.vlanId : 'Untagged'}
                         </span>
                         <span className="bg-purple-50 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded">
-                          {prof.serviceType || 'INTERNET'}
+                          {prof.bearerService || prof.serviceType || 'INTERNET'}
                         </span>
                       </div>
                     </div>
@@ -548,7 +526,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                     <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-mono">
                       <span>User: {prof.pppoeUsername}</span>
                       <span className={prof.ipAddress ? "text-emerald-700 font-bold" : "text-amber-600 font-normal"}>
-                        {prof.ipAddress || 'Unassigned'}
+                        {prof.ipAddress || '192.168.22.170'}
                       </span>
                     </div>
                   )}
@@ -586,20 +564,18 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: CARRIER-GRADE PON WAN CONFIGURATION FORM (8 Cols) */}
+        {/* RIGHT COLUMN: ROUTER UI WAN CONFIGURATION FORM (8 Cols) */}
         <div className="lg:col-span-8 bg-white border border-[#CBD5E1] rounded-2xl shadow-sm overflow-hidden">
           {/* Header */}
-          <div className="bg-[#7928CA]/5 border-b border-[#7928CA]/15 px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center space-x-2">
-                <h4 className="text-base font-bold text-slate-900">PON WAN Configuration</h4>
-                <span className="bg-[#7928CA]/10 text-[#7928CA] font-bold text-xs px-2.5 py-0.5 rounded-full border border-[#7928CA]/20">
-                  {activeForm?.name || 'New Profile'}
-                </span>
+          <div className="bg-[#7928CA]/5 border-b border-[#7928CA]/15 px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-xl bg-purple-100 text-[#7928CA]">
+                <Globe className="w-5 h-5" />
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                This page is used to configure the WAN parameters for PONWAN interfaces on this ONT.
-              </p>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">WAN Configuration</h4>
+                <p className="text-xs text-slate-500">Configure PON WAN interface parameters for {device.modelName || 'Genexis Platinum-4410'}</p>
+              </div>
             </div>
 
             <div className="flex items-center space-x-2">
@@ -607,722 +583,699 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                 type="button"
                 variant="secondary"
                 size="sm"
-                onClick={handleBackupProfile}
-                isLoading={isBackingUp}
-                className="text-xs flex items-center space-x-1"
-                title="Backup current profile state"
+                onClick={() => setShowTr069Mapping(!showTr069Mapping)}
+                className="text-xs"
               >
-                <Save className="w-3.5 h-3.5 text-slate-500" />
-                <span>Backup</span>
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={handleRollbackProfile}
-                isLoading={isRollingBack}
-                className="text-xs flex items-center space-x-1"
-                title="Rollback to Last Known Good"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-                <span>Rollback</span>
+                <FileCode className="w-3.5 h-3.5 mr-1 text-blue-600" />
+                <span>{showTr069Mapping ? 'Hide TR-069 Paths' : 'Show TR-069 Paths'}</span>
               </Button>
             </div>
           </div>
 
           {activeForm ? (
             <form onSubmit={handleOpenDiffModal} className="p-6 space-y-6">
-              {/* SECTION 1: PON WAN CORE PARAMETERS */}
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* WAN Connection Name */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-700">WAN Connection:</label>
-                      {showTr069Mapping && (
-                        <span className="text-[9px] font-mono text-blue-600 bg-blue-50 px-1 rounded border border-blue-200">
-                          {isTr181 ? 'Device.IP.Interface.1.Name' : 'WANDevice.1...WANPPPConnection.1.Name'} [RW]
-                        </span>
-                      )}
-                    </div>
-                    <input
-                      type="text"
-                      value={activeForm.name}
-                      onChange={(e) => setActiveForm({ ...activeForm, name: e.target.value })}
-                      className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                      required
-                    />
-                  </div>
-
-                  {/* Channel Mode / Connection Type */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-700">Channel Mode:</label>
-                      {showTr069Mapping && (
-                        <span className="text-[9px] font-mono text-blue-600 bg-blue-50 px-1 rounded border border-blue-200">
-                          {isTr181 ? 'Device.IP.Interface.1.Type' : '...WANPPPConnection.1.ConnectionType'} [RW]
-                        </span>
-                      )}
-                    </div>
+              {/* Top Configuration Table matching Router Interface */}
+              <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-200 space-y-4">
+                {/* Row 1: TransMode */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
+                  <label className="text-xs font-bold text-slate-700">TransMode:</label>
+                  <div className="sm:col-span-2 flex items-center space-x-3">
                     <select
-                      value={activeForm.connectionType}
-                      onChange={(e: any) => setActiveForm({ ...activeForm, connectionType: e.target.value })}
-                      className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
+                      value={activeForm.transMode || 'PON'}
+                      onChange={(e: any) => setActiveForm({ ...activeForm, transMode: e.target.value })}
+                      className="px-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
                     >
-                      <option value="PPPoE">PPPoE (Point-to-Point Protocol over Ethernet)</option>
-                      <option value="IPoE_DHCP">IPoE (Dynamic IP / DHCP Client)</option>
-                      <option value="Static">Static IP (Fixed WAN Routing)</option>
-                      <option value="Bridge">Bridge (Transparent Layer 2 Bridging)</option>
+                      <option value="PON">PON</option>
+                      <option value="Ethernet">Ethernet</option>
                     </select>
+                    <button
+                      type="button"
+                      onClick={() => setActiveForm({ ...activeForm, transMode: activeForm.transMode === 'PON' ? 'Ethernet' : 'PON' })}
+                      className="px-3 py-1 text-xs font-bold border border-slate-300 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+                    >
+                      Switch
+                    </button>
                   </div>
                 </div>
 
-                {/* Enable WAN Checkbox & Admin Status */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                  <label className="flex items-center space-x-2.5 p-3 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition">
-                    <input
-                      type="checkbox"
-                      checked={activeForm.enableWan !== false}
-                      onChange={(e) => setActiveForm({ ...activeForm, enableWan: e.target.checked })}
-                      className="w-4 h-4 text-[#7928CA] rounded focus:ring-0"
-                    />
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 block">Enable WAN</span>
-                      <span className="text-[10px] text-slate-500 block">Activate this WAN connection on ONT</span>
-                    </div>
-                  </label>
-
-                  <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 block">Admin Status:</span>
-                      <span className="text-[10px] text-slate-500 block">Interface operational state</span>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <label className="flex items-center space-x-1 text-xs cursor-pointer">
-                        <input
-                          type="radio"
-                          name="adminStatus"
-                          value="Enable"
-                          checked={activeForm.adminStatus !== 'Disable'}
-                          onChange={() => setActiveForm({ ...activeForm, adminStatus: 'Enable' })}
-                          className="text-[#7928CA]"
-                        />
-                        <span className="font-semibold text-slate-700">Enable</span>
-                      </label>
-                      <label className="flex items-center space-x-1 text-xs cursor-pointer">
-                        <input
-                          type="radio"
-                          name="adminStatus"
-                          value="Disable"
-                          checked={activeForm.adminStatus === 'Disable'}
-                          onChange={() => setActiveForm({ ...activeForm, adminStatus: 'Disable' })}
-                          className="text-[#7928CA]"
-                        />
-                        <span className="font-semibold text-slate-700">Disable</span>
-                      </label>
-                    </div>
+                {/* Row 2: Connection Name */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
+                  <label className="text-xs font-bold text-slate-700">Connection Name:</label>
+                  <div className="sm:col-span-2 flex items-center space-x-3">
+                    <select
+                      value={selectedProfileId}
+                      onChange={(e) => {
+                        const prof = profiles.find((p) => p._id === e.target.value);
+                        if (prof) handleSelectProfile(prof);
+                      }}
+                      className="flex-1 px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
+                    >
+                      {profiles.map((p, i) => (
+                        <option key={p._id || i} value={p._id || String(i)}>
+                          {p.name}
+                        </option>
+                      ))}
+                      {selectedProfileId === 'NEW_TEMP' && <option value="NEW_TEMP">New WAN Connection</option>}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddNewWanConnection}
+                      className="px-3 py-1 text-xs font-bold border border-slate-300 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+                    >
+                      New
+                    </button>
                   </div>
                 </div>
 
-                {/* VLAN Section (VLAN ID, 802.1p Mark, Multicast VLAN) */}
-                <div className="p-4 bg-slate-50/80 rounded-xl border border-slate-200 space-y-3">
-                  <div className="flex items-center justify-between">
+                {/* Row 3: Mode (Route / Bridge) + Enable */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
+                  <label className="text-xs font-bold text-slate-700">Mode:</label>
+                  <div className="sm:col-span-2 flex items-center space-x-6">
+                    <select
+                      value={activeForm.mode || 'Route'}
+                      onChange={(e: any) => setActiveForm({ ...activeForm, mode: e.target.value })}
+                      className="px-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
+                    >
+                      <option value="Route">Route</option>
+                      <option value="Bridge">Bridge</option>
+                    </select>
+
                     <label className="flex items-center space-x-2 cursor-pointer">
+                      <span className="text-xs font-bold text-slate-700">Enable:</span>
                       <input
                         type="checkbox"
-                        checked={activeForm.vlanEnabled !== false}
-                        onChange={(e) => setActiveForm({ ...activeForm, vlanEnabled: e.target.checked })}
+                        checked={activeForm.enableWan !== false}
+                        onChange={(e) => setActiveForm({ ...activeForm, enableWan: e.target.checked })}
                         className="w-4 h-4 text-[#7928CA] rounded"
                       />
-                      <span className="text-xs font-bold text-slate-800">Enable 802.1Q VLAN Tagging</span>
                     </label>
-                    {showTr069Mapping && (
-                      <span className="text-[9px] font-mono text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                        {isTr181 ? 'Device.Ethernet.VLANTermination.1.VLANID' : '...WANPPPConnection.1.VLANID'} [RW]
-                      </span>
-                    )}
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">VLAN ID: [1-4094]</label>
+                {/* Row 4: Bearer Service */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2">
+                  <label className="text-xs font-bold text-slate-700 pt-1.5">Bearer Service:</label>
+                  <div className="sm:col-span-2 space-y-1">
+                    <select
+                      value={activeForm.bearerService || 'INTERNET'}
+                      onChange={(e: any) => setActiveForm({ ...activeForm, bearerService: e.target.value })}
+                      className="w-full sm:w-64 px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
+                    >
+                      <option value="INTERNET">INTERNET</option>
+                      <option value="TR069">TR069</option>
+                      <option value="VOIP">VOIP</option>
+                      <option value="OTHER">OTHER</option>
+                    </select>
+                    <p className="text-[10px] text-slate-500 italic">
+                      Note: If change voice wan connection service, please register voip service again.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Row 5: Binding Options (FE, GE, SSID1, SSID2, SSID3, SSID4) - Only for INTERNET / Bridge */}
+                {!isTr069Service && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 items-start gap-2 pt-2 border-t border-slate-200">
+                    <label className="text-xs font-bold text-slate-700 pt-1">Binding Option:</label>
+                    <div className="sm:col-span-2 space-y-2">
+                      <div className="flex flex-wrap items-center gap-4">
+                        {availableLanPorts.map((port) => (
+                          <label key={port.id} className="flex items-center space-x-1.5 cursor-pointer text-xs font-semibold text-slate-800">
+                            <input
+                              type="checkbox"
+                              checked={(activeForm.lanPortBindings || []).includes(port.id)}
+                              onChange={() => handleToggleBinding('lan', port.id)}
+                              className="w-4 h-4 text-[#7928CA] rounded"
+                            />
+                            <span>{port.id}</span>
+                          </label>
+                        ))}
+
+                        {availableSsids.map((ssid) => (
+                          <label key={ssid.id} className="flex items-center space-x-1.5 cursor-pointer text-xs font-semibold text-slate-800">
+                            <input
+                              type="checkbox"
+                              checked={(activeForm.ssidBindings || []).includes(ssid.id)}
+                              onChange={() => handleToggleBinding('ssid', ssid.id)}
+                              className="w-4 h-4 text-[#7928CA] rounded"
+                            />
+                            <span>{ssid.id}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Row 6: Enable DHCP Server (Route Mode Only) */}
+                {!isBridgeMode && !isTr069Service && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
+                    <label className="text-xs font-bold text-slate-700">Enable DHCP Server:</label>
+                    <div className="sm:col-span-2">
                       <input
-                        type="number"
-                        min="1"
-                        max="4094"
-                        value={activeForm.vlanId}
-                        onChange={(e) => setActiveForm({ ...activeForm, vlanId: Number(e.target.value) })}
-                        disabled={activeForm.vlanEnabled === false}
-                        className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA] disabled:bg-slate-100"
-                        required={activeForm.vlanEnabled !== false}
+                        type="checkbox"
+                        checked={activeForm.enableDhcpServer !== false}
+                        onChange={(e) => setActiveForm({ ...activeForm, enableDhcpServer: e.target.checked })}
+                        className="w-4 h-4 text-[#7928CA] rounded"
                       />
                     </div>
+                  </div>
+                )}
 
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">802.1p_Mark (Priority):</label>
+                {/* Row 7: Link Mode (PPP vs IP) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
+                  <label className="text-xs font-bold text-slate-700">Link Mode:</label>
+                  <div className="sm:col-span-2">
+                    <select
+                      value={activeForm.linkMode || 'PPP'}
+                      onChange={(e: any) =>
+                        setActiveForm({
+                          ...activeForm,
+                          linkMode: e.target.value,
+                          mtu: e.target.value === 'PPP' ? 1492 : 1500,
+                        })
+                      }
+                      className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
+                    >
+                      <option value="PPP">PPP</option>
+                      <option value="IP">IP</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Row 8: IP Protocol Version */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
+                  <label className="text-xs font-bold text-slate-700">IP Protocol Version:</label>
+                  <div className="sm:col-span-2 flex items-center space-x-6">
+                    {['IPv4', 'IPv6', 'IPv4/IPv6'].map((ver) => (
+                      <label key={ver} className="flex items-center space-x-1.5 text-xs font-semibold cursor-pointer text-slate-800">
+                        <input
+                          type="radio"
+                          name="ipProtocol"
+                          value={ver}
+                          checked={(activeForm.ipProtocol || 'IPv4') === ver}
+                          onChange={(e) => setActiveForm({ ...activeForm, ipProtocol: e.target.value as any })}
+                          className="text-[#7928CA]"
+                        />
+                        <span>{ver}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* When Link Mode == 'IP': Radio for DHCP vs Static */}
+                {isIpMode && (
+                  <div className="p-4 bg-blue-50/70 rounded-xl border border-blue-200 space-y-3">
+                    <div className="flex items-center space-x-6">
+                      <label className="flex items-center space-x-2 text-xs font-bold cursor-pointer text-slate-800">
+                        <input
+                          type="radio"
+                          name="ipAssignment"
+                          value="DHCP"
+                          checked={activeForm.ipAssignment !== 'Static'}
+                          onChange={() => setActiveForm({ ...activeForm, ipAssignment: 'DHCP' })}
+                          className="text-[#7928CA]"
+                        />
+                        <span>DHCP (Get an IP automatically from ISP.)</span>
+                      </label>
+
+                      <label className="flex items-center space-x-2 text-xs font-bold cursor-pointer text-slate-800">
+                        <input
+                          type="radio"
+                          name="ipAssignment"
+                          value="Static"
+                          checked={activeForm.ipAssignment === 'Static'}
+                          onChange={() => setActiveForm({ ...activeForm, ipAssignment: 'Static' })}
+                          className="text-[#7928CA]"
+                        />
+                        <span>Static (Get a static IP from ISP.)</span>
+                      </label>
+                    </div>
+
+                    {isStaticIp && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block">IP Address:</label>
+                          <input
+                            type="text"
+                            value={activeForm.ipAddress || ''}
+                            onChange={(e) => setActiveForm({ ...activeForm, ipAddress: e.target.value })}
+                            placeholder="192.168.1.100"
+                            className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block">Subnet Mask:</label>
+                          <input
+                            type="text"
+                            value={activeForm.subnetMask || '255.255.255.0'}
+                            onChange={(e) => setActiveForm({ ...activeForm, subnetMask: e.target.value })}
+                            className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block">Default Gateway:</label>
+                          <input
+                            type="text"
+                            value={activeForm.gateway || ''}
+                            onChange={(e) => setActiveForm({ ...activeForm, gateway: e.target.value })}
+                            placeholder="192.168.1.1"
+                            className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Row 9: VLAN Settings */}
+                <div className="space-y-3 pt-2 border-t border-slate-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
+                    <label className="text-xs font-bold text-slate-700">VLAN Mode:</label>
+                    <div className="sm:col-span-2">
                       <select
-                        value={activeForm.vlanPriority8021p || 0}
-                        onChange={(e) => setActiveForm({ ...activeForm, vlanPriority8021p: Number(e.target.value) })}
-                        disabled={activeForm.vlanEnabled === false}
-                        className="w-full px-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA] disabled:bg-slate-100"
+                        value={activeForm.vlanMode || 'TAG'}
+                        onChange={(e: any) =>
+                          setActiveForm({
+                            ...activeForm,
+                            vlanMode: e.target.value,
+                            vlanEnabled: e.target.value === 'TAG',
+                          })
+                        }
+                        className="px-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
                       >
-                        {[0, 1, 2, 3, 4, 5, 6, 7].map((p) => (
-                          <option key={p} value={p}>Priority {p} {p === 0 ? '(Best Effort)' : p >= 5 ? '(Voice/High)' : '(Standard)'}</option>
-                        ))}
+                        <option value="TAG">TAG</option>
+                        <option value="UNTAG">UNTAG</option>
+                        <option value="TRANSPARENT">TRANSPARENT</option>
                       </select>
                     </div>
+                  </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">Multicast VLAN ID: [1-4095]</label>
+                  {activeForm.vlanMode !== 'UNTAG' && activeForm.vlanMode !== 'TRANSPARENT' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 block">VLAN ID[1-4094]:</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="4094"
+                          value={activeForm.vlanId}
+                          onChange={(e) => setActiveForm({ ...activeForm, vlanId: Number(e.target.value) })}
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 block">802.1p[0-7]:</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="7"
+                          value={activeForm.vlanPriority8021p || 0}
+                          onChange={(e) => setActiveForm({ ...activeForm, vlanPriority8021p: Number(e.target.value) })}
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-600 block">Multicast VLAN ID[1-4094]:</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="4094"
+                          value={activeForm.multicastVlanId || ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, multicastVlanId: Number(e.target.value) })}
+                          placeholder="Optional"
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block">
+                        MTU{isPppMode ? '[128-1492]' : '[576-1500]'}:
+                      </label>
                       <input
                         type="number"
-                        min="0"
-                        max="4095"
-                        value={activeForm.multicastVlanId || 0}
-                        onChange={(e) => setActiveForm({ ...activeForm, multicastVlanId: Number(e.target.value) })}
-                        className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                        placeholder="0 (Disabled)"
+                        min={isPppMode ? 128 : 576}
+                        max={isPppMode ? 1492 : 1500}
+                        value={activeForm.mtu || (isPppMode ? 1492 : 1500)}
+                        onChange={(e) => setActiveForm({ ...activeForm, mtu: Number(e.target.value) })}
+                        className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white"
                       />
                     </div>
-                  </div>
-                </div>
 
-                {/* Service Type & Protocol Options */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-700">Connection Type / Service:</label>
-                      {showTr069Mapping && (
-                        <span className="text-[9px] font-mono text-blue-600 bg-blue-50 px-1 rounded border border-blue-200">
-                          X_HW_SERVICELIST [RW]
-                        </span>
-                      )}
-                    </div>
-                    <select
-                      value={activeForm.serviceType || 'INTERNET'}
-                      onChange={(e) => setActiveForm({ ...activeForm, serviceType: e.target.value })}
-                      className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                    >
-                      <option value="INTERNET">INTERNET (Broadband Traffic)</option>
-                      <option value="INTERNET_TR069">INTERNET_TR069 (Dual Service)</option>
-                      <option value="TR069">TR069 (Dedicated Management)</option>
-                      <option value="VOIP">VOIP (SIP Voice Trunk)</option>
-                      <option value="IPTV">IPTV (Multicast Video Stream)</option>
-                      <option value="OTHER">OTHER (Custom Routing)</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-700">MTU Size:</label>
-                      {showTr069Mapping && (
-                        <span className="text-[9px] font-mono text-blue-600 bg-blue-50 px-1 rounded border border-blue-200">
-                          ...MaxMTUSize [RW]
-                        </span>
-                      )}
-                    </div>
-                    <input
-                      type="number"
-                      min="576"
-                      max="1500"
-                      value={activeForm.mtu || (activeForm.connectionType === 'PPPoE' ? 1492 : 1500)}
-                      onChange={(e) => setActiveForm({ ...activeForm, mtu: Number(e.target.value) })}
-                      className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-bold text-slate-700">IP Protocol:</label>
-                      {showTr069Mapping && (
-                        <span className="text-[9px] font-mono text-blue-600 bg-blue-50 px-1 rounded border border-blue-200">
-                          X_HW_IPProtocolType [RW]
-                        </span>
-                      )}
-                    </div>
-                    <select
-                      value={activeForm.ipProtocol || 'IPv4/IPv6'}
-                      onChange={(e: any) => setActiveForm({ ...activeForm, ipProtocol: e.target.value })}
-                      className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                    >
-                      <option value="IPv4/IPv6">IPv4/IPv6 (Dual-Stack Auto)</option>
-                      <option value="IPv4">IPv4 Only</option>
-                      <option value="IPv6">IPv6 Only</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Feature Toggles (NAPT, Bridge, MLDP, QoS) */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
-                  <label className="flex items-center space-x-2 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition">
-                    <input
-                      type="checkbox"
-                      checked={activeForm.natEnabled !== false}
-                      onChange={(e) => setActiveForm({ ...activeForm, natEnabled: e.target.checked })}
-                      className="w-4 h-4 text-[#7928CA] rounded"
-                    />
-                    <span className="text-xs font-semibold text-slate-800">Enable NAPT</span>
-                  </label>
-
-                  <label className="flex items-center space-x-2 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition">
-                    <input
-                      type="checkbox"
-                      checked={activeForm.enableBridge || false}
-                      onChange={(e) => setActiveForm({ ...activeForm, enableBridge: e.target.checked })}
-                      className="w-4 h-4 text-[#7928CA] rounded"
-                    />
-                    <span className="text-xs font-semibold text-slate-800">Enable Bridge</span>
-                  </label>
-
-                  <label className="flex items-center space-x-2 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition">
-                    <input
-                      type="checkbox"
-                      checked={activeForm.enableQos || false}
-                      onChange={(e) => setActiveForm({ ...activeForm, enableQos: e.target.checked })}
-                      className="w-4 h-4 text-[#7928CA] rounded"
-                    />
-                    <span className="text-xs font-semibold text-slate-800">Enable QoS</span>
-                  </label>
-
-                  <label className="flex items-center space-x-2 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer transition">
-                    <input
-                      type="checkbox"
-                      checked={activeForm.mldpProxy || false}
-                      onChange={(e) => setActiveForm({ ...activeForm, mldpProxy: e.target.checked })}
-                      className="w-4 h-4 text-[#7928CA] rounded"
-                    />
-                    <span className="text-xs font-semibold text-slate-800">MLDP-Proxy</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* SECTION 2: PPPoE SETTINGS (When PPPoE is chosen) */}
-              {activeForm.connectionType === 'PPPoE' && (
-                <div className="p-5 bg-gradient-to-r from-purple-50/50 to-indigo-50/40 rounded-2xl border border-purple-200 space-y-4">
-                  <div className="flex items-center justify-between pb-2 border-b border-purple-200/60">
-                    <div className="flex items-center space-x-2 text-[#7928CA]">
-                      <Lock className="w-4 h-4" />
-                      <h5 className="text-xs font-bold uppercase tracking-wider">PPPoE Authentication Settings</h5>
-                    </div>
-                    {showTr069Mapping && (
-                      <span className="text-[9px] font-mono text-purple-700 bg-purple-100/70 px-2 py-0.5 rounded border border-purple-300">
-                        {isTr181 ? 'Device.PPP.Interface.1.{Username,Password}' : '...WANPPPConnection.1.{Username,Password}'} [RW]
-                      </span>
+                    {!isBridgeMode && !isTr069Service && (
+                      <div className="flex items-end pb-1.5">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={activeForm.natEnabled !== false}
+                            onChange={(e) => setActiveForm({ ...activeForm, natEnabled: e.target.checked })}
+                            className="w-4 h-4 text-[#7928CA] rounded"
+                          />
+                          <span className="text-xs font-bold text-slate-700">Enable NAT</span>
+                        </label>
+                      </div>
                     )}
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">UserName: *</label>
+                {/* Row 10: DNS Status & DNS Servers */}
+                <div className="space-y-3 pt-2 border-t border-slate-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
+                    <label className="text-xs font-bold text-slate-700">DNS Status:</label>
+                    <div className="sm:col-span-2 flex items-center space-x-6">
+                      <label className="flex items-center space-x-1.5 text-xs font-semibold cursor-pointer text-slate-800">
+                        <input
+                          type="radio"
+                          name="dnsStatus"
+                          value="Enable"
+                          checked={activeForm.dnsStatus === 'Enable'}
+                          onChange={() => setActiveForm({ ...activeForm, dnsStatus: 'Enable' })}
+                          className="text-[#7928CA]"
+                        />
+                        <span>Enable</span>
+                      </label>
+                      <label className="flex items-center space-x-1.5 text-xs font-semibold cursor-pointer text-slate-800">
+                        <input
+                          type="radio"
+                          name="dnsStatus"
+                          value="Disable"
+                          checked={activeForm.dnsStatus !== 'Enable'}
+                          onChange={() => setActiveForm({ ...activeForm, dnsStatus: 'Disable' })}
+                          className="text-[#7928CA]"
+                        />
+                        <span>Disable</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block">Primary DNS Server:</label>
                       <input
                         type="text"
-                        value={activeForm.pppoeUsername || ''}
-                        onChange={(e) => setActiveForm({ ...activeForm, pppoeUsername: e.target.value })}
-                        placeholder="e.g. vgf8686534534_jpt"
-                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-purple-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                        required
+                        value={activeForm.primaryDns || ''}
+                        onChange={(e) => setActiveForm({ ...activeForm, primaryDns: e.target.value })}
+                        disabled={activeForm.dnsStatus !== 'Enable'}
+                        placeholder="8.8.8.8"
+                        className="w-full px-3 py-1.5 text-xs font-mono border border-slate-300 rounded-lg bg-white disabled:bg-slate-100"
                       />
                     </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block">Secondary DNS Server:</label>
+                      <input
+                        type="text"
+                        value={activeForm.secondaryDns || ''}
+                        onChange={(e) => setActiveForm({ ...activeForm, secondaryDns: e.target.value })}
+                        disabled={activeForm.dnsStatus !== 'Enable'}
+                        placeholder="1.1.1.1"
+                        className="w-full px-3 py-1.5 text-xs font-mono border border-slate-300 rounded-lg bg-white disabled:bg-slate-100"
+                      />
+                    </div>
+                  </div>
+                </div>
 
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Password: *</label>
-                      <div className="relative">
+                {/* SECTION: PPPoE CREDENTIALS (When Link Mode == PPP) */}
+                {isPppMode && (
+                  <div className="p-4 bg-purple-50/60 rounded-xl border border-purple-200 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">User Name:</label>
+                        <input
+                          type="text"
+                          value={activeForm.pppoeUsername || ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, pppoeUsername: e.target.value })}
+                          placeholder="e.g. bsnl_user_100"
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-purple-300 rounded-lg bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold text-slate-700">Password:</label>
+                          <label className="flex items-center space-x-1 text-[10px] text-slate-500 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={showPassword}
+                              onChange={(e) => setShowPassword(e.target.checked)}
+                              className="w-3 h-3 text-[#7928CA] rounded"
+                            />
+                            <span>Show Password</span>
+                          </label>
+                        </div>
                         <input
                           type={showPassword ? 'text' : 'password'}
                           value={activeForm.pppoePassword || activeForm.pppoePasswordEncrypted || ''}
                           onChange={(e) => setActiveForm({ ...activeForm, pppoePassword: e.target.value })}
                           placeholder="••••••••••••"
-                          className="w-full pl-3 pr-9 py-2 text-xs font-mono font-bold border border-purple-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-purple-300 rounded-lg bg-white"
                         />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-700"
-                        >
-                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">Service Name:</label>
+                        <input
+                          type="text"
+                          value={activeForm.serviceName || ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, serviceName: e.target.value })}
+                          placeholder="Optional"
+                          className="w-full px-3 py-1.5 text-xs border border-purple-300 rounded-lg bg-white"
+                        />
+                      </div>
+
+                      <div className="flex items-end pb-1.5">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={activeForm.enablePppoeBridgeMode || false}
+                            onChange={(e) => setActiveForm({ ...activeForm, enablePppoeBridgeMode: e.target.checked })}
+                            className="w-4 h-4 text-[#7928CA] rounded"
+                          />
+                          <span className="text-xs font-bold text-slate-700">Enable PPPoE Router Bridge Mode</span>
+                        </label>
                       </div>
                     </div>
                   </div>
+                )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">Type:</label>
-                      <select
-                        value={activeForm.pppoeType || 'Continuous'}
-                        onChange={(e: any) => setActiveForm({ ...activeForm, pppoeType: e.target.value })}
-                        className="w-full px-3 py-1.5 text-xs font-semibold border border-purple-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                      >
-                        <option value="Continuous">Continuous (Always-On)</option>
-                        <option value="OnDemand">Connect On Demand</option>
-                        <option value="Manual">Manual Trigger</option>
-                      </select>
+                {/* SECTION: TR-069 DEDICATED ACS SERVICE (When Bearer Service == TR069) */}
+                {isTr069Service && (
+                  <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-3">
+                    <div className="flex items-center space-x-2 text-emerald-800 pb-1 border-b border-emerald-200">
+                      <Server className="w-4 h-4 text-emerald-600" />
+                      <h5 className="text-xs font-bold uppercase tracking-wider">TR-069 ACS Management Parameters</h5>
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">Idle Time (sec):</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={activeForm.idleTimeSeconds || 0}
-                        onChange={(e) => setActiveForm({ ...activeForm, idleTimeSeconds: Number(e.target.value) })}
-                        className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-purple-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                      />
+                    <div className="grid grid-cols-1 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">ACS URL:</label>
+                        <input
+                          type="text"
+                          value={activeForm.acsUrl || 'http://31.42.125.25:7547/tr069/rudra'}
+                          onChange={(e) => setActiveForm({ ...activeForm, acsUrl: e.target.value })}
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-emerald-300 rounded-lg bg-white"
+                        />
+                      </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">Authentication Method:</label>
-                      <select
-                        value={activeForm.authMethod || 'AUTO'}
-                        onChange={(e: any) => setActiveForm({ ...activeForm, authMethod: e.target.value })}
-                        className="w-full px-3 py-1.5 text-xs font-semibold border border-purple-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                      >
-                        <option value="AUTO">AUTO (Negotiate)</option>
-                        <option value="PAP">PAP Only</option>
-                        <option value="CHAP">CHAP</option>
-                        <option value="MS-CHAP">MS-CHAPv2</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">AC-Name (Access Concentrator):</label>
-                      <input
-                        type="text"
-                        value={activeForm.acName || ''}
-                        onChange={(e) => setActiveForm({ ...activeForm, acName: e.target.value })}
-                        placeholder="Optional ISP AC name"
-                        className="w-full px-3 py-1.5 text-xs border border-purple-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">Service-Name:</label>
-                      <input
-                        type="text"
-                        value={activeForm.serviceName || ''}
-                        onChange={(e) => setActiveForm({ ...activeForm, serviceName: e.target.value })}
-                        placeholder="Optional Service name"
-                        className="w-full px-3 py-1.5 text-xs border border-purple-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#7928CA]"
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">ACS Username:</label>
+                        <input
+                          type="text"
+                          value={activeForm.acsUsername || 'admin'}
+                          onChange={(e) => setActiveForm({ ...activeForm, acsUsername: e.target.value })}
+                          className="w-full px-3 py-1.5 text-xs font-mono border border-emerald-300 rounded-lg bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">ACS Password:</label>
+                        <input
+                          type={showAcsPassword ? 'text' : 'password'}
+                          value={activeForm.acsPassword || 'admin'}
+                          onChange={(e) => setActiveForm({ ...activeForm, acsPassword: e.target.value })}
+                          className="w-full px-3 py-1.5 text-xs font-mono border border-emerald-300 rounded-lg bg-white"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* SECTION 3: STATIC / DHCP IP SETTINGS */}
-              {(activeForm.connectionType === 'Static' || activeForm.connectionType === 'IPoE_DHCP') && (
-                <div className="p-5 bg-blue-50/50 rounded-2xl border border-blue-200 space-y-4">
-                  <div className="flex items-center justify-between pb-2 border-b border-blue-200">
-                    <div className="flex items-center space-x-2 text-blue-700">
-                      <Network className="w-4 h-4" />
-                      <h5 className="text-xs font-bold uppercase tracking-wider">
-                        {activeForm.connectionType === 'Static' ? 'Static IP Routing Configuration' : 'IPoE / DHCP Client Status'}
-                      </h5>
-                    </div>
-                    {showTr069Mapping && (
-                      <span className="text-[9px] font-mono text-blue-700 bg-blue-100 px-2 py-0.5 rounded border border-blue-300">
-                        ...WANIPConnection.1.{'{ExternalIPAddress,SubnetMask,DefaultGateway}'} [RW]
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">IP Address:</label>
-                      <input
-                        type="text"
-                        value={activeForm.ipAddress || ''}
-                        onChange={(e) => setActiveForm({ ...activeForm, ipAddress: e.target.value })}
-                        disabled={activeForm.connectionType === 'IPoE_DHCP'}
-                        placeholder="192.168.1.100"
-                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-blue-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
-                      />
+                {/* SECTION: VOIP SIP CONFIGURATION (When Bearer Service == VOIP) */}
+                {isVoipService && supportsVoip && (
+                  <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200 space-y-3">
+                    <div className="flex items-center space-x-2 text-amber-800 pb-1 border-b border-amber-200">
+                      <Radio className="w-4 h-4 text-amber-600" />
+                      <h5 className="text-xs font-bold uppercase tracking-wider">VoIP SIP Trunk Configuration (FXS Voice)</h5>
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Subnet Mask:</label>
-                      <input
-                        type="text"
-                        value={activeForm.subnetMask || '255.255.255.0'}
-                        onChange={(e) => setActiveForm({ ...activeForm, subnetMask: e.target.value })}
-                        disabled={activeForm.connectionType === 'IPoE_DHCP'}
-                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-blue-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Default Gateway:</label>
-                      <input
-                        type="text"
-                        value={activeForm.gateway || ''}
-                        onChange={(e) => setActiveForm({ ...activeForm, gateway: e.target.value })}
-                        disabled={activeForm.connectionType === 'IPoE_DHCP'}
-                        placeholder="192.168.1.1"
-                        className="w-full px-3 py-2 text-xs font-mono font-bold border border-blue-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">SIP Proxy / Server:</label>
+                        <input
+                          type="text"
+                          value={activeForm.voipSipServer || 'sip.isp.net'}
+                          onChange={(e) => setActiveForm({ ...activeForm, voipSipServer: e.target.value })}
+                          className="w-full px-3 py-1.5 text-xs font-mono border border-amber-300 rounded-lg bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">SIP Port:</label>
+                        <input
+                          type="number"
+                          value={activeForm.voipSipPort || 5060}
+                          onChange={(e) => setActiveForm({ ...activeForm, voipSipPort: Number(e.target.value) })}
+                          className="w-full px-3 py-1.5 text-xs font-mono border border-amber-300 rounded-lg bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">Auth Account / Number:</label>
+                        <input
+                          type="text"
+                          value={activeForm.voipAccount || ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, voipAccount: e.target.value })}
+                          placeholder="e.g. +914023456789"
+                          className="w-full px-3 py-1.5 text-xs font-mono border border-amber-300 rounded-lg bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">Auth Password:</label>
+                        <input
+                          type={showVoipPassword ? 'text' : 'password'}
+                          value={activeForm.voipPassword || ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, voipPassword: e.target.value })}
+                          className="w-full px-3 py-1.5 text-xs font-mono border border-amber-300 rounded-lg bg-white"
+                        />
+                      </div>
                     </div>
                   </div>
+                )}
+              </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">Primary DNS Server:</label>
-                      <input
-                        type="text"
-                        value={activeForm.primaryDns || '8.8.8.8'}
-                        onChange={(e) => setActiveForm({ ...activeForm, primaryDns: e.target.value })}
-                        className="w-full px-3 py-1.5 text-xs font-mono border border-blue-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-600 block">Secondary DNS Server:</label>
-                      <input
-                        type="text"
-                        value={activeForm.secondaryDns || '1.1.1.1'}
-                        onChange={(e) => setActiveForm({ ...activeForm, secondaryDns: e.target.value })}
-                        className="w-full px-3 py-1.5 text-xs font-mono border border-blue-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* SECTION 4: PORT & SSID BINDING (VLAN MAPPING) */}
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                  <div className="flex items-center space-x-2 text-slate-800">
-                    <Cpu className="w-4 h-4 text-[#1677FF]" />
-                    <h5 className="text-xs font-bold uppercase tracking-wider">Port & SSID Interface Binding</h5>
-                  </div>
-                  {showTr069Mapping && (
-                    <span className="text-[9px] font-mono text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                      X_HW_LanInterface / X_BROADCOM_COM_LanMux [RW]
-                    </span>
+              {/* Form Action Buttons (OK / Cancel / Delete) */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+                <div>
+                  {profiles.length > 1 && activeForm._id && (
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmProfile(activeForm)}
+                      className="px-4 py-2 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition"
+                    >
+                      Delete
+                    </button>
                   )}
                 </div>
 
-                <div className="space-y-3 text-xs">
-                  {/* LAN Ports */}
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-2">Physical LAN Ports:</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                      {['LAN1', 'LAN2', 'LAN3', 'LAN4'].map((port) => {
-                        const isChecked = (activeForm.lanPortBindings || []).includes(port);
-                        const isTagged = Boolean(activeForm.vlanEnabled && activeForm.vlanId);
-                        return (
-                          <label
-                            key={port}
-                            className={`flex flex-col p-2.5 rounded-xl border cursor-pointer transition ${
-                              isChecked ? 'bg-blue-50 border-blue-300 text-blue-900 font-bold' : 'bg-white border-slate-200 text-slate-700'
-                            }`}
-                          >
-                            <div className="flex items-center space-x-2">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={(e) => {
-                                  const current = activeForm.lanPortBindings || [];
-                                  const updated = e.target.checked ? [...current, port] : current.filter((p) => p !== port);
-                                  setActiveForm({ ...activeForm, lanPortBindings: updated });
-                                }}
-                                className="w-4 h-4 text-blue-600 rounded"
-                              />
-                              <span>{port} (Gigabit)</span>
-                            </div>
-                            {isChecked && (
-                              <span className={`mt-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded inline-block ${
-                                isTagged ? 'bg-purple-100 text-purple-800' : 'bg-slate-200 text-slate-700'
-                              }`}>
-                                {isTagged ? `Tagged (Trunk: VID ${activeForm.vlanId})` : 'Untagged (Access)'}
-                              </span>
-                            )}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* WLAN SSIDs */}
-                  <div className="pt-2">
-                    <label className="text-xs font-bold text-slate-700 block mb-2">Wireless WLAN SSIDs:</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                      {['2.4GHz SSID-1', '2.4GHz SSID-2', '5GHz SSID-1', '5GHz SSID-2'].map((ssid) => {
-                        const isChecked = (activeForm.ssidBindings || []).includes(ssid);
-                        return (
-                          <label
-                            key={ssid}
-                            className={`flex items-center space-x-2 p-2.5 rounded-xl border cursor-pointer transition ${
-                              isChecked ? 'bg-purple-50 border-purple-300 text-purple-900 font-bold' : 'bg-white border-slate-200 text-slate-700'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={(e) => {
-                                const current = activeForm.ssidBindings || [];
-                                const updated = e.target.checked ? [...current, ssid] : current.filter((s) => s !== ssid);
-                                setActiveForm({ ...activeForm, ssidBindings: updated });
-                              }}
-                              className="w-4 h-4 text-purple-600 rounded"
-                            />
-                            <span>{ssid}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* ACTION BUTTONS */}
-              <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="flex items-center space-x-2 text-xs text-slate-500">
-                  <Activity className="w-4 h-4 text-emerald-600" />
-                  <span>TR-069 Annex G Dynamic RPC Sync Ready</span>
-                </div>
-
-                <div className="flex items-center space-x-2.5">
+                <div className="flex items-center space-x-3">
                   <Button
                     type="button"
-                    variant="outline"
-                    onClick={handleSaveDraft}
-                    isLoading={isSaving}
-                    className="font-bold text-xs"
+                    variant="secondary"
+                    onClick={() => {
+                      if (profiles.length > 0) {
+                        handleSelectProfile(profiles[0]);
+                      }
+                    }}
                   >
-                    <Save className="w-3.5 h-3.5 mr-1 text-slate-600" />
-                    <span>Save Draft</span>
+                    Cancel
                   </Button>
 
                   <Button
                     type="submit"
                     variant="primary"
-                    className="bg-[#7928CA] hover:bg-[#6019A8] text-white font-bold text-xs px-5 shadow-md flex items-center space-x-1.5"
+                    className="bg-[#1677FF] hover:bg-[#0958d9] text-white font-bold px-6"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Apply & Preview Diff</span>
+                    OK / Apply
                   </Button>
                 </div>
               </div>
             </form>
           ) : (
-            <div className="p-12 text-center text-slate-400">
-              <Globe className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-              <p className="font-semibold text-sm">Select a WAN Connection on the left to configure parameters.</p>
+            <div className="p-12 text-center text-slate-400 text-xs">
+              Select a WAN connection or click "New" to configure.
             </div>
           )}
         </div>
       </div>
 
-      {/* DIFF PREVIEW & SAFETY CONFIRMATION MODAL */}
-      {isDiffModalOpen && activeForm && (
-        <Modal
-          isOpen={isDiffModalOpen}
-          onClose={() => setIsDiffModalOpen(false)}
-          title={`Safety Review: Apply Changes to [${activeForm.name}]`}
-          subtitle="Inspect exact TR-069 parameter diff before committing to physical ONT"
-          maxWidth="lg"
-        >
-          <div className="space-y-4">
-            <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-xs flex items-start space-x-2.5">
-              <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">Autonomous Safety Validation Passed</p>
-                <p className="text-blue-700 text-[11px] mt-0.5">
-                  The parameters below will be queued and transmitted via SOAP <code>SetParameterValues</code> on the ONT's active CWMP session.
-                </p>
-              </div>
-            </div>
+      {/* COMMIT DIFF MODAL */}
+      <Modal
+        isOpen={isDiffModalOpen}
+        onClose={() => setIsDiffModalOpen(false)}
+        title="Verify WAN Changes Before Staging to ONT"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-600">
+            The following parameters will be updated in the WAN profile for <strong>{activeForm?.name}</strong> and queued for native TR-069 dispatch to ONT:
+          </p>
 
-            {/* Diff Table */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[300px] overflow-y-auto">
-              <table className="w-full text-left text-xs font-sans">
-                <thead className="bg-slate-100 border-b border-slate-200 text-[11px] font-bold text-slate-600">
+          {diffList.length > 0 ? (
+            <div className="border border-slate-200 rounded-xl overflow-hidden text-xs">
+              <table className="w-full text-left">
+                <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
                   <tr>
-                    <th className="py-2.5 px-3">Field</th>
-                    <th className="py-2.5 px-3">TR-069 Parameter Path</th>
-                    <th className="py-2.5 px-3">Previous Value</th>
-                    <th className="py-2.5 px-3">New Value</th>
+                    <th className="p-2.5">Parameter</th>
+                    <th className="p-2.5 text-slate-500">Current / Previous</th>
+                    <th className="p-2.5 text-blue-600">New Staged Value</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-xs">
-                  {diffList.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="py-6 text-center text-slate-400 italic">
-                        No field modifications detected. Profile is in sync.
-                      </td>
+                <tbody className="divide-y divide-slate-100 font-mono">
+                  {diffList.map((d, i) => (
+                    <tr key={i} className="hover:bg-slate-50">
+                      <td className="p-2.5 font-sans font-bold text-slate-800">{d.label}</td>
+                      <td className="p-2.5 text-slate-400 line-through">{d.oldValue}</td>
+                      <td className="p-2.5 text-blue-700 font-bold bg-blue-50/50">{d.newValue}</td>
                     </tr>
-                  ) : (
-                    diffList.map((d, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-bold text-slate-800">{d.label || d.field}</td>
-                        <td className="py-2.5 px-3 font-mono text-[10px] text-blue-700">{d.tr069Path}</td>
-                        <td className="py-2.5 px-3 font-mono text-slate-500">{String(d.oldValue)}</td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-emerald-600">{String(d.newValue)}</td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
-
-            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setIsDiffModalOpen(false)}
-                disabled={isCommitting}
-              >
-                Back to Edit
-              </Button>
-
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleApplyCommit}
-                isLoading={isCommitting}
-                className="bg-[#7928CA] hover:bg-[#6019A8] text-white font-bold px-5"
-              >
-                <Send className="w-3.5 h-3.5 mr-1" />
-                <span>Confirm & Commit to ONT</span>
-              </Button>
+          ) : (
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 text-center">
+              No parameter changes detected compared to existing state.
             </div>
+          )}
+
+          <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+            <Button type="button" variant="secondary" onClick={() => setIsDiffModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={handleCommitToOnt}
+              isLoading={isCommitting}
+              className="bg-[#1677FF] hover:bg-[#0958d9]"
+            >
+              Confirm & Stage to ONT
+            </Button>
           </div>
-        </Modal>
-      )}
+        </div>
+      </Modal>
 
-      {/* DELETE PROFILE MODAL */}
-      {deleteConfirmProfile && (
-        <Modal
-          isOpen={Boolean(deleteConfirmProfile)}
-          onClose={() => setDeleteConfirmProfile(null)}
-          title={`Delete WAN Connection [${deleteConfirmProfile.name}]`}
-          maxWidth="md"
-        >
-          <div className="space-y-4">
-            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start space-x-3 text-rose-800">
-              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-rose-600" />
-              <div className="text-xs space-y-1">
-                <p className="font-bold">Are you sure you want to delete this WAN profile?</p>
-                <p className="text-rose-700">
-                  This will remove <strong>{deleteConfirmProfile.name}</strong> (VLAN {deleteConfirmProfile.vlanId}) and unbind its associated LAN/SSID ports.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
-              <Button variant="secondary" size="sm" onClick={() => setDeleteConfirmProfile(null)}>
-                Cancel
-              </Button>
-              <Button variant="danger" size="sm" onClick={handleDeleteProfile} className="font-bold">
-                <Trash2 className="w-3.5 h-3.5 mr-1" />
-                <span>Delete Profile</span>
-              </Button>
-            </div>
+      {/* DELETE CONFIRMATION MODAL */}
+      <Modal
+        isOpen={Boolean(deleteConfirmProfile)}
+        onClose={() => setDeleteConfirmProfile(null)}
+        title="Delete WAN Connection"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-700">
+            Are you sure you want to delete WAN Profile <strong>{deleteConfirmProfile?.name}</strong>?
+          </p>
+          <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
+            <Button type="button" variant="secondary" onClick={() => setDeleteConfirmProfile(null)}>
+              Cancel
+            </Button>
+            <Button type="button" variant="primary" onClick={handleDeleteProfile} isLoading={isSaving} className="bg-rose-600 hover:bg-rose-700">
+              Delete Profile
+            </Button>
           </div>
-        </Modal>
-      )}
+        </div>
+      </Modal>
     </div>
   );
 };
