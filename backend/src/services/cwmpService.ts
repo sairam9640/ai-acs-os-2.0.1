@@ -2029,6 +2029,12 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
     device.status = 'online';
     await device.save();
 
+    // Mark SUMMON_LIVE_POLL and any telemetry polling commands as success
+    await DeviceCommand.updateMany(
+      { deviceId: device._id, action: 'SUMMON_LIVE_POLL', status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
+      { $set: { status: 'success', completedAt: new Date() } }
+    ).catch(() => {});
+
     console.log(
       `[CWMP ACS] Ingested Live GPV Response for ${device.serialNumber} | SSID: ${device.wifi24?.ssid ?? 'N/A'} | Rx: ${device.currentRxPowerDbm ?? 'N/A'} dBm | Status: ${device.lastParameterSyncStatus}`
     );
