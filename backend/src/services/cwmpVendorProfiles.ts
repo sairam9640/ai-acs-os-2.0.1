@@ -201,15 +201,20 @@ export class CwmpVendorProfiles {
       ];
     }
 
-    // Standard Universal TR-098 parameters guaranteed across all vendors without Fault 9005
+    // Standard Universal TR-098 / IGD Parameters guaranteed on 100% of devices (TR-098 Issue 1 & 2)
     return [
       'InternetGatewayDevice.DeviceInfo.Manufacturer',
+      'InternetGatewayDevice.DeviceInfo.ManufacturerOUI',
       'InternetGatewayDevice.DeviceInfo.ModelName',
+      'InternetGatewayDevice.DeviceInfo.Description',
+      'InternetGatewayDevice.DeviceInfo.SerialNumber',
+      'InternetGatewayDevice.DeviceInfo.HardwareVersion',
       'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
       'InternetGatewayDevice.DeviceInfo.UpTime',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
+      'InternetGatewayDevice.ManagementServer.ConnectionRequestURL',
+      'InternetGatewayDevice.ManagementServer.ParameterKey',
     ];
   }
 
