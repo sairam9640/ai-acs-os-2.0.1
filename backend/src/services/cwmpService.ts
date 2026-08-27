@@ -1257,13 +1257,7 @@ ${stringElements}
               return name.includes('WANPPPConnection');
             });
 
-            // Check if device currently only has WANIPConnection in raw parameters
-            const hasOnlyIpWan = !rawParams.some((p: any) => {
-              const name = Array.isArray(p) ? p[0] : (p.name || p.path || '');
-              return (dev as any)?.tr069Parameters?.[name];
-            });
-
-            if (isPppoeCreation && session.stage !== 'ADD_OBJECT_SENT' && pendingCmd.action === 'SET_WAN_CONFIG') {
+            if (isPppoeCreation && session.stage !== 'ADD_OBJECT_SENT') {
               session.stage = 'ADD_OBJECT_SENT';
               const addObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -1275,6 +1269,18 @@ ${stringElements}
     </cwmp:AddObject>
   </soapenv:Body>
 </soapenv:Envelope>`;
+              CwmpSessionLog.create({
+                tenantId: session.tenantId,
+                deviceId: dev._id,
+                serialNumber: session.serialNumber,
+                sessionId: session.sessionId,
+                cwmpId: '3',
+                direction: 'ACS_TO_CPE',
+                rpcMethod: 'AddObject',
+                httpStatus: 200,
+                rawXml: addObjectXml,
+                timestamp: new Date(),
+              }).catch(() => {});
               console.log(`[Native CWMP OUT] Dispatched AddObject RPC for WANPPPConnection on ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
               return addObjectXml;
             }
