@@ -72,6 +72,13 @@ operatorRouter.get('/dashboard/summary', async (req: AuthenticatedRequest, res: 
   try {
     const tenantId = new Types.ObjectId(req.tenantId);
 
+    // Automatically transition stale devices (> 5 mins without TR-069 inform) to offline
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    await Device.updateMany(
+      { tenantId, status: 'online', $or: [{ lastInform: { $lt: fiveMinutesAgo } }, { lastInform: null }] },
+      { $set: { status: 'offline' } }
+    );
+
     const [
       totalCustomers,
       activeCustomers,
@@ -344,6 +351,13 @@ operatorRouter.get('/devices', async (req: AuthenticatedRequest, res: Response) 
       : new Types.ObjectId('6a8b4af0c02cab47ff9b11ef');
     const { search, status, opticalStatus } = req.query;
 
+    // Transition stale devices (> 5 mins without inform) to offline
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    await Device.updateMany(
+      { tenantId, status: 'online', $or: [{ lastInform: { $lt: fiveMinutesAgo } }, { lastInform: null }] },
+      { $set: { status: 'offline' } }
+    );
+
     const query: any = { tenantId };
     if (status && status !== 'all') query.status = status;
     if (opticalStatus && opticalStatus !== 'all') query.opticalStatus = opticalStatus;
@@ -377,6 +391,13 @@ operatorRouter.get('/devices/:id', async (req: AuthenticatedRequest, res: Respon
     const tenantId = new Types.ObjectId(req.tenantId);
     const device = await Device.findOne({ _id: req.params.id, tenantId }).populate('customerId');
     if (!device) return res.status(404).json({ success: false, error: 'Device not found in tenant context' });
+
+    // Dynamic liveness evaluation
+    const isAlive = device.lastInform && (Date.now() - new Date(device.lastInform).getTime() <= 5 * 60 * 1000);
+    if (!isAlive && device.status === 'online') {
+      device.status = 'offline';
+      await Device.updateOne({ _id: device._id }, { $set: { status: 'offline' } });
+    }
 
     const capabilities = await DeviceManagementService.getDeviceCapabilities(device);
 
@@ -2268,11 +2289,12 @@ operatorRouter.post('/devices/:id/summon', async (req: AuthenticatedRequest, res
     const device = await Device.findOne(getSafeDeviceQuery(req.params.id, tenantId)).populate('customerId', 'fullName accountNumber');
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
-    // Queue live sync command in Native CWMP engine
+    // Queue safe telemetry poll command in Native CWMP engine (NEVER reboot)
     await DeviceCommand.create({
       tenantId: device.tenantId,
       deviceId: device._id,
       serialNumber: device.serialNumber,
+      action: 'SUMMON_LIVE_POLL',
       commandType: 'SUMMON_LIVE_POLL',
       rpcMethod: 'GetParameterValues',
       status: 'pending',
@@ -2282,14 +2304,6 @@ operatorRouter.post('/devices/:id/summon', async (req: AuthenticatedRequest, res
 
     // Trigger Connection Request so ONT immediately checks in
     await triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
-
-    const now = new Date();
-    await Device.updateOne(
-      { _id: device._id },
-      { $set: { lastInform: now, status: 'online' } }
-    );
-    device.lastInform = now;
-    device.status = 'online';
 
     await recordAuditLog({
       tenantId,
@@ -2305,7 +2319,7 @@ operatorRouter.post('/devices/:id/summon', async (req: AuthenticatedRequest, res
 
     return res.json({
       success: true,
-      message: `Summon triggered! Polling live telemetry for ONT ${device.serialNumber}.`,
+      message: `Summon dispatched for ONT ${device.serialNumber}. Awaiting real-time CWMP inform.`,
       lastInform: device.lastInform,
       status: device.status,
       device,
@@ -2329,15 +2343,13 @@ operatorRouter.post('/devices/summon-all', async (req: AuthenticatedRequest, res
         tenantId: dev.tenantId,
         deviceId: dev._id,
         serialNumber: dev.serialNumber,
+        action: 'SUMMON_LIVE_POLL',
         commandType: 'CUSTOM_RPC',
         rpcMethod: 'GetParameterValues',
         status: 'pending',
         payload: { parameterNames: ['InternetGatewayDevice.'] },
         correlationId: `bulk_summon_${Date.now()}`
       }).catch(() => {});
-      dev.lastInform = new Date();
-      dev.status = 'online';
-      await dev.save();
       dispatchedCount++;
     }
 
@@ -2764,6 +2776,13 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
     const tenantId = new Types.ObjectId(req.tenantId);
     const device = await Device.findOne(getSafeDeviceQuery(req.params.id, tenantId)).populate('customerId', 'fullName accountNumber phone email address status planName');
     if (!device) return res.status(404).json({ success: false, error: 'Device not found in your tenant context' });
+
+    // Dynamic real-time liveness check (> 5 mins without inform = offline)
+    const isAlive = device.lastInform && (Date.now() - new Date(device.lastInform).getTime() <= 5 * 60 * 1000);
+    if (!isAlive && device.status === 'online') {
+      device.status = 'offline';
+      await Device.updateOne({ _id: device._id }, { $set: { status: 'offline' } });
+    }
 
     const d = device as any;
     const customerObj = device.customerId as any;

@@ -1,6 +1,10 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 export type CommandActionType =
+  | 'GET_PARAMETERS'
+  | 'SUMMON_LIVE_POLL'
+  | 'CUSTOM_RPC'
+  | 'REFRESH_TELEMETRY'
   | 'SET_WIFI_CONFIG'
   | 'SET_WAN_CONFIG'
   | 'BLOCK_CLIENT'
@@ -67,6 +71,10 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
     action: {
       type: String,
       enum: [
+        'GET_PARAMETERS',
+        'SUMMON_LIVE_POLL',
+        'CUSTOM_RPC',
+        'REFRESH_TELEMETRY',
         'SET_WIFI_CONFIG',
         'SET_WAN_CONFIG',
         'BLOCK_CLIENT',
@@ -76,7 +84,7 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
         'FIRMWARE_UPGRADE',
         'FACTORY_RESET',
       ],
-      default: 'REBOOT_DEVICE',
+      default: 'GET_PARAMETERS',
       index: true,
     },
     parameters: { type: Schema.Types.Mixed, default: () => ({}) },
