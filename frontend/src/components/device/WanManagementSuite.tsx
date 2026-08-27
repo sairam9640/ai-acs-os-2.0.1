@@ -333,41 +333,57 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
         ? 'Static'
         : 'IPoE_DHCP';
 
-    const stagedForm = {
+    const isVoipOrTr069 = activeForm.bearerService === 'VOIP' || activeForm.bearerService === 'TR069';
+    const stagedForm: WanProfileData = {
       ...activeForm,
       connectionType: finalConnectionType,
       serviceType: activeForm.bearerService || 'INTERNET',
       vlanEnabled: activeForm.vlanMode === 'TAG',
+      lanPortBindings: isVoipOrTr069 ? [] : activeForm.lanPortBindings,
+      ssidBindings: isVoipOrTr069 ? [] : activeForm.ssidBindings,
+      enableDhcpServer: isVoipOrTr069 ? false : activeForm.enableDhcpServer,
+      enablePppoeBridgeMode: isVoipOrTr069 ? false : activeForm.enablePppoeBridgeMode,
+      pppoeUsername: isVoipOrTr069 || activeForm.linkMode === 'IP' ? '' : activeForm.pppoeUsername,
+      pppoePassword: isVoipOrTr069 || activeForm.linkMode === 'IP' ? '' : activeForm.pppoePassword,
+      serviceName: isVoipOrTr069 || activeForm.linkMode === 'IP' ? '' : activeForm.serviceName,
     };
 
     const original = profiles.find((p) => p._id === selectedProfileId) || {};
     const diffs: any[] = [];
 
-    const keysToCompare = [
-      { key: 'name', label: 'Connection Name' },
-      { key: 'mode', label: 'Mode (Route/Bridge)' },
-      { key: 'bearerService', label: 'Bearer Service' },
-      { key: 'linkMode', label: 'Link Mode' },
-      { key: 'ipProtocol', label: 'IP Protocol Version' },
-      { key: 'ipAssignment', label: 'IP Assignment' },
-      { key: 'vlanMode', label: 'VLAN Mode' },
-      { key: 'vlanId', label: 'VLAN ID' },
-      { key: 'vlanPriority8021p', label: '802.1p Priority' },
-      { key: 'mtu', label: 'MTU' },
-      { key: 'natEnabled', label: 'Enable NAT' },
-      { key: 'enableDhcpServer', label: 'Enable DHCP Server' },
-      { key: 'pppoeUsername', label: 'PPPoE Username' },
-      { key: 'pppoePassword', label: 'PPPoE Password' },
-      { key: 'serviceName', label: 'PPPoE Service Name' },
-      { key: 'enablePppoeBridgeMode', label: 'PPPoE Router Bridge Mode' },
-      { key: 'lanPortBindings', label: 'LAN Port Bindings' },
-      { key: 'ssidBindings', label: 'SSID Bindings' },
-      { key: 'ipAddress', label: 'Static IP Address' },
-      { key: 'subnetMask', label: 'Subnet Mask' },
-      { key: 'gateway', label: 'Default Gateway' },
-      { key: 'primaryDns', label: 'Primary DNS' },
-      { key: 'secondaryDns', label: 'Secondary DNS' },
+    const isVoip = stagedForm.bearerService === 'VOIP';
+    const isTr069 = stagedForm.bearerService === 'TR069';
+    const isPpp = stagedForm.linkMode === 'PPP';
+    const isStatic = stagedForm.linkMode === 'IP' && stagedForm.ipAssignment === 'Static';
+
+    const allKeys = [
+      { key: 'name', label: 'Connection Name', show: true },
+      { key: 'mode', label: 'Mode (Route/Bridge)', show: true },
+      { key: 'bearerService', label: 'Bearer Service', show: true },
+      { key: 'linkMode', label: 'Link Mode', show: true },
+      { key: 'ipProtocol', label: 'IP Protocol Version', show: true },
+      { key: 'ipAssignment', label: 'IP Assignment', show: !isPpp },
+      { key: 'vlanMode', label: 'VLAN Mode', show: true },
+      { key: 'vlanId', label: 'VLAN ID', show: stagedForm.vlanMode !== 'UNTAG' && stagedForm.vlanMode !== 'TRANSPARENT' },
+      { key: 'vlanPriority8021p', label: '802.1p Priority', show: stagedForm.vlanMode !== 'UNTAG' && stagedForm.vlanMode !== 'TRANSPARENT' },
+      { key: 'multicastVlanId', label: 'Multicast VLAN ID', show: Boolean(stagedForm.multicastVlanId) },
+      { key: 'mtu', label: 'MTU', show: true },
+      { key: 'natEnabled', label: 'Enable NAT', show: !isVoip && !isTr069 && stagedForm.mode !== 'Bridge' },
+      { key: 'enableDhcpServer', label: 'Enable DHCP Server', show: !isVoip && !isTr069 && stagedForm.mode !== 'Bridge' },
+      { key: 'pppoeUsername', label: 'PPPoE Username', show: isPpp && !isVoip && !isTr069 },
+      { key: 'pppoePassword', label: 'PPPoE Password', show: isPpp && !isVoip && !isTr069 },
+      { key: 'serviceName', label: 'PPPoE Service Name', show: isPpp && !isVoip && !isTr069 && Boolean(stagedForm.serviceName) },
+      { key: 'enablePppoeBridgeMode', label: 'PPPoE Router Bridge Mode', show: isPpp && !isVoip && !isTr069 },
+      { key: 'lanPortBindings', label: 'LAN Port Bindings', show: !isVoip && !isTr069 },
+      { key: 'ssidBindings', label: 'SSID Bindings', show: !isVoip && !isTr069 },
+      { key: 'ipAddress', label: 'Static IP Address', show: isStatic },
+      { key: 'subnetMask', label: 'Subnet Mask', show: isStatic },
+      { key: 'gateway', label: 'Default Gateway', show: isStatic },
+      { key: 'primaryDns', label: 'Primary DNS', show: stagedForm.dnsStatus === 'Enable' },
+      { key: 'secondaryDns', label: 'Secondary DNS', show: stagedForm.dnsStatus === 'Enable' },
     ];
+
+    const keysToCompare = allKeys.filter(k => k.show);
 
     for (const item of keysToCompare) {
       const oldVal = (original as any)[item.key];
