@@ -1,0 +1,290 @@
+{
+  "_meta": {
+    "vendor": "Genexis",
+    "model": "Platinum-4410",
+    "vendor_id": "GNXS",
+    "vendor_id_hex": "474E5853",
+    "chipset": "Custom (Linux-based drgos firmware)",
+    "data_model": "TR-098 (InternetGatewayDevice)",
+    "note": "Genexis uses custom firmware. Proprietary paths MUST be discovered via GetParameterNames before querying."
+  },
+  "universal_baseline": {
+    "description": "100% safe on Platinum-4410. Query these first to identify the device.",
+    "device_identity": [
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.Manufacturer",
+        "type": "string",
+        "access": "R",
+        "value_example": "Genexis"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.ManufacturerOUI",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.ModelName",
+        "type": "string",
+        "access": "R",
+        "value_example": "Platinum-4410"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.Description",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.SerialNumber",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.HardwareVersion",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.SoftwareVersion",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.UpTime",
+        "type": "unsignedInt",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.DeviceInfo.DeviceStatus",
+        "type": "string",
+        "access": "R"
+      }
+    ],
+    "acs_management": [
+      {
+        "path": "InternetGatewayDevice.ManagementServer.URL",
+        "type": "string",
+        "access": "W"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.Username",
+        "type": "string",
+        "access": "W"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.Password",
+        "type": "string",
+        "access": "W"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.PeriodicInformEnable",
+        "type": "boolean",
+        "access": "W"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.PeriodicInformInterval",
+        "type": "unsignedInt",
+        "access": "W"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.ConnectionRequestURL",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.ManagementServer.ParameterKey",
+        "type": "string",
+        "access": "R"
+      }
+    ]
+  },
+  "wan_data_tx_rx": {
+    "description": "WAN connection stats and info \u2014 all standard TR-098, safe to query",
+    "wan_common": [
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.PhysicalLinkStatus",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalBytesSent",
+        "type": "unsignedInt",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalBytesReceived",
+        "type": "unsignedInt",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalPacketsSent",
+        "type": "unsignedInt",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANCommonInterfaceConfig.TotalPacketsReceived",
+        "type": "unsignedInt",
+        "access": "R"
+      }
+    ],
+    "wan_ip_connection": [
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.SubnetMask",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DefaultGateway",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.DNSServers",
+        "type": "string",
+        "access": "W"
+      }
+    ]
+  },
+  "lan_ethernet": {
+    "description": "4 LAN ports on Platinum-4410",
+    "ports": [
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.Status",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2.Status",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3.Status",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4.Status",
+        "type": "string",
+        "access": "R"
+      }
+    ]
+  },
+  "wifi": {
+    "description": "2.4GHz + 5GHz dual-band WiFi on Platinum-4410",
+    "radios": [
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID",
+        "type": "string",
+        "access": "W",
+        "label": "WiFi 2.4GHz SSID"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel",
+        "type": "unsignedInt",
+        "access": "W"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Status",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.TotalAssociations",
+        "type": "unsignedInt",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID",
+        "type": "string",
+        "access": "W",
+        "label": "WiFi 5GHz SSID"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel",
+        "type": "unsignedInt",
+        "access": "W"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Status",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.TotalAssociations",
+        "type": "unsignedInt",
+        "access": "R"
+      }
+    ]
+  },
+  "lan_hosts": {
+    "description": "DHCP client table / connected devices",
+    "hosts": [
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries",
+        "type": "unsignedInt",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.IPAddress",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.MACAddress",
+        "type": "string",
+        "access": "R"
+      },
+      {
+        "path": "InternetGatewayDevice.LANDevice.1.Hosts.Host.1.HostName",
+        "type": "string",
+        "access": "R"
+      }
+    ]
+  },
+  "genexis_proprietary": {
+    "discovery_branches": [
+      "InternetGatewayDevice.X_GNXS.",
+      "InternetGatewayDevice.X_Genexis.",
+      "InternetGatewayDevice.X_474E5853.",
+      "InternetGatewayDevice.DeviceInfo.X_GNXS.",
+      "InternetGatewayDevice.DeviceInfo.X_Genexis."
+    ],
+    "likely_parameters": [
+      {
+        "path": "InternetGatewayDevice.X_GNXS_Gpon.OpticalTxPower",
+        "category": "gpon_optical",
+        "confidence": "medium"
+      },
+      {
+        "path": "InternetGatewayDevice.X_GNXS_Gpon.OpticalRxPower",
+        "category": "gpon_optical",
+        "confidence": "medium"
+      },
+      {
+        "path": "InternetGatewayDevice.X_GNXS_Gpon.ONU_ID",
+        "category": "gpon_id",
+        "confidence": "medium"
+      },
+      {
+        "path": "InternetGatewayDevice.X_GNXS_Gpon.LOID",
+        "category": "gpon_id",
+        "confidence": "medium"
+      },
+      {
+        "path": "InternetGatewayDevice.X_GNXS_Gpon.PLOAMState",
+        "category": "gpon_id",
+        "confidence": "medium"
+      }
+    ]
+  }
+}

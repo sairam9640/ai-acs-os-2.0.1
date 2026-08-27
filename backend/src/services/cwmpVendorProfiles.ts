@@ -238,6 +238,15 @@ export class CwmpVendorProfiles {
           'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
         ];
 
+      case 'GENEXIS':
+        return [
+          'InternetGatewayDevice.X_GNXS_Gpon.OpticalRxPower',
+          'InternetGatewayDevice.X_Genexis_Gpon.OpticalRxPower',
+          'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
+          'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower',
+          'InternetGatewayDevice.WANDevice.1.WANGponInterfaceConfig.RXPower',
+        ];
+
       case 'NOKIA':
         return [
           'InternetGatewayDevice.X_00000C_Gpon.OpticalPowerRx',
@@ -327,6 +336,16 @@ export class CwmpVendorProfiles {
         'InternetGatewayDevice.X_00000C_Gpon.GEM_Port',
         'InternetGatewayDevice.X_00000C_Gpon.LOID',
         'InternetGatewayDevice.X_00000C_Gpon.PLOAMState',
+      ];
+    }
+
+    if (rxPath.includes('X_GNXS_Gpon') || rxPath.includes('X_Genexis_Gpon')) {
+      return [
+        'InternetGatewayDevice.X_GNXS_Gpon.OpticalTxPower',
+        'InternetGatewayDevice.X_GNXS_Gpon.ONU_ID',
+        'InternetGatewayDevice.X_GNXS_Gpon.GEM_Port',
+        'InternetGatewayDevice.X_GNXS_Gpon.LOID',
+        'InternetGatewayDevice.X_GNXS_Gpon.PLOAMState',
       ];
     }
 
