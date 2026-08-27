@@ -1976,21 +1976,26 @@ ${stringElements}
 </soapenv:Envelope>`;
   }
 
-  static getStats(tenantSlug?: string) {
+  static getStats(tenantSlug?: string, reqHost?: string) {
     const hits = tenantSlug && tenantSlug !== 'default'
       ? this.recentHits.filter((h) => h.tenantSlug === tenantSlug)
       : this.recentHits;
-    const isFirst = !tenantSlug || tenantSlug === 'rudra' || tenantSlug === 'g';
-    const cwmpUrl = isFirst ? 'http://ciniplay.in:7547' : `http://${tenantSlug}.ciniplay.in:7547`;
+    const host = (reqHost || '31.42.125.25').split(':')[0];
+    const slug = (tenantSlug && tenantSlug !== 'default') ? tenantSlug : 'rudra';
+    const cwmpPathUrl = `http://${host}:7547/tr069/${slug}`;
+    const cwmpSubdomainUrl = `http://${slug}.${host}:7547`;
     return {
       success: true,
-      cwmpUrl,
+      cwmpUrl: cwmpPathUrl,
+      cwmpPathUrl,
+      cwmpSubdomainUrl,
+      tenantSlug: slug,
       totalHits: this.totalHits,
       activeListeningPort: 7547,
       authCredentials: {
-        username: process.env.CWMP_CONN_REQ_USER || 'acs_user',
-        password: process.env.CWMP_CONN_REQ_PASS ? 'configured' : 'unconfigured',
-        informIntervalSeconds: 300,
+        username: process.env.CWMP_CONN_REQ_USER || 'admin',
+        password: process.env.CWMP_CONN_REQ_PASS || 'admin123',
+        informIntervalSeconds: 60,
       },
       recentHits: hits,
       serverStatus: 'LISTENING',
