@@ -201,16 +201,15 @@ export class CwmpVendorProfiles {
       ];
     }
 
-    // Standard TR-098 IGD parameters (Earth-2022, Realtek, Syrotech, Huawei, ZTE, VSOL)
+    // Standard Universal TR-098 parameters guaranteed across all vendors without Fault 9005
     return [
+      'InternetGatewayDevice.DeviceInfo.Manufacturer',
+      'InternetGatewayDevice.DeviceInfo.ModelName',
+      'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
+      'InternetGatewayDevice.DeviceInfo.UpTime',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
     ];
   }
 
