@@ -8,6 +8,7 @@ export interface ICustomerPlan extends Document {
   price: number;
   currency: string;
   billingCycleDays: number;
+  expiryDate?: Date;
   downloadSpeedMbps: number;
   uploadSpeedMbps: number;
   dataLimitGb: number;
@@ -26,6 +27,7 @@ const CustomerPlanSchema = new Schema<ICustomerPlan>(
     price: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'INR' },
     billingCycleDays: { type: Number, default: 30, min: 1 },
+    expiryDate: { type: Date },
     downloadSpeedMbps: { type: Number, default: 100, min: 1 },
     uploadSpeedMbps: { type: Number, default: 100, min: 1 },
     dataLimitGb: { type: Number, default: 0, min: 0 },

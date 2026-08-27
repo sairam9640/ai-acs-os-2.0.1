@@ -754,8 +754,13 @@ class ApiService {
   }
 
   // Plan Management & Expiring Subscriptions
-  async getPlanCatalog() {
-    return this.request('/operator/plans/catalog');
+  async getPlanCatalog(params?: { sortBy?: string; status?: string; search?: string }) {
+    const q = new URLSearchParams();
+    if (params?.sortBy) q.append('sortBy', params.sortBy);
+    if (params?.status) q.append('status', params.status);
+    if (params?.search) q.append('search', params.search);
+    const queryStr = q.toString() ? `?${q.toString()}` : '';
+    return this.request(`/operator/plans/catalog${queryStr}`);
   }
 
   async createPlanCatalog(payload: any) {
@@ -769,6 +774,13 @@ class ApiService {
     return this.request(`/operator/plans/catalog/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  }
+
+  async togglePlanStatus(id: string, isActive?: boolean) {
+    return this.request(`/operator/plans/catalog/${id}/toggle-status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
     });
   }
 

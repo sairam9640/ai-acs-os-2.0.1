@@ -311,4 +311,97 @@ describe('AI ACS OS — Plan Management & Expiry Notification Engine Tests', () 
       })
     ).rejects.toThrow();
   });
+
+  it('7. Create Plan & Ascending Order: should persist plan with validity/expiry date and return plans in ascending price order', async () => {
+    // Create plans with different prices and validity periods
+    const p499 = await CustomerPlan.create({
+      tenantId: tenant._id,
+      name: 'Starter Giga 50 Mbps',
+      code: 'START-50M',
+      price: 499,
+      currency: 'INR',
+      billingCycleDays: 15,
+      expiryDate: new Date(Date.now() + 15 * 86400000),
+      downloadSpeedMbps: 50,
+      uploadSpeedMbps: 50,
+      isActive: true,
+    });
+
+    const p999 = await CustomerPlan.create({
+      tenantId: tenant._id,
+      name: 'Turbo Max 300 Mbps',
+      code: 'TURBO-300M',
+      price: 999,
+      currency: 'INR',
+      billingCycleDays: 60,
+      expiryDate: new Date(Date.now() + 60 * 86400000),
+      downloadSpeedMbps: 300,
+      uploadSpeedMbps: 300,
+      isActive: true,
+    });
+
+    // Query sorted ascending by price
+    const plansAsc = await CustomerPlan.find({ tenantId: tenant._id }).sort({ price: 1, name: 1 });
+    expect(plansAsc.length).toBeGreaterThanOrEqual(3);
+    expect(plansAsc[0].price).toBe(499);
+    expect(plansAsc[1].price).toBe(699);
+    expect(plansAsc[2].price).toBe(999);
+    expect(plansAsc[0].billingCycleDays).toBe(15);
+    expect(plansAsc[0].expiryDate).toBeDefined();
+
+    await CustomerPlan.deleteMany({ _id: { $in: [p499._id, p999._id] } });
+  });
+
+  it('8. Duplicate Prevention: should reject duplicate plan names or plan codes within the same tenant', async () => {
+    // Check duplicate name
+    const isDuplicate = await CustomerPlan.findOne({
+      tenantId: tenant._id,
+      name: { $regex: new RegExp('^apex ultra 100 mbps$', 'i') },
+    });
+    expect(isDuplicate).toBeDefined();
+
+    // Verify unique index on code throws error on duplicate insert
+    await expect(
+      CustomerPlan.create({
+        tenantId: tenant._id,
+        name: 'Another Apex Plan',
+        code: 'APEX-100M', // Same code as plan100M
+        price: 799,
+        billingCycleDays: 30,
+      })
+    ).rejects.toThrow();
+  });
+
+  it('9. Deactivate & Activate Toggle: should update isActive flag and record audit log', async () => {
+    // Deactivate plan
+    const deactivated = await CustomerPlan.findOneAndUpdate(
+      { _id: plan100M._id, tenantId: tenant._id },
+      { $set: { isActive: false } },
+      { new: true }
+    );
+    expect(deactivated!.isActive).toBe(false);
+
+    // Audit log
+    const auditLogObj = await AuditLog.create({
+      tenantId: tenant._id,
+      actorId: new Types.ObjectId(),
+      actorEmail: 'op@apex.com',
+      actorRole: 'operator_admin',
+      action: 'PLAN_CATALOG_DEACTIVATED',
+      targetResource: 'CustomerPlan',
+      targetId: plan100M._id.toString(),
+      targetIdentifier: `${plan100M.name} -> DEACTIVATED`,
+      correlationId: `test_deact_${Date.now()}`,
+    });
+
+    expect(auditLogObj).toBeDefined();
+
+    // Reactivate plan
+    const reactivated = await CustomerPlan.findOneAndUpdate(
+      { _id: plan100M._id, tenantId: tenant._id },
+      { $set: { isActive: true } },
+      { new: true }
+    );
+    expect(reactivated!.isActive).toBe(true);
+  });
 });

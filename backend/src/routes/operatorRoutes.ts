@@ -4480,7 +4480,30 @@ operatorRouter.post('/gis/fault-impact', async (req: AuthenticatedRequest, res: 
 operatorRouter.get('/plans/catalog', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = new Types.ObjectId(req.tenantId);
-    const plans = await CustomerPlan.find({ tenantId }).sort({ price: 1, createdAt: -1 });
+    const { search, status, sortBy = 'price_asc' } = req.query;
+
+    const query: any = { tenantId };
+
+    if (status === 'active') query.isActive = true;
+    if (status === 'deactivated') query.isActive = false;
+
+    if (search && String(search).trim()) {
+      const s = String(search).trim();
+      query.$or = [
+        { name: new RegExp(s, 'i') },
+        { code: new RegExp(s, 'i') },
+        { description: new RegExp(s, 'i') },
+      ];
+    }
+
+    // Default: Ascending order by price, then name
+    let sortOptions: any = { price: 1, name: 1 };
+    if (sortBy === 'price_desc') sortOptions = { price: -1, name: 1 };
+    else if (sortBy === 'name_asc') sortOptions = { name: 1 };
+    else if (sortBy === 'validity_asc') sortOptions = { billingCycleDays: 1, price: 1 };
+    else if (sortBy === 'created_desc') sortOptions = { createdAt: -1 };
+
+    const plans = await CustomerPlan.find(query).sort(sortOptions);
     return res.json({ success: true, plans });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -4490,24 +4513,88 @@ operatorRouter.get('/plans/catalog', async (req: AuthenticatedRequest, res: Resp
 operatorRouter.post('/plans/catalog', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = new Types.ObjectId(req.tenantId);
-    const { name, code, price, currency, billingCycleDays, downloadSpeedMbps, uploadSpeedMbps, dataLimitGb, description, isActive } = req.body;
+    const {
+      name,
+      code,
+      price,
+      currency,
+      billingCycleDays,
+      validityDays,
+      expiryDate,
+      downloadSpeedMbps,
+      uploadSpeedMbps,
+      dataLimitGb,
+      description,
+      isActive,
+    } = req.body;
 
-    if (!name || !code || price === undefined) {
-      return res.status(400).json({ success: false, error: 'Plan Name, Code, and Price are required' });
+    // 1. Validate Plan Name
+    const cleanName = String(name || '').trim();
+    if (!cleanName) {
+      return res.status(400).json({ success: false, error: 'Plan Name is required' });
+    }
+
+    // 2. Validate Duplicate Plan Name
+    const existingName = await CustomerPlan.findOne({
+      tenantId,
+      name: { $regex: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+    });
+    if (existingName) {
+      return res.status(409).json({
+        success: false,
+        error: `A plan named "${cleanName}" already exists in your catalog. Please choose a unique name.`,
+      });
+    }
+
+    // 3. Validate / Sanitize Plan Code
+    let finalCode = String(code || '').trim().toUpperCase();
+    if (!finalCode) {
+      finalCode = `PLAN-${cleanName.replace(/[^a-zA-Z0-9]/g, '-').toUpperCase().slice(0, 16)}`;
+    }
+
+    // Check Duplicate Code
+    const existingCode = await CustomerPlan.findOne({ tenantId, code: finalCode });
+    if (existingCode) {
+      return res.status(409).json({
+        success: false,
+        error: `Plan Code "${finalCode}" is already in use. Please provide a distinct code.`,
+      });
+    }
+
+    // 4. Validate Price
+    const numericPrice = Number(price);
+    if (isNaN(numericPrice) || numericPrice < 0) {
+      return res.status(400).json({ success: false, error: 'Price must be a valid non-negative number (₹)' });
+    }
+
+    // 5. Validate Validity Period
+    const effectiveDays = Number(validityDays || billingCycleDays || 30);
+    if (isNaN(effectiveDays) || effectiveDays < 1) {
+      return res.status(400).json({ success: false, error: 'Validity period must be at least 1 day' });
+    }
+
+    // 6. Calculate or assign Expiry Date
+    let parsedExpiryDate: Date;
+    if (expiryDate && !isNaN(new Date(expiryDate).getTime())) {
+      parsedExpiryDate = new Date(expiryDate);
+    } else {
+      parsedExpiryDate = new Date(Date.now() + effectiveDays * 24 * 60 * 60 * 1000);
     }
 
     const plan = await CustomerPlan.create({
       tenantId,
-      name: name.trim(),
-      code: code.trim().toUpperCase(),
-      price: Number(price),
+      name: cleanName,
+      code: finalCode,
+      price: numericPrice,
       currency: currency || 'INR',
-      billingCycleDays: Number(billingCycleDays || 30),
+      billingCycleDays: effectiveDays,
+      expiryDate: parsedExpiryDate,
       downloadSpeedMbps: Number(downloadSpeedMbps || 100),
       uploadSpeedMbps: Number(uploadSpeedMbps || 100),
       dataLimitGb: Number(dataLimitGb || 0),
-      description: description || '',
+      description: String(description || '').trim(),
       isActive: isActive !== undefined ? Boolean(isActive) : true,
+      activeSubscribersCount: 0,
     });
 
     await recordAuditLog({
@@ -4518,11 +4605,15 @@ operatorRouter.post('/plans/catalog', async (req: AuthenticatedRequest, res: Res
       action: 'PLAN_CATALOG_CREATED',
       targetResource: 'CustomerPlan',
       targetId: plan._id.toString(),
-      targetIdentifier: plan.code,
+      targetIdentifier: `${plan.name} (${plan.code}) - ₹${plan.price}`,
       correlationId: req.correlationId || `plan_create_${Date.now()}`,
     });
 
-    return res.status(201).json({ success: true, plan, message: 'Broadband plan added to catalog successfully' });
+    return res.status(201).json({
+      success: true,
+      plan,
+      message: `Broadband plan "${plan.name}" added to catalog successfully.`,
+    });
   } catch (error: any) {
     return res.status(400).json({ success: false, error: error.message });
   }
@@ -4532,28 +4623,83 @@ operatorRouter.put('/plans/catalog/:id', async (req: AuthenticatedRequest, res: 
   try {
     const tenantId = new Types.ObjectId(req.tenantId);
     const { id } = req.params;
-    const { name, code, price, currency, billingCycleDays, downloadSpeedMbps, uploadSpeedMbps, dataLimitGb, description, isActive } = req.body;
+    const {
+      name,
+      code,
+      price,
+      currency,
+      billingCycleDays,
+      validityDays,
+      expiryDate,
+      downloadSpeedMbps,
+      uploadSpeedMbps,
+      dataLimitGb,
+      description,
+      isActive,
+    } = req.body;
+
+    const existing = await CustomerPlan.findOne({ _id: id, tenantId });
+    if (!existing) return res.status(404).json({ success: false, error: 'Plan not found' });
+
+    // Validate Duplicate Name against other plans
+    if (name && name.trim().toLowerCase() !== existing.name.toLowerCase()) {
+      const cleanName = name.trim();
+      const duplicateName = await CustomerPlan.findOne({
+        tenantId,
+        _id: { $ne: id },
+        name: { $regex: new RegExp(`^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      });
+      if (duplicateName) {
+        return res.status(409).json({
+          success: false,
+          error: `Another plan named "${cleanName}" already exists. Please choose a unique name.`,
+        });
+      }
+    }
+
+    // Validate Duplicate Code against other plans
+    if (code && code.trim().toUpperCase() !== existing.code) {
+      const cleanCode = code.trim().toUpperCase();
+      const duplicateCode = await CustomerPlan.findOne({
+        tenantId,
+        _id: { $ne: id },
+        code: cleanCode,
+      });
+      if (duplicateCode) {
+        return res.status(409).json({
+          success: false,
+          error: `Plan Code "${cleanCode}" is already in use by another plan.`,
+        });
+      }
+    }
+
+    const effectiveDays = validityDays !== undefined ? Number(validityDays) : (billingCycleDays !== undefined ? Number(billingCycleDays) : existing.billingCycleDays);
+    let parsedExpiryDate = existing.expiryDate;
+    if (expiryDate) {
+      parsedExpiryDate = new Date(expiryDate);
+    } else if (validityDays !== undefined || billingCycleDays !== undefined) {
+      parsedExpiryDate = new Date(Date.now() + effectiveDays * 24 * 60 * 60 * 1000);
+    }
 
     const plan = await CustomerPlan.findOneAndUpdate(
       { _id: id, tenantId },
       {
         $set: {
-          name: name?.trim(),
-          code: code?.trim()?.toUpperCase(),
-          price: price !== undefined ? Number(price) : undefined,
-          currency,
-          billingCycleDays: billingCycleDays !== undefined ? Number(billingCycleDays) : undefined,
-          downloadSpeedMbps: downloadSpeedMbps !== undefined ? Number(downloadSpeedMbps) : undefined,
-          uploadSpeedMbps: uploadSpeedMbps !== undefined ? Number(uploadSpeedMbps) : undefined,
-          dataLimitGb: dataLimitGb !== undefined ? Number(dataLimitGb) : undefined,
-          description,
-          isActive,
+          name: name ? name.trim() : existing.name,
+          code: code ? code.trim().toUpperCase() : existing.code,
+          price: price !== undefined ? Number(price) : existing.price,
+          currency: currency || existing.currency,
+          billingCycleDays: effectiveDays,
+          expiryDate: parsedExpiryDate,
+          downloadSpeedMbps: downloadSpeedMbps !== undefined ? Number(downloadSpeedMbps) : existing.downloadSpeedMbps,
+          uploadSpeedMbps: uploadSpeedMbps !== undefined ? Number(uploadSpeedMbps) : existing.uploadSpeedMbps,
+          dataLimitGb: dataLimitGb !== undefined ? Number(dataLimitGb) : existing.dataLimitGb,
+          description: description !== undefined ? String(description).trim() : existing.description,
+          isActive: isActive !== undefined ? Boolean(isActive) : existing.isActive,
         },
       },
       { new: true }
     );
-
-    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
 
     await recordAuditLog({
       tenantId,
@@ -4562,14 +4708,56 @@ operatorRouter.put('/plans/catalog/:id', async (req: AuthenticatedRequest, res: 
       actorRole: req.user!.role,
       action: 'PLAN_CATALOG_UPDATED',
       targetResource: 'CustomerPlan',
-      targetId: plan._id.toString(),
-      targetIdentifier: plan.code,
+      targetId: plan!._id.toString(),
+      targetIdentifier: `${plan!.name} (${plan!.code})`,
       correlationId: req.correlationId || `plan_upd_${Date.now()}`,
     });
 
-    return res.json({ success: true, plan, message: 'Plan updated successfully' });
+    return res.json({ success: true, plan, message: `Plan "${plan!.name}" updated successfully.` });
   } catch (error: any) {
     return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Dedicated Deactivate / Activate Toggle Endpoint
+operatorRouter.patch('/plans/catalog/:id/toggle-status', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    const existing = await CustomerPlan.findOne({ _id: id, tenantId });
+    if (!existing) return res.status(404).json({ success: false, error: 'Plan not found' });
+
+    const newStatus = isActive !== undefined ? Boolean(isActive) : !existing.isActive;
+
+    const plan = await CustomerPlan.findOneAndUpdate(
+      { _id: id, tenantId },
+      { $set: { isActive: newStatus } },
+      { new: true }
+    );
+
+    const actionText = newStatus ? 'ACTIVATED' : 'DEACTIVATED';
+
+    await recordAuditLog({
+      tenantId,
+      actorId: req.user!.id,
+      actorEmail: req.user!.email,
+      actorRole: req.user!.role,
+      action: `PLAN_CATALOG_${actionText}`,
+      targetResource: 'CustomerPlan',
+      targetId: plan!._id.toString(),
+      targetIdentifier: `${plan!.name} (${plan!.code}) -> ${actionText}`,
+      correlationId: req.correlationId || `plan_toggle_${Date.now()}`,
+    });
+
+    return res.json({
+      success: true,
+      plan,
+      message: `Plan "${plan!.name}" has been ${newStatus ? 'activated' : 'deactivated'}.`,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -4593,7 +4781,7 @@ operatorRouter.delete('/plans/catalog/:id', async (req: AuthenticatedRequest, re
       correlationId: req.correlationId || `plan_del_${Date.now()}`,
     });
 
-    return res.json({ success: true, message: 'Plan removed from catalog successfully' });
+    return res.json({ success: true, message: `Plan "${plan.name}" removed from catalog.` });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }
