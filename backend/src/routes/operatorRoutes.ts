@@ -1311,7 +1311,7 @@ function buildTr069WanParams(profile: any, device: any): Array<[string, any, str
       }
     } else {
       // IP Connection Mode (DHCP / Static IP / TR-069 Management)
-      if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069') {
+      if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069' && !/4410|Platinum/i.test(String(device?.modelName || ''))) {
         params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
       }
 
@@ -1319,14 +1319,11 @@ function buildTr069WanParams(profile: any, device: any): Array<[string, any, str
         if (profile.ipAddress) params.push([`${basePath}.ExternalIPAddress`, String(profile.ipAddress), 'xsd:string']);
         if (profile.subnetMask) params.push([`${basePath}.SubnetMask`, String(profile.subnetMask), 'xsd:string']);
         if (profile.gateway) params.push([`${basePath}.DefaultGateway`, String(profile.gateway), 'xsd:string']);
-        if (profile.primaryDns) {
-          const dnsStr = `${profile.primaryDns}${profile.secondaryDns ? `,${profile.secondaryDns}` : ''}`;
-          params.push([`${basePath}.DNSServers`, dnsStr, 'xsd:string']);
-        }
       }
 
-      if (profile.vlanEnabled !== false && profile.vlanId) {
-        params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
+      if (profile.primaryDns) {
+        const dnsStr = `${profile.primaryDns}${profile.secondaryDns ? `,${profile.secondaryDns}` : ''}`;
+        params.push([`${basePath}.DNSServers`, dnsStr, 'xsd:string']);
       }
     }
   }
