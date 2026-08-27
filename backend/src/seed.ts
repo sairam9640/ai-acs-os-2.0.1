@@ -166,17 +166,17 @@ export async function seedDatabase() {
     },
   ]);
 
-  // 3. Seed Primary 1st ISP Tenant (ciniplay.in)
+  // 3. Seed Primary 1st ISP Tenant (Rudra Broadband - Mandatory Slug: rudra)
   const primaryTenant = await Tenant.create({
     name: 'Rudra Broadband',
     displayName: 'Rudra Fiber Broadband',
     slug: 'rudra',
-    subdomain: 'ciniplay.in',
+    subdomain: 'rudra.31.42.125.25',
     operatorKey: 'opk_rudra_982341',
     status: 'active',
     owner: {
       name: 'Rudra Operations Lead',
-      email: 'admin@ciniplay.in',
+      email: 'admin@rudra.ciniplay.in',
       phone: '+919845000001',
     },
     address: {
@@ -193,7 +193,7 @@ export async function seedDatabase() {
       secondaryColor: '#0f172a',
       companyName: 'Rudra Fiber Broadband',
       supportPhone: '+91 98450 00001',
-      supportEmail: 'support@ciniplay.in',
+      supportEmail: 'support@rudra.ciniplay.in',
       portalTitle: 'Rudra Fiber NOC & Operations',
     },
     plan: {
@@ -211,7 +211,7 @@ export async function seedDatabase() {
   // 4. Seed Primary Operator User for WhatsApp OTP login
   await User.create({
     tenantId: primaryTenant._id,
-    email: 'admin@ciniplay.in',
+    email: 'admin@rudra.ciniplay.in',
     phone: '+919845000001',
     fullName: 'Rudra NOC Lead',
     role: 'operator_admin',
@@ -240,8 +240,10 @@ export async function seedDatabase() {
   ]);
 
   console.log('✓ Clean production database foundation initialized successfully!');
-  console.log(`Primary Domain: ciniplay.in`);
-  console.log(`Primary CWMP ACS URL: http://ciniplay.in:7547`);
+  console.log(`Primary Operator Slug: rudra`);
+  console.log(`Primary Subdomain URL: http://rudra.31.42.125.25`);
+  console.log(`Primary CWMP ACS URL (Subdomain): http://rudra.31.42.125.25:7547`);
+  console.log(`Primary CWMP ACS URL (Path): http://31.42.125.25:7547/tr069/rudra`);
   console.log(`Primary Operator Phone: +919845000001 (WhatsApp OTP Auth)`);
   console.log(`Super Admin Registered Emails: kanugulasairam2004@gmail.com, superadmin@ciniplay.in`);
 }

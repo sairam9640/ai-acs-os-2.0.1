@@ -284,28 +284,34 @@ export const TenantList: React.FC = () => {
     });
   };
 
-  const isFirstTenant = tenants.length === 0;
-  const currentSlug = formData.slug.toLowerCase().trim();
-  const previewDomain = isFirstTenant && !currentSlug ? 'ciniplay.in' : currentSlug ? `${currentSlug}.ciniplay.in` : 'ciniplay.in';
-  const previewCwmpUrl = isFirstTenant && !currentSlug ? 'http://ciniplay.in:7547' : currentSlug ? `http://${currentSlug}.ciniplay.in:7547` : 'http://ciniplay.in:7547';
+  const currentSlug = formData.slug.toLowerCase().trim() || 'operator-slug';
+  const currentHost = window.location.hostname || '31.42.125.25';
+  const previewDomain = `${currentSlug}.${currentHost}`;
+  const previewCwmpUrl = `http://${currentSlug}.${currentHost}:7547`;
+  const previewCwmpPathUrl = `http://${currentHost}:7547/tr069/${currentSlug}`;
 
   const columns: Column<Tenant>[] = [
     {
       header: 'ISP Tenant & Brand',
-      accessor: (t) => (
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] flex items-center justify-center text-[#1677FF] font-bold">
-            <Building2 className="w-5 h-5" />
+      accessor: (t) => {
+        const host = window.location.hostname || '31.42.125.25';
+        const displayDomain = t.subdomain || `${t.slug}.${host}`;
+        return (
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] flex items-center justify-center text-[#1677FF] font-bold">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-[#0F172A]">{t.displayName || t.name}</p>
+              <p className="text-xs text-[#64748B] font-mono flex items-center space-x-1">
+                <Globe className="w-3 h-3 inline text-[#1677FF] mr-1" />
+                <span>{displayDomain}</span>
+                <span className="text-[#047857] ml-2 font-bold">(Slug: {t.slug})</span>
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="font-semibold text-[#0F172A]">{t.displayName || t.name}</p>
-            <p className="text-xs text-[#64748B] font-mono flex items-center space-x-1">
-              <Globe className="w-3 h-3 inline text-[#1677FF] mr-1" />
-              {t.subdomain || `${t.slug}.ciniplay.in`}
-            </p>
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       header: 'Plan Tier',
@@ -557,19 +563,20 @@ export const TenantList: React.FC = () => {
               <div className="flex items-center justify-between text-xs font-semibold text-[#1D4ED8]">
                 <span className="flex items-center space-x-1.5">
                   <Zap className="w-4 h-4 text-[#B45309]" />
-                  <span>Live Routing & CWMP URL Preview</span>
+                  <span>Deterministic Operator Routing & CWMP Endpoints</span>
                 </span>
-                <Badge variant="success">Auto-Configured</Badge>
+                <Badge variant="success">Slug Mandatory for All</Badge>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono pt-1">
-                <div className="p-2 rounded bg-white border border-[#E2E8F0]">
-                  <span className="text-[#64748B] text-[10px] block font-sans">Tenant Subdomain URL:</span>
-                  <span className="text-[#1677FF] font-bold">https://{previewDomain}</span>
+                <div className="p-2.5 rounded-lg bg-white border border-[#E2E8F0]">
+                  <span className="text-[#64748B] text-[10px] block font-sans font-bold">Tenant Subdomain URL:</span>
+                  <span className="text-[#1677FF] font-bold select-all">http://{previewDomain}</span>
                 </div>
-                <div className="p-2 rounded bg-white border border-[#E2E8F0]">
-                  <span className="text-[#64748B] text-[10px] block font-sans">TR-069 CWMP ACS URL:</span>
-                  <span className="text-[#047857] font-bold">{previewCwmpUrl}</span>
+                <div className="p-2.5 rounded-lg bg-white border border-[#E2E8F0]">
+                  <span className="text-[#64748B] text-[10px] block font-sans font-bold">TR-069 CWMP ACS URL (ONT Config):</span>
+                  <span className="text-[#047857] font-bold select-all">{previewCwmpUrl}</span>
+                  <span className="text-[#64748B] text-[10px] block mt-0.5">Alt: {previewCwmpPathUrl}</span>
                 </div>
               </div>
             </div>

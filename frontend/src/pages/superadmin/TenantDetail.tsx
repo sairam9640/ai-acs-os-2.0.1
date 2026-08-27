@@ -196,13 +196,17 @@ export const TenantDetail: React.FC = () => {
                 <Badge variant="success" dot>Live Ready</Badge>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
                 <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-                  <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans">CWMP ACS URL</span>
-                  <span className="text-[#047857] font-bold select-all">{data?.cwmpUrl || 'http://ciniplay.in:7547'}</span>
+                  <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans font-bold">Subdomain CWMP ACS URL</span>
+                  <span className="text-[#047857] font-bold select-all">{data?.cwmpUrl || `http://${tenant.slug || 'rudra'}.${window.location.hostname || '31.42.125.25'}:7547`}</span>
                 </div>
                 <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-                  <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans">Operator Key (Auth Token)</span>
+                  <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans font-bold">Direct Path CWMP ACS URL</span>
+                  <span className="text-[#047857] font-bold select-all">{data?.cwmpPathUrl || `http://${window.location.hostname || '31.42.125.25'}:7547/tr069/${tenant.slug || 'rudra'}`}</span>
+                </div>
+                <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
+                  <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans font-bold">Operator Key (Auth Token)</span>
                   <span className="text-[#1677FF] font-bold select-all">{tenant.operatorKey}</span>
                 </div>
               </div>

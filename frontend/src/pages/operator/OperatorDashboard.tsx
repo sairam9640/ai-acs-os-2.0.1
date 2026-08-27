@@ -78,10 +78,10 @@ export const OperatorDashboard: React.FC = () => {
   }, []);
 
   const s = summary || {};
-
+  const activeHost = window.location.hostname || '31.42.125.25';
   const tenantSlug = tenant?.slug || 'rudra';
-  const isPrimaryTenant = tenantSlug === 'rudra' || tenantSlug === 'default';
-  const activeCwmpUrl = cwmpStats?.cwmpUrl || (isPrimaryTenant ? 'http://ciniplay.in:7547' : `http://${tenantSlug}.ciniplay.in:7547`);
+  const activeCwmpUrl = cwmpStats?.cwmpUrl || `http://${tenantSlug}.${activeHost}:7547`;
+  const activeCwmpPathUrl = `http://${activeHost}:7547/tr069/${tenantSlug}`;
 
   const handleCopyUrl = () => {
     navigator.clipboard.writeText(activeCwmpUrl);
@@ -147,15 +147,18 @@ export const OperatorDashboard: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
             {/* ACS URL Box */}
-            <div className="md:col-span-6 p-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between">
-              <div className="overflow-hidden mr-2">
-                <span className="text-[10px] text-[#64748B] uppercase font-semibold block">ACS Server URL:</span>
-                <span className="text-sm font-mono text-[#1677FF] font-bold truncate block">{activeCwmpUrl}</span>
+            <div className="md:col-span-7 p-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#64748B] uppercase font-bold block">1. Subdomain ACS URL (ONT):</span>
+                <button onClick={() => { navigator.clipboard.writeText(activeCwmpUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="text-xs font-mono text-[#1677FF] hover:underline font-bold">
+                  {copied ? '✓ Copied' : 'Copy'}
+                </button>
               </div>
-              <Button size="sm" variant="secondary" onClick={handleCopyUrl} className="shrink-0">
-                {copied ? <Check className="w-3.5 h-3.5 text-[#047857] mr-1" /> : <Copy className="w-3.5 h-3.5 mr-1" />}
-                <span>{copied ? 'Copied!' : 'Copy'}</span>
-              </Button>
+              <span className="text-xs font-mono text-[#1677FF] font-bold truncate block select-all">{activeCwmpUrl}</span>
+              <div className="pt-1 border-t border-[#E2E8F0] flex items-center justify-between">
+                <span className="text-[10px] text-[#64748B] uppercase font-bold block">2. Direct Path ACS URL:</span>
+                <span className="text-xs font-mono text-[#047857] font-bold select-all">{activeCwmpPathUrl}</span>
+              </div>
             </div>
 
             {/* Quick ONT Config Specs */}

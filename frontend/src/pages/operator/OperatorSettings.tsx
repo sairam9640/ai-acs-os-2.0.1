@@ -119,20 +119,28 @@ export const OperatorSettings: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
               <div>
                 <label className="text-[#0F172A] font-bold block mb-1">Company Display Name</label>
                 <input
                   disabled
-                  value={tenant?.displayName || 'Apex Fiber'}
+                  value={tenant?.displayName || 'Rudra Fiber Broadband'}
                   className="w-full bg-[#F8FAFC] border border-[#CBD5E1] rounded-xl p-3 text-[#0F172A] font-bold"
                 />
               </div>
               <div>
-                <label className="text-[#0F172A] font-bold block mb-1">Tenant Subdomain / Root Host</label>
+                <label className="text-[#0F172A] font-bold block mb-1">Mandatory Tenant Slug</label>
                 <input
                   disabled
-                  value={tenant?.slug ? `${tenant.slug}.ciniplay.in` : 'ciniplay.in'}
+                  value={tenant?.slug || 'rudra'}
+                  className="w-full bg-[#F8FAFC] border border-[#CBD5E1] rounded-xl p-3 text-[#047857] font-mono font-bold"
+                />
+              </div>
+              <div>
+                <label className="text-[#0F172A] font-bold block mb-1">Tenant Subdomain URL</label>
+                <input
+                  disabled
+                  value={`http://${tenant?.slug || 'rudra'}.${window.location.hostname || '31.42.125.25'}`}
                   className="w-full bg-[#F8FAFC] border border-[#CBD5E1] rounded-xl p-3 text-[#1677FF] font-mono font-bold"
                 />
               </div>

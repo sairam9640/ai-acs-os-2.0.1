@@ -204,7 +204,7 @@ export const OperatorLogin: React.FC = () => {
           )}
 
           <div className="mt-6 border-t border-[#E2E8F0] pt-4 flex items-center justify-between text-[11px] text-[#94A3B8]">
-            <span>Primary Domain: ciniplay.in</span>
+            <span>Tenant Subdomain Binding: http://&lt;slug&gt;.{window.location.hostname || '31.42.125.25'}</span>
             <button
               type="button"
               onClick={() => navigate('/superadmin/login')}

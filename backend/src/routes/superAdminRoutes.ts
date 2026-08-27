@@ -169,21 +169,22 @@ superAdminRouter.post('/tenants', async (req: AuthenticatedRequest, res: Respons
       });
     }
 
-    const existingSlug = await Tenant.findOne({ slug: slug.toLowerCase() });
+    const targetSlug = slug.toLowerCase().trim();
+    const existingSlug = await Tenant.findOne({ slug: targetSlug });
     if (existingSlug) {
-      return res.status(409).json({ success: false, error: `Slug '${slug}' is already in use.` });
+      return res.status(409).json({ success: false, error: `Slug '${targetSlug}' is already in use.` });
     }
 
-    const tenantCount = await Tenant.countDocuments();
-    const isFirstTenant = tenantCount === 0;
-    const computedSubdomain = isFirstTenant ? 'ciniplay.in' : `${slug.toLowerCase()}.ciniplay.in`;
+    const rawHost = (req.headers['x-forwarded-host'] as string) || (req.headers['host'] as string) || '31.42.125.25';
+    const cleanHost = rawHost.split(':')[0];
+    const computedSubdomain = `${targetSlug}.${cleanHost}`;
 
     const tenant = await Tenant.create({
       name,
       displayName: displayName || name,
-      slug: slug.toLowerCase(),
+      slug: targetSlug,
       subdomain: computedSubdomain,
-      operatorKey: `opk_${slug}_${Math.random().toString(36).substring(2, 8)}`,
+      operatorKey: `opk_${targetSlug}_${Math.random().toString(36).substring(2, 8)}`,
       owner,
       plan: plan || {
         name: 'Growth ISP Plan',
@@ -239,10 +240,10 @@ superAdminRouter.post('/tenants', async (req: AuthenticatedRequest, res: Respons
       correlationId: req.correlationId || `sa_ten_${Date.now()}`,
     });
 
-    const isFirst = tenant.subdomain === 'ciniplay.in';
-    const cwmpUrl = isFirst ? 'http://ciniplay.in:7547' : `http://${tenant.slug}.ciniplay.in:7547`;
+    const cwmpUrl = `http://${tenant.slug}.${cleanHost}:7547`;
+    const cwmpPathUrl = `http://${cleanHost}:7547/tr069/${tenant.slug}`;
 
-    return res.status(201).json({ success: true, tenant, cwmpUrl });
+    return res.status(201).json({ success: true, tenant, cwmpUrl, cwmpPathUrl });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -256,21 +257,24 @@ superAdminRouter.get('/tenants/:id', async (req: AuthenticatedRequest, res: Resp
     const tenant = await Tenant.findById(req.params.id);
     if (!tenant) return res.status(404).json({ success: false, error: 'Tenant not found' });
 
-    const [customerCount, deviceCount, incidentCount, auditLogs, firstTenant] = await Promise.all([
+    const [customerCount, deviceCount, incidentCount, auditLogs] = await Promise.all([
       Customer.countDocuments({ tenantId: tenant._id }),
       Device.countDocuments({ tenantId: tenant._id }),
       Incident.countDocuments({ tenantId: tenant._id }),
       AuditLog.find({ tenantId: tenant._id }).sort({ timestamp: -1 }).limit(10),
-      Tenant.findOne().sort({ createdAt: 1 }),
     ]);
 
-    const isFirst = tenant.subdomain === 'ciniplay.in' || firstTenant?._id.equals(tenant._id);
-    const cwmpUrl = isFirst ? 'http://ciniplay.in:7547' : `http://${tenant.slug}.ciniplay.in:7547`;
+    const rawHost = (req.headers['x-forwarded-host'] as string) || (req.headers['host'] as string) || '31.42.125.25';
+    const cleanHost = rawHost.split(':')[0];
+    const targetSlug = tenant.slug || 'rudra';
+    const cwmpUrl = `http://${targetSlug}.${cleanHost}:7547`;
+    const cwmpPathUrl = `http://${cleanHost}:7547/tr069/${targetSlug}`;
 
     return res.json({
       success: true,
       tenant,
       cwmpUrl,
+      cwmpPathUrl,
       usage: {
         customers: { current: customerCount, limit: tenant.plan.maxCustomers },
         devices: { current: deviceCount, limit: tenant.plan.maxDevices },
@@ -344,10 +348,10 @@ superAdminRouter.put('/tenants/:id', async (req: AuthenticatedRequest, res: Resp
       if (existing) {
         return res.status(409).json({ success: false, error: `Slug '${slug}' is already in use by another tenant.` });
       }
-      tenant.slug = slug.toLowerCase();
-      if (tenant.subdomain !== 'ciniplay.in') {
-        tenant.subdomain = `${tenant.slug}.ciniplay.in`;
-      }
+      tenant.slug = slug.toLowerCase().trim();
+      const rawHost = (req.headers['x-forwarded-host'] as string) || (req.headers['host'] as string) || '31.42.125.25';
+      const cleanHost = rawHost.split(':')[0];
+      tenant.subdomain = `${tenant.slug}.${cleanHost}`;
     }
 
     if (name) tenant.name = name;
@@ -421,10 +425,13 @@ superAdminRouter.put('/tenants/:id', async (req: AuthenticatedRequest, res: Resp
       correlationId: req.correlationId || `sa_ten_upd_${Date.now()}`,
     });
 
-    const isFirst = tenant.subdomain === 'ciniplay.in';
-    const cwmpUrl = isFirst ? 'http://ciniplay.in:7547' : `http://${tenant.slug}.ciniplay.in:7547`;
+    const rawHost = (req.headers['x-forwarded-host'] as string) || (req.headers['host'] as string) || '31.42.125.25';
+    const cleanHost = rawHost.split(':')[0];
+    const targetSlug = tenant.slug || 'rudra';
+    const cwmpUrl = `http://${targetSlug}.${cleanHost}:7547`;
+    const cwmpPathUrl = `http://${cleanHost}:7547/tr069/${targetSlug}`;
 
-    return res.json({ success: true, tenant, cwmpUrl });
+    return res.json({ success: true, tenant, cwmpUrl, cwmpPathUrl });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }
