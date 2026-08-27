@@ -189,25 +189,21 @@ export const TenantDetail: React.FC = () => {
                 <div>
                   <h3 className="text-sm font-bold text-[#0F172A] flex items-center space-x-2">
                     <Radio className="w-4 h-4 text-[#047857]" />
-                    <span>TR-069 CWMP & ACS Auto-Provisioning Endpoints</span>
+                    <span>TR-069 CWMP & ACS Gateway Endpoint</span>
                   </h3>
-                  <p className="text-xs text-[#64748B] mt-0.5">Configure these parameters on ONT / CPE hardware for zero-touch cloud enrollment</p>
+                  <p className="text-xs text-[#64748B] mt-0.5">Configure this direct URL on customer ONT / CPE hardware for cloud management</p>
                 </div>
-                <Badge variant="success" dot>Live Ready</Badge>
+                <Badge variant="success" dot>Live Gateway</Badge>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
                 <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-                  <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans font-bold">Subdomain CWMP ACS URL</span>
-                  <span className="text-[#047857] font-bold select-all">{data?.cwmpUrl || `http://${tenant.slug || 'rudra'}.${window.location.hostname || '31.42.125.25'}:7547`}</span>
-                </div>
-                <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-                  <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans font-bold">Direct Path CWMP ACS URL</span>
-                  <span className="text-[#047857] font-bold select-all">{data?.cwmpPathUrl || `http://${window.location.hostname || '31.42.125.25'}:7547/tr069/${tenant.slug || 'rudra'}`}</span>
+                  <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans font-bold">Direct TR-069 ACS URL (Customer ONT Config)</span>
+                  <span className="text-[#047857] font-bold select-all text-sm">{`http://${window.location.hostname || '31.42.125.25'}/tr069/${tenant.slug || 'rudra'}`}</span>
                 </div>
                 <div className="p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
                   <span className="text-[#94A3B8] block text-[11px] mb-1 font-sans font-bold">Operator Key (Auth Token)</span>
-                  <span className="text-[#1677FF] font-bold select-all">{tenant.operatorKey}</span>
+                  <span className="text-[#1677FF] font-bold select-all text-sm">{tenant.operatorKey}</span>
                 </div>
               </div>
             </div>

@@ -574,9 +574,8 @@ export const TenantList: React.FC = () => {
                   <span className="text-[#1677FF] font-bold select-all">http://{previewDomain}</span>
                 </div>
                 <div className="p-2.5 rounded-lg bg-white border border-[#E2E8F0]">
-                  <span className="text-[#64748B] text-[10px] block font-sans font-bold">TR-069 CWMP ACS URL (ONT Config):</span>
-                  <span className="text-[#047857] font-bold select-all">{previewCwmpUrl}</span>
-                  <span className="text-[#64748B] text-[10px] block mt-0.5">Alt: {previewCwmpPathUrl}</span>
+                  <span className="text-[#64748B] text-[10px] block font-sans font-bold">Direct TR-069 CWMP ACS URL (ONT Config):</span>
+                  <span className="text-[#047857] font-bold select-all">http://{currentHost}/tr069/{currentSlug}</span>
                 </div>
               </div>
             </div>
