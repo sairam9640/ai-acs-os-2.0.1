@@ -6,6 +6,8 @@ export type UserRole =
   | 'noc_operator'
   | 'fiber_planner'
   | 'technician'
+  | 'accountant'
+  | 'support_agent'
   | 'customer';
 
 export interface IUserSession {
@@ -51,6 +53,8 @@ const UserSchema = new Schema<IUser>(
         'noc_operator',
         'fiber_planner',
         'technician',
+        'accountant',
+        'support_agent',
         'customer',
       ],
       required: true,

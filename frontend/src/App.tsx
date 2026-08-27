@@ -33,6 +33,10 @@ import { AutomationRules } from './pages/operator/AutomationRules.js';
 import { OperatorReports } from './pages/operator/OperatorReports.js';
 import { OperatorSettings } from './pages/operator/OperatorSettings.js';
 import { PlanManagement } from './pages/operator/PlanManagement.js';
+import { PaymentGatewaySettings } from './pages/operator/PaymentGatewaySettings.js';
+import { PaymentReconciliation } from './pages/operator/PaymentReconciliation.js';
+import { WarehouseInventory } from './pages/operator/WarehouseInventory.js';
+import { EnterpriseAnalytics } from './pages/operator/EnterpriseAnalytics.js';
 
 // Technician Pages
 import { TechnicianLogin } from './pages/technician/TechnicianLogin.js';
@@ -45,6 +49,7 @@ import { CustomerHome } from './pages/customer/CustomerHome.js';
 import { CustomerWiFi } from './pages/customer/CustomerWiFi.js';
 import { CustomerDevices } from './pages/customer/CustomerDevices.js';
 import { CustomerSupport } from './pages/customer/CustomerSupport.js';
+import { CustomerBilling } from './pages/customer/CustomerBilling.js';
 
 /**
  * Strict RBAC Route Guard Component
@@ -387,6 +392,38 @@ export function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/operator/payments/gateways"
+            element={
+              <ProtectedRoute allowedRoles={['operator_admin', 'accountant']} portalType="operator">
+                <PaymentGatewaySettings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/operator/payments/reconciliation"
+            element={
+              <ProtectedRoute allowedRoles={['operator_admin', 'accountant']} portalType="operator">
+                <PaymentReconciliation />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/operator/inventory/warehouse"
+            element={
+              <ProtectedRoute allowedRoles={['operator_admin', 'noc_operator', 'accountant']} portalType="operator">
+                <WarehouseInventory />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/operator/analytics"
+            element={
+              <ProtectedRoute allowedRoles={['operator_admin', 'noc_operator', 'accountant']} portalType="operator">
+                <EnterpriseAnalytics />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Field Technician Portal Logins & Protected Routes */}
           <Route path="/tech/login" element={<TechnicianLogin />} />
@@ -423,6 +460,14 @@ export function App() {
             element={
               <ProtectedRoute allowedRoles={['customer', 'operator_admin']} portalType="customer">
                 <CustomerHome />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/customer/billing"
+            element={
+              <ProtectedRoute allowedRoles={['customer', 'operator_admin']} portalType="customer">
+                <CustomerBilling />
               </ProtectedRoute>
             }
           />

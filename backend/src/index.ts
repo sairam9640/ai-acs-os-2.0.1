@@ -255,6 +255,23 @@ app.post('/api/v1/webhooks/billing', async (req: Request, res: Response) => {
   return res.json({ success: true, ...result });
 });
 
+// 6. Enterprise Plugin-Based Multi-Gateway Payment Webhooks
+app.post('/api/v1/webhooks/payments/:gateway/:tenantSlug', async (req: Request, res: Response) => {
+  try {
+    const { gateway, tenantSlug } = req.params;
+    const result = await (await import('./services/paymentGatewayService.js')).PaymentGatewayService.handleWebhook({
+      gateway: gateway.toUpperCase() as any,
+      tenantSlug,
+      rawBody: req.body,
+      headers: req.headers,
+    });
+
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Frontend SPA Single-Page Application Serving & Fallback
 const frontendDist = process.env.FRONTEND_DIST || '/var/www/ai-isp-os/frontend/dist';
 if (fs.existsSync(frontendDist)) {

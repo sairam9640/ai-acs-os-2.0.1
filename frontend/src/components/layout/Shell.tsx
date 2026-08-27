@@ -27,13 +27,16 @@ import {
   ArrowLeft,
   Sparkles,
   CalendarClock,
+  CreditCard,
+  TrendingUp,
+  Layers,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { Button } from '../ui/Button.js';
 
 export interface ShellProps {
   children: React.ReactNode;
-  portalType: 'superadmin' | 'operator';
+  portalType: 'superadmin' | 'operator' | 'customer' | 'technician';
   title: string;
   breadcrumbs?: Array<{ label: string; href?: string }>;
   primaryAction?: React.ReactNode;
@@ -71,22 +74,32 @@ export const Shell: React.FC<ShellProps> = ({
     { label: 'OLT & PON Ports', path: '/operator/network', icon: Server },
     { label: 'Fiber GIS Map', path: '/operator/gis', icon: MapPin },
     { label: 'Plan & Expiry Hub', path: '/operator/plans', icon: CalendarClock },
+    { label: 'Payment Gateways', path: '/operator/payments/gateways', icon: CreditCard },
+    { label: 'Reconciliation', path: '/operator/payments/reconciliation', icon: CreditCard },
+    { label: 'Warehouse Spares', path: '/operator/inventory/warehouse', icon: Layers },
     { label: 'Approvals Gate', path: '/operator/approvals', icon: CheckSquare },
-    { label: 'Hardware Inventory', path: '/operator/inventory', icon: Package },
     { label: 'Automation Rules', path: '/operator/automation', icon: Zap },
     { label: 'Alerts & Incidents', path: '/operator/incidents', icon: AlertTriangle },
     { label: 'Support Tickets', path: '/operator/tickets', icon: Ticket },
     { label: 'Field Technicians', path: '/operator/technicians', icon: Wrench },
     { label: 'AI Command Center', path: '/operator/ai', icon: Bot },
-    { label: 'Reports & Analytics', path: '/operator/reports', icon: BarChart3 },
+    { label: 'Executive Analytics', path: '/operator/analytics', icon: TrendingUp },
     { label: 'Operator Settings', path: '/operator/settings', icon: Settings },
   ];
 
-  const navItems = portalType === 'superadmin' ? superAdminNav : operatorNav;
+  const customerNav = [
+    { label: 'My Fiber Home', path: '/customer/home', icon: LayoutDashboard },
+    { label: 'My Billing & Invoices', path: '/customer/billing', icon: CreditCard },
+    { label: 'Wi-Fi Settings', path: '/customer/wifi', icon: Radio },
+    { label: 'Connected Devices', path: '/customer/devices', icon: Users },
+    { label: 'Helpdesk & Tickets', path: '/customer/support', icon: Ticket },
+  ];
+
+  const navItems = portalType === 'superadmin' ? superAdminNav : portalType === 'customer' ? customerNav : operatorNav;
 
   const handleLogout = () => {
     logout();
-    navigate(portalType === 'superadmin' ? '/superadmin/login' : '/operator/login');
+    navigate(portalType === 'superadmin' ? '/superadmin/login' : portalType === 'customer' ? '/customer/login' : '/operator/login');
   };
 
   const handleExitImpersonation = () => {

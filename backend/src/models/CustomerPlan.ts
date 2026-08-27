@@ -15,6 +15,13 @@ export interface ICustomerPlan extends Document {
   description?: string;
   isActive: boolean;
   activeSubscribersCount: number;
+  comboAddons?: {
+    ottApps?: string[]; // e.g. ["Disney+ Hotstar", "SonyLIV", "Zee5", "Amazon Prime"]
+    iptvChannelsCount?: number;
+    voipMinutes?: number;
+    staticIpIncluded?: boolean;
+  };
+  autoRenewalDefault?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,6 +41,13 @@ const CustomerPlanSchema = new Schema<ICustomerPlan>(
     description: { type: String, default: '' },
     isActive: { type: Boolean, default: true, index: true },
     activeSubscribersCount: { type: Number, default: 0 },
+    comboAddons: {
+      ottApps: [{ type: String }],
+      iptvChannelsCount: { type: Number, default: 0 },
+      voipMinutes: { type: Number, default: 0 },
+      staticIpIncluded: { type: Boolean, default: false },
+    },
+    autoRenewalDefault: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

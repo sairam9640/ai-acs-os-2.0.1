@@ -1013,6 +1013,119 @@ class ApiService {
       body: JSON.stringify(payload),
     });
   }
+
+  // ==========================================
+  // ENTERPRISE PAYMENT GATEWAYS & RECONCILIATION
+  // ==========================================
+  async getPaymentGateways() {
+    return this.request('/operator/payments/gateways');
+  }
+
+  async updatePaymentGateway(payload: any) {
+    return this.request('/operator/payments/gateways', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getPaymentTransactions(params: any = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/operator/payments/transactions?${query}`);
+  }
+
+  async getDailyReconciliation(date?: string) {
+    const query = date ? `?date=${date}` : '';
+    return this.request(`/operator/payments/reconciliation/daily${query}`);
+  }
+
+  async syncTransactionStatus(id: string, status?: string) {
+    return this.request(`/operator/payments/transactions/${id}/sync`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async getBranchRevenueReport() {
+    return this.request('/operator/payments/reports/branch-revenue');
+  }
+
+  // ==========================================
+  // NETWORK INVENTORY & WAREHOUSE SPARE STOCK
+  // ==========================================
+  async getWarehouseStock(params: any = {}) {
+    const query = new URLSearchParams(params).toString();
+    return this.request(`/operator/inventory/warehouse?${query}`);
+  }
+
+  async stockInWarehouse(payload: any) {
+    return this.request('/operator/inventory/warehouse/stock-in', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async stockOutWarehouse(id: string, payload: any) {
+    return this.request(`/operator/inventory/warehouse/${id}/stock-out`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getLowStockAlerts() {
+    return this.request('/operator/inventory/warehouse/low-stock-alerts');
+  }
+
+  async getExpiringWarranties(days = 60) {
+    return this.request(`/operator/inventory/warehouse/expiring-warranties?days=${days}`);
+  }
+
+  async getVendors() {
+    return this.request('/operator/inventory/vendors');
+  }
+
+  async createVendor(payload: any) {
+    return this.request('/operator/inventory/vendors', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // ==========================================
+  // EXECUTIVE ANALYTICS & OPERATIONAL REPORTS
+  // ==========================================
+  async getRevenueAnalytics() {
+    return this.request('/operator/analytics/revenue');
+  }
+
+  async getChurnAnalytics() {
+    return this.request('/operator/analytics/churn');
+  }
+
+  async getAreaComplaintsAnalytics() {
+    return this.request('/operator/analytics/area-complaints');
+  }
+
+  async getTechnicianMttrAnalytics() {
+    return this.request('/operator/analytics/technician-mttr');
+  }
+
+  // ==========================================
+  // CUSTOMER PORTAL SELF-SERVICE BILLING & CHECKOUT
+  // ==========================================
+  async getCustomerPaymentGateways() {
+    return this.request('/customer/gateways');
+  }
+
+  async initiateCustomerPayment(payload: any) {
+    return this.request('/customer/pay/initiate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getCustomerInvoices() {
+    return this.request('/customer/invoices');
+  }
 }
 
 export const api = new ApiService();

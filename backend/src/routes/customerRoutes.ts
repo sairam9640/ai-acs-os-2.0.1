@@ -254,3 +254,180 @@ customerRouter.get('/knowledge-base/search', async (req: AuthenticatedRequest, r
     return res.status(500).json({ success: false, error: error.message });
   }
 });
+
+/**
+ * =========================================================================
+ * 12.5 Self-Service Online Payment Checkout & Invoice Generation
+ * =========================================================================
+ */
+customerRouter.get('/gateways', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { PaymentGatewayService } = await import('../services/paymentGatewayService.js');
+    const all = await PaymentGatewayService.getTenantGateways(req.tenantId!);
+    const enabled = all.filter((g) => g.isEnabled);
+    return res.json({ success: true, gateways: enabled });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+customerRouter.post('/pay/initiate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { gateway = 'RAZORPAY', amount, planId, planName, validityDays } = req.body;
+
+    const customer = await Customer.findOne({
+      tenantId: new Types.ObjectId(req.tenantId),
+      $or: [{ phone: req.user!.email }, { email: req.user!.email }, { _id: req.user!.id }],
+    }) || await Customer.findOne({ tenantId: new Types.ObjectId(req.tenantId) });
+
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer account not found' });
+
+    const payAmount = Number(amount || customer.servicePlan?.price || 699);
+
+    const { PaymentGatewayService } = await import('../services/paymentGatewayService.js');
+    const orderResult = await PaymentGatewayService.createPaymentOrder({
+      tenantId: req.tenantId!,
+      customerId: customer._id.toString(),
+      gateway: gateway.toUpperCase() as any,
+      amount: payAmount,
+      planId: planId || customer.servicePlan?.name,
+      planName: planName || customer.servicePlan?.name || 'Broadband Renewal',
+      validityDays: validityDays || 30,
+    });
+
+    return res.json(orderResult);
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+customerRouter.get('/invoices', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const customer = await Customer.findOne({
+      tenantId: new Types.ObjectId(req.tenantId),
+      $or: [{ phone: req.user!.email }, { email: req.user!.email }, { _id: req.user!.id }],
+    }) || await Customer.findOne({ tenantId: new Types.ObjectId(req.tenantId) });
+
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer account not found' });
+
+    const { PaymentTransaction } = await import('../models/PaymentTransaction.js');
+    const transactions = await PaymentTransaction.find({
+      tenantId: customer.tenantId,
+      customerId: customer._id,
+    }).sort({ createdAt: -1 });
+
+    const invoices = transactions.map((t) => ({
+      invoiceId: `INV-${t.transactionId}`,
+      transactionId: t.transactionId,
+      date: t.createdAt,
+      planName: t.metadata?.planName || 'Fiber Broadband Package',
+      amount: t.amount,
+      paymentMode: t.paymentMode || t.gateway,
+      status: t.status,
+      receiptUrl: `/api/v1/customer/invoices/${t.transactionId}/download`,
+    }));
+
+    return res.json({ success: true, invoices });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+customerRouter.get('/invoices/:id/download', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { PaymentTransaction } = await import('../models/PaymentTransaction.js');
+    const txn = await PaymentTransaction.findOne({
+      tenantId: new Types.ObjectId(req.tenantId),
+      $or: [{ transactionId: id }, { _id: Types.ObjectId.isValid(id) ? new Types.ObjectId(id) : undefined }],
+    });
+
+    if (!txn) return res.status(404).send('Invoice not found');
+
+    const customer = await Customer.findById(txn.customerId);
+    const invoiceHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Invoice - ${txn.transactionId}</title>
+        <style>
+          body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; color: #1e293b; max-width: 800px; margin: auto; }
+          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #0284c7; padding-bottom: 20px; }
+          .badge { background: #dcfce7; color: #166534; padding: 4px 12px; border-radius: 9999px; font-weight: bold; font-size: 12px; }
+          .section { margin-top: 30px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+          th, td { padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+          th { background: #f8fafc; font-size: 12px; text-transform: uppercase; color: #64748b; }
+          .total-row { font-weight: bold; font-size: 16px; color: #0f172a; }
+          .footer { margin-top: 40px; text-align: center; font-size: 11px; color: #94a3b8; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 style="margin:0; color:#0284c7; font-size:24px;">AI ACS OS — ISP BROADBAND INVOICE</h1>
+            <p style="margin:4px 0 0; color:#64748b; font-size:12px;">Tax Invoice & Official Payment Receipt</p>
+          </div>
+          <div style="text-align:right;">
+            <span class="badge">${txn.status}</span>
+            <p style="margin:8px 0 0; font-family:monospace; font-size:13px; font-weight:bold;">${txn.transactionId}</p>
+            <p style="margin:2px 0 0; font-size:11px; color:#64748b;">Date: ${new Date(txn.createdAt).toLocaleDateString()}</p>
+          </div>
+        </div>
+
+        <div class="section" style="display:flex; justify-content:space-between;">
+          <div>
+            <span style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:bold;">Billed To</span>
+            <h3 style="margin:4px 0 0; font-size:16px;">${customer?.fullName || txn.customerName}</h3>
+            <p style="margin:2px 0; font-size:12px; color:#475569;">Account #: <strong>${txn.accountNumber}</strong></p>
+            <p style="margin:2px 0; font-size:12px; color:#475569;">Mobile: ${txn.customerPhone}</p>
+            <p style="margin:2px 0; font-size:12px; color:#475569;">${customer?.address?.street || ''}, ${customer?.address?.city || ''}</p>
+          </div>
+          <div style="text-align:right;">
+            <span style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:bold;">Payment Details</span>
+            <p style="margin:4px 0 0; font-size:12px;">Gateway: <strong>${txn.gateway}</strong></p>
+            <p style="margin:2px 0; font-size:12px;">Mode: <strong>${txn.paymentMode}</strong></p>
+            <p style="margin:2px 0; font-size:12px;">Order ID: <code style="font-size:11px;">${txn.orderId || 'N/A'}</code></p>
+          </div>
+        </div>
+
+        <div class="section">
+          <table>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Validity</th>
+                <th>Rate</th>
+                <th>Amount (INR)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>${txn.metadata?.planName || 'Fiber Broadband Renewal'}</strong><br><span style="font-size:11px; color:#64748b;">High-speed unlimited FTTH connection</span></td>
+                <td>${txn.metadata?.validityDays || 30} Days</td>
+                <td>₹${txn.amount}</td>
+                <td>₹${txn.amount}</td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="3" style="text-align:right;">Grand Total:</td>
+                <td style="color:#166534;">₹${txn.amount}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="footer">
+          <p>This is a computer-generated tax receipt and requires no physical signature.</p>
+          <p>Powered by AI ACS OS — Telecom-grade Fiber Operations Platform</p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    res.setHeader('Content-Type', 'text/html');
+    return res.send(invoiceHtml);
+  } catch (error: any) {
+    return res.status(500).send('Error generating invoice');
+  }
+});
+

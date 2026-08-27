@@ -51,13 +51,18 @@ import { CustomerPlan } from '../models/CustomerPlan.js';
 import { PlanNotificationTemplate, DEFAULT_PLAN_TEMPLATES, PlanNotificationEventType } from '../models/PlanNotificationTemplate.js';
 import { CustomerPlanService } from '../services/customerPlanService.js';
 import { PlanNotificationService } from '../services/planNotificationService.js';
+import { PaymentGatewayService } from '../services/paymentGatewayService.js';
+import { ReconciliationService } from '../services/reconciliationService.js';
+import { WarehouseInventoryService } from '../services/warehouseInventoryService.js';
+import { AnalyticsReportService } from '../services/analyticsReportService.js';
+import { Vendor } from '../models/Vendor.js';
 
 export const operatorRouter = Router();
 
 // Apply Operator Security Boundary & Tenant Enforcement
 operatorRouter.use(authenticateToken);
 operatorRouter.use(requireTenant);
-operatorRouter.use(requireRole(['operator_admin', 'noc_operator', 'fiber_planner']));
+operatorRouter.use(requireRole(['operator_admin', 'noc_operator', 'fiber_planner', 'accountant', 'support_agent', 'technician']));
 
 /**
  * 7.1 Operator NOC Dashboard Summary
@@ -5773,5 +5778,255 @@ operatorRouter.post('/settings/whatsapp/disconnect', async (req: AuthenticatedRe
     return res.status(500).json({ success: false, error: error.message });
   }
 });
+
+/**
+ * =========================================================================
+ * 15. ENTERPRISE PAYMENT GATEWAYS (Plugin-based: Razorpay, Cashfree, PhonePe, Paytm, Stripe)
+ * =========================================================================
+ */
+operatorRouter.get('/payments/gateways', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const gateways = await PaymentGatewayService.getTenantGateways(req.tenantId!);
+    return res.json({ success: true, gateways });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.put('/payments/gateways', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { gateway, displayName, isEnabled, isTestMode, credentials, webhookSecret } = req.body;
+    if (!gateway || !credentials) {
+      return res.status(400).json({ success: false, error: 'Gateway and credentials are required' });
+    }
+
+    const config = await PaymentGatewayService.saveGatewayConfig({
+      tenantId: req.tenantId!,
+      gateway,
+      displayName,
+      isEnabled: Boolean(isEnabled),
+      isTestMode: Boolean(isTestMode),
+      credentials,
+      webhookSecret,
+      actor: { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+    });
+
+    return res.json({
+      success: true,
+      message: `Gateway ${gateway} credentials encrypted and saved successfully.`,
+      gateway: {
+        _id: config._id,
+        gateway: config.gateway,
+        displayName: config.displayName,
+        isEnabled: config.isEnabled,
+        isTestMode: config.isTestMode,
+        publicMetadata: config.publicMetadata,
+        webhookEndpointUrl: config.webhookEndpointUrl,
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * =========================================================================
+ * 16. PAYMENT RECONCILIATION & SETTLEMENT ENGINE
+ * =========================================================================
+ */
+operatorRouter.get('/payments/transactions', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await ReconciliationService.getTransactions({
+      tenantId: req.tenantId!,
+      status: req.query.status as string,
+      gateway: req.query.gateway as string,
+      settlementStatus: req.query.settlementStatus as string,
+      search: req.query.search as string,
+      startDate: req.query.startDate as string,
+      endDate: req.query.endDate as string,
+      page: req.query.page ? Number(req.query.page) : 1,
+      limit: req.query.limit ? Number(req.query.limit) : 20,
+    });
+
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.get('/payments/reconciliation/daily', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const summary = await ReconciliationService.getDailyCollectionsSummary(
+      req.tenantId!,
+      req.query.date as string
+    );
+    return res.json({ success: true, summary });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/payments/transactions/:id/sync', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const txn = await ReconciliationService.syncTransactionStatus(
+      req.tenantId!,
+      req.params.id,
+      req.body.status
+    );
+    return res.json({ success: true, transaction: txn, message: 'Transaction status synchronized.' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.get('/payments/reports/branch-revenue', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const report = await ReconciliationService.getBranchRevenueReport(req.tenantId!);
+    return res.json({ success: true, report });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * =========================================================================
+ * 17. NETWORK INVENTORY & SPARE STOCK WAREHOUSE
+ * =========================================================================
+ */
+operatorRouter.get('/inventory/warehouse', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await WarehouseInventoryService.getStockItems({
+      tenantId: req.tenantId!,
+      category: req.query.category as string,
+      status: req.query.status as string,
+      brand: req.query.brand as string,
+      search: req.query.search as string,
+      page: req.query.page ? Number(req.query.page) : 1,
+      limit: req.query.limit ? Number(req.query.limit) : 20,
+    });
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/inventory/warehouse/stock-in', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const items = await WarehouseInventoryService.stockIn({
+      tenantId: req.tenantId!,
+      ...req.body,
+      actor: { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+    });
+    return res.status(201).json({
+      success: true,
+      items,
+      message: `Stock-in successful: ${items.length} items added to warehouse.`,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/inventory/warehouse/:id/stock-out', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const item = await WarehouseInventoryService.stockOut({
+      tenantId: req.tenantId!,
+      itemId: req.params.id,
+      ...req.body,
+      actor: { id: req.user!.id, email: req.user!.email, role: req.user!.role },
+    });
+    return res.json({
+      success: true,
+      item,
+      message: `Stock-out successful: ${item.itemCode} assigned to ${req.body.targetIdentifier}.`,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.get('/inventory/warehouse/low-stock-alerts', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const alerts = await WarehouseInventoryService.getLowStockAlerts(req.tenantId!);
+    return res.json({ success: true, alerts });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.get('/inventory/warehouse/expiring-warranties', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const items = await WarehouseInventoryService.getExpiringWarrantyItems(
+      req.tenantId!,
+      req.query.days ? Number(req.query.days) : 60
+    );
+    return res.json({ success: true, items });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.get('/inventory/vendors', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const vendors = await Vendor.find({ tenantId: new Types.ObjectId(req.tenantId) }).sort({ name: 1 });
+    return res.json({ success: true, vendors });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.post('/inventory/vendors', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const vendor = await Vendor.create({
+      tenantId: new Types.ObjectId(req.tenantId),
+      ...req.body,
+    });
+    return res.status(201).json({ success: true, vendor, message: 'Vendor added successfully.' });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * =========================================================================
+ * 18. EXECUTIVE ANALYTICS & OPERATIONAL REPORTS
+ * =========================================================================
+ */
+operatorRouter.get('/analytics/revenue', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const metrics = await AnalyticsReportService.getRevenueMetrics(req.tenantId!);
+    return res.json({ success: true, metrics });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.get('/analytics/churn', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const metrics = await AnalyticsReportService.getChurnAnalysis(req.tenantId!);
+    return res.json({ success: true, metrics });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.get('/analytics/area-complaints', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const heatmap = await AnalyticsReportService.getAreaWiseComplaints(req.tenantId!);
+    return res.json({ success: true, heatmap });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+operatorRouter.get('/analytics/technician-mttr', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const performance = await AnalyticsReportService.getTechnicianPerformance(req.tenantId!);
+    return res.json({ success: true, performance });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 
