@@ -1649,9 +1649,16 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
         targetIdx = parsed;
       }
     }
+    if (targetIdx === -1 && req.body.name) {
+      targetIdx = device.wanProfiles.findIndex((p: any) => p.name && p.name.trim().toLowerCase() === String(req.body.name).trim().toLowerCase());
+    }
+    if (targetIdx === -1 && device.wanProfiles.length === 1) {
+      targetIdx = 0;
+    }
 
     if (targetIdx === -1) {
-      return res.status(404).json({ success: false, error: `WAN profile '${targetKey}' not found.` });
+      // Graceful auto-creation fallback so user configuration is never lost
+      return handleAddWanProfile(req, res);
     }
 
     const currentProfile = device.wanProfiles[targetIdx] as any;
