@@ -68,7 +68,7 @@ export interface ActiveSessionContext {
   clientIp: string;
   tenantId: string;
   tenantSlug: string;
-  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'COMPLETED';
+  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'ADD_OBJECT_SENT' | 'COMPLETED';
   activeOpticalCandidate?: string;
   supportedOpticalPath?: string;
   timestamp: number;
@@ -1251,6 +1251,33 @@ ${stringElements}
             pendingCmd.status = 'sending';
             pendingCmd.sentAt = new Date();
             await pendingCmd.save();
+
+            const isPppoeCreation = rawParams.some((p: any) => {
+              const name = Array.isArray(p) ? p[0] : (p.name || p.path || '');
+              return name.includes('WANPPPConnection');
+            });
+
+            // Check if device currently only has WANIPConnection in raw parameters
+            const hasOnlyIpWan = !rawParams.some((p: any) => {
+              const name = Array.isArray(p) ? p[0] : (p.name || p.path || '');
+              return (dev as any)?.tr069Parameters?.[name];
+            });
+
+            if (isPppoeCreation && session.stage !== 'ADD_OBJECT_SENT' && pendingCmd.action === 'SET_WAN_CONFIG') {
+              session.stage = 'ADD_OBJECT_SENT';
+              const addObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:AddObject>
+      <ObjectName>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.</ObjectName>
+      <ParameterKey>${pendingCmd._id}</ParameterKey>
+    </cwmp:AddObject>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+              console.log(`[Native CWMP OUT] Dispatched AddObject RPC for WANPPPConnection on ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
+              return addObjectXml;
+            }
             const normalizedParams = rawParams.map((p: any) => {
               if (Array.isArray(p)) return { name: p[0], value: p[1], type: p[2] || 'xsd:string' };
               return { name: p.name || p.path, value: p.value, type: p.type || 'xsd:string' };
@@ -1562,6 +1589,43 @@ ${stringElements}
     device.lastRawGetParameterValuesResponseXml = xml;
     if (!device.rawParameters) device.rawParameters = {};
     Object.assign(device.rawParameters, rawMap);
+
+    // Handle AddObjectResponse from CPE
+    if (xml.includes('AddObjectResponse')) {
+      const instMatch = xml.match(/<InstanceNumber>(\d+)<\/InstanceNumber>/i);
+      const instanceNum = instMatch ? instMatch[1] : '1';
+      console.log(`[Native CWMP IN] CPE created new WAN connection instance ${instanceNum} for ${device.serialNumber}`);
+      
+      const pendingCmd = await DeviceCommand.findOne({ deviceId: device._id, status: { $in: ['queued', 'sending', 'sent'] } }).sort({ queuedAt: -1 });
+      if (pendingCmd) {
+        const rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues || [];
+        const normalizedParams = rawParams.map((p: any) => {
+          let name = Array.isArray(p) ? p[0] : (p.name || p.path);
+          name = name.replace(/WANPPPConnection\.\d+\./, `WANPPPConnection.${instanceNum}.`);
+          const val = Array.isArray(p) ? p[1] : p.value;
+          const type = Array.isArray(p) ? (p[2] || 'xsd:string') : (p.type || 'xsd:string');
+          return { name, value: val, type };
+        });
+
+        const spvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[${normalizedParams.length}]">
+${normalizedParams.map((p: any) => `        <ParameterValueStruct>
+          <Name>${p.name}</Name>
+          <Value xsi:type="${p.type}">${p.value}</Value>
+        </ParameterValueStruct>`).join('\n')}
+      </ParameterList>
+      <ParameterKey>${pendingCmd._id}</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+        console.log(`[Native CWMP OUT] Dispatched SetParameterValues for newly added WAN instance ${instanceNum} on ${device.serialNumber}`);
+        return spvXml;
+      }
+    }
 
     // Handle SetParameterValuesResponse from CPE
     if (xml.includes('SetParameterValuesResponse')) {
