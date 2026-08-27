@@ -56,6 +56,7 @@ import { ReconciliationService } from '../services/reconciliationService.js';
 import { WarehouseInventoryService } from '../services/warehouseInventoryService.js';
 import { AnalyticsReportService } from '../services/analyticsReportService.js';
 import { Vendor } from '../models/Vendor.js';
+import { WhatsAppBotService } from '../services/whatsAppBotService.js';
 
 export const operatorRouter = Router();
 
@@ -6096,6 +6097,118 @@ operatorRouter.get('/analytics/technician-mttr', async (req: AuthenticatedReques
   try {
     const performance = await AnalyticsReportService.getTechnicianPerformance(req.tenantId!);
     return res.json({ success: true, performance });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// =========================================================================
+// WHATSAPP CUSTOMER SELF-SERVICE BOT, LIVE CHAT & LEADS WORKSPACE
+// =========================================================================
+
+// Inbound WhatsApp message processor (Webhooks & simulator)
+operatorRouter.post('/whatsapp/inbound', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { fromPhone, messageText, messageId, senderName } = req.body;
+    if (!fromPhone || messageText === undefined) {
+      return res.status(400).json({ success: false, error: 'fromPhone and messageText are required' });
+    }
+
+    const result = await WhatsAppBotService.handleInboundMessage({
+      tenantId: req.tenantId!,
+      fromPhone,
+      messageText,
+      messageId,
+      senderName,
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// List all WhatsApp conversation threads for Operator Inbox
+operatorRouter.get('/whatsapp/conversations', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const conversations = await WhatsAppBotService.getConversations(req.tenantId!);
+    return res.json({ success: true, data: conversations });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get full chronological chat history for a specific phone number
+operatorRouter.get('/whatsapp/conversations/:phone', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const history = await WhatsAppBotService.getChatHistory(req.tenantId!, req.params.phone);
+    return res.json({ success: true, data: history });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Operator manual reply to a WhatsApp conversation
+operatorRouter.post('/whatsapp/conversations/:phone/reply', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { messageText } = req.body;
+    if (!messageText) {
+      return res.status(400).json({ success: false, error: 'messageText is required' });
+    }
+
+    const operator = {
+      id: req.user?.id || 'operator_1',
+      email: req.user?.email || 'operator@isp.com',
+      name: req.user?.email?.split('@')[0] || 'Support Desk',
+    };
+
+    const result = await WhatsAppBotService.sendOperatorReply(
+      req.tenantId!,
+      req.params.phone,
+      messageText,
+      operator
+    );
+
+    return res.json({ success: true, data: result });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get all prospective leads captured from WhatsApp Bot
+operatorRouter.get('/leads', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const leads = await WhatsAppBotService.getLeads(req.tenantId!, req.query.status as string);
+    return res.json({ success: true, data: leads });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Convert a WhatsApp prospective lead into an active Customer Account
+operatorRouter.post('/leads/:id/convert', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { planName, planPrice } = req.body;
+    if (!planName) {
+      return res.status(400).json({ success: false, error: 'planName is required' });
+    }
+
+    const actor = {
+      id: req.user?.id || 'operator_1',
+      email: req.user?.email || 'operator@isp.com',
+    };
+
+    const newCustomer = await WhatsAppBotService.convertLeadToCustomer(
+      req.tenantId!,
+      req.params.id,
+      {
+        planName,
+        planPrice: planPrice || 699,
+        actor,
+      }
+    );
+
+    return res.json({ success: true, data: newCustomer });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }

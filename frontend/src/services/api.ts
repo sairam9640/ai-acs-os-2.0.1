@@ -1153,6 +1153,44 @@ class ApiService {
   async getCustomerInvoices() {
     return this.request('/customer/invoices');
   }
+
+  // ==========================================
+  // WHATSAPP SELF-SERVICE BOT, LIVE CHAT & LEADS
+  // ==========================================
+  async sendInboundWhatsAppMessage(fromPhone: string, messageText: string, senderName?: string) {
+    return this.request('/operator/whatsapp/inbound', {
+      method: 'POST',
+      body: JSON.stringify({ fromPhone, messageText, senderName }),
+    });
+  }
+
+  async getWhatsAppConversations() {
+    return this.request('/operator/whatsapp/conversations');
+  }
+
+  async getWhatsAppChatHistory(phone: string) {
+    return this.request(`/operator/whatsapp/conversations/${encodeURIComponent(phone)}`);
+  }
+
+  async sendWhatsAppReply(phone: string, messageText: string) {
+    return this.request(`/operator/whatsapp/conversations/${encodeURIComponent(phone)}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ messageText }),
+    });
+  }
+
+  async getWhatsAppLeads(status?: string) {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.request(`/operator/leads${qs}`);
+  }
+
+  async convertWhatsAppLead(leadId: string, payload: { planName: string; planPrice?: number }) {
+    return this.request(`/operator/leads/${leadId}/convert`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
 }
 
 export const api = new ApiService();
+

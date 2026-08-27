@@ -30,6 +30,7 @@ import {
   CreditCard,
   TrendingUp,
   Layers,
+  MessageSquare,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { Button } from '../ui/Button.js';
@@ -76,6 +77,7 @@ export const Shell: React.FC<ShellProps> = ({
     { label: 'Plan & Expiry Hub', path: '/operator/plans', icon: CalendarClock },
     { label: 'Payment Gateways', path: '/operator/payments/gateways', icon: CreditCard },
     { label: 'Reconciliation', path: '/operator/payments/reconciliation', icon: CreditCard },
+    { label: 'WhatsApp Live Chat', path: '/operator/whatsapp-chat', icon: MessageSquare },
     { label: 'Warehouse Spares', path: '/operator/inventory/warehouse', icon: Layers },
     { label: 'Approvals Gate', path: '/operator/approvals', icon: CheckSquare },
     { label: 'Automation Rules', path: '/operator/automation', icon: Zap },

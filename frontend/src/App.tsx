@@ -37,6 +37,7 @@ import { PaymentGatewaySettings } from './pages/operator/PaymentGatewaySettings.
 import { PaymentReconciliation } from './pages/operator/PaymentReconciliation.js';
 import { WarehouseInventory } from './pages/operator/WarehouseInventory.js';
 import { EnterpriseAnalytics } from './pages/operator/EnterpriseAnalytics.js';
+import { WhatsAppChatCenter } from './pages/operator/WhatsAppChatCenter.js';
 
 // Technician Pages
 import { TechnicianLogin } from './pages/technician/TechnicianLogin.js';
@@ -421,6 +422,30 @@ export function App() {
             element={
               <ProtectedRoute allowedRoles={['operator_admin', 'noc_operator', 'accountant']} portalType="operator">
                 <EnterpriseAnalytics />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/operator/whatsapp"
+            element={
+              <ProtectedRoute allowedRoles={['operator_admin', 'noc_operator', 'support_agent', 'accountant']} portalType="operator">
+                <WhatsAppChatCenter />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/operator/whatsapp-chat"
+            element={
+              <ProtectedRoute allowedRoles={['operator_admin', 'noc_operator', 'support_agent', 'accountant']} portalType="operator">
+                <WhatsAppChatCenter />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/operator/leads"
+            element={
+              <ProtectedRoute allowedRoles={['operator_admin', 'noc_operator', 'support_agent']} portalType="operator">
+                <WhatsAppChatCenter />
               </ProtectedRoute>
             }
           />
