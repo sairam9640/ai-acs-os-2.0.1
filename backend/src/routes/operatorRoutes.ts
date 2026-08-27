@@ -1009,12 +1009,22 @@ operatorRouter.post('/devices/:id/commands/:commandId/retry', async (req: Authen
       }
     );
 
+    let retryParams = { ...oldCmd.parameters };
+    if (oldCmd.action === 'SET_WAN_CONFIG') {
+      const profileData = oldCmd.parameters?.profile || oldCmd.parameters || {};
+      const cleanWanParams = buildTr069WanParams(profileData, device);
+      retryParams = {
+        ...oldCmd.parameters,
+        tr069ParamValues: cleanWanParams,
+      };
+    }
+
     const newCmd = await DeviceCommand.create({
       tenantId,
       deviceId: device._id,
       customerId: device.customerId,
       action: oldCmd.action,
-      parameters: oldCmd.parameters,
+      parameters: retryParams,
       status: 'pending',
       requestedBy: {
         userId: req.user!.id,

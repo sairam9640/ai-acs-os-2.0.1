@@ -161,16 +161,17 @@ export class DeviceManagementService {
         tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel', String(parameters.wifi5g.channel), 'xsd:unsignedInt']);
       }
     } else if (action === 'SET_WAN_CONFIG') {
+      tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Enable', 'true', 'xsd:boolean']);
       if (parameters.pppoeUsername) {
         tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username', String(parameters.pppoeUsername), 'xsd:string']);
       }
       if (parameters.pppoePassword) {
         tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Password', String(parameters.pppoePassword), 'xsd:string']);
       }
+      tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.NATEnabled', String(parameters.natEnabled !== false), 'xsd:boolean']);
+      tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionType', 'IP_Routed', 'xsd:string']);
       if (parameters.vlanId) {
-        tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_HW_VLAN', String(parameters.vlanId), 'xsd:unsignedInt']);
-        tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_CT-COM_VlanID', String(parameters.vlanId), 'xsd:unsignedInt']);
-        tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_ZTE-COM_VLAN', String(parameters.vlanId), 'xsd:unsignedInt']);
+        tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.VLANID', String(parameters.vlanId), 'xsd:unsignedInt']);
       }
     }
 
