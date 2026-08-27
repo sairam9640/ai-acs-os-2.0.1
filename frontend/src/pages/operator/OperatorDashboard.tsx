@@ -80,7 +80,7 @@ export const OperatorDashboard: React.FC = () => {
   const s = summary || {};
   const activeHost = window.location.hostname || '31.42.125.25';
   const tenantSlug = tenant?.slug || 'rudra';
-  const activeCwmpUrl = cwmpStats?.cwmpPathUrl || `http://${activeHost}:7547/tr069/${tenantSlug}`;
+  const activeCwmpUrl = `http://${activeHost}/tr069/${tenantSlug}`;
 
   const handleCopyUrl = () => {
     navigator.clipboard.writeText(activeCwmpUrl);
