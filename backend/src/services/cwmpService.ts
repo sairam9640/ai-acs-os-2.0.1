@@ -1134,13 +1134,23 @@ export class CwmpService {
       // 0. Check for Pending Operational Commands (SetParameterValues, Reboot, etc.)
       const serialAliases = session.serialAliases || CwmpXmlParser.getSerialNumberAliases(session.serialNumber);
       const dev = await Device.findOne({ serialNumber: { $in: serialAliases } });
-      
       if (dev) {
-        const pendingCmd = await DeviceCommand.findOne({
+        // Priority 1: High-priority configuration & diagnostic commands (SET_WIFI_CONFIG, SET_WAN_CONFIG, REBOOT_DEVICE, etc.)
+        let pendingCmd = await DeviceCommand.findOne({
           deviceId: dev._id,
           tenantId: dev.tenantId,
+          action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
           status: { $in: ['pending', 'queued', 'authorized', 'created'] }
         }).sort({ queuedAt: 1, createdAt: 1 });
+
+        // Priority 2: General telemetry poll / summon commands
+        if (!pendingCmd) {
+          pendingCmd = await DeviceCommand.findOne({
+            deviceId: dev._id,
+            tenantId: dev.tenantId,
+            status: { $in: ['pending', 'queued', 'authorized', 'created'] }
+          }).sort({ queuedAt: -1, createdAt: -1 });
+        }
 
         if (pendingCmd) {
           const cmdAction = (pendingCmd as any).action || (pendingCmd as any).rpcMethod || (pendingCmd as any).commandType || '';
