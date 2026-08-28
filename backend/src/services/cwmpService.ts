@@ -1320,16 +1320,19 @@ ${stringElements}
               return { name: p.name || p.path, value: p.value, type: p.type || 'xsd:string' };
             });
 
-            // Validate against SupportedParameterCache (reject known unsupported vendor parameters)
+            // Validate against SupportedParameterCache (reject known unsupported vendor parameters, never core params)
             const validParams: Array<{ name: string; value: any; type: string }> = [];
             for (const p of normalizedParams) {
-              const cached = await SupportedParameterCache.findOne({
-                parameterPath: p.name,
-                status: 'UNSUPPORTED'
-              });
-              if (cached) {
-                console.warn(`[CWMP ACS] 🛡️ Suppressed unsupported parameter '${p.name}' before SetParameterValues dispatch.`);
-                continue;
+              const isCoreParam = /Username|Password|NATEnabled|Enable$/i.test(p.name);
+              if (!isCoreParam) {
+                const cached = await SupportedParameterCache.findOne({
+                  parameterPath: p.name,
+                  status: 'UNSUPPORTED'
+                });
+                if (cached) {
+                  console.warn(`[CWMP ACS] 🛡️ Suppressed unsupported parameter '${p.name}' before SetParameterValues dispatch.`);
+                  continue;
+                }
               }
               validParams.push(p);
             }
@@ -1891,21 +1894,27 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
         const fString = spvFaultMatch[3].trim();
         detailedErrorMsg = `Fault ${fCode}: ${fString} (Parameter: ${paramName})`;
         console.warn(`[CWMP ACS] 🛑 Extracted SetParameterValuesFault on '${paramName}': ${detailedErrorMsg}`);
-        SupportedParameterCache.findOneAndUpdate(
-          { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: paramName },
-          { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
-          { upsert: true }
-        ).catch(() => {});
+        const isCoreParam = /Username|Password|NATEnabled|Enable$/i.test(paramName);
+        if (!isCoreParam) {
+          SupportedParameterCache.findOneAndUpdate(
+            { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: paramName },
+            { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
+            { upsert: true }
+          ).catch(() => {});
+        }
       } else {
         const failedParamMatch = xml.match(/<ParameterName>([^<]+)<\/ParameterName>/i);
         if (failedParamMatch && failedParamMatch[1]) {
           const failedParam = failedParamMatch[1].trim();
           detailedErrorMsg = `Fault ${fault.faultCode}: ${fault.faultString} (Parameter: ${failedParam})`;
-          SupportedParameterCache.findOneAndUpdate(
-            { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: failedParam },
-            { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
-            { upsert: true }
-          ).catch(() => {});
+          const isCoreParam = /Username|Password|NATEnabled|Enable$/i.test(failedParam);
+          if (!isCoreParam) {
+            SupportedParameterCache.findOneAndUpdate(
+              { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: failedParam },
+              { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
+              { upsert: true }
+            ).catch(() => {});
+          }
         }
       }
 
