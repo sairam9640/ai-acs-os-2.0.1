@@ -869,17 +869,18 @@ export class CwmpService {
             device.wanProfiles = incoming;
           } else {
             for (const inc of incoming) {
+              const isIncMgmt = inc.serviceType === 'TR069' || inc.serviceType === 'VOIP/TR069' || inc.name?.includes('TR069') || inc.name?.includes('WAN_IP');
               const existing = device.wanProfiles.find((p: any) =>
                 (inc.cpeObjectPath && p.cpeObjectPath === inc.cpeObjectPath) ||
                 (inc.name && p.name === inc.name) ||
-                (inc.serviceType === 'TR069' && (p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.isProtected))
+                (isIncMgmt && (p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.isProtected || p.name?.includes('TR069') || p.name?.includes('WAN_IP')))
               );
               if (existing) {
                 if (inc.status) existing.status = inc.status;
                 if (inc.ipAddress) existing.ipAddress = inc.ipAddress;
                 if (inc.vlanId) existing.vlanId = inc.vlanId;
                 if (inc.pppoeUsername) existing.pppoeUsername = inc.pppoeUsername;
-              } else {
+              } else if (!isIncMgmt) {
                 device.wanProfiles.push(inc);
               }
             }
@@ -1333,13 +1334,17 @@ ${stringElements}
               validParams.push(p);
             }
 
-            // If target WAN slot (slot > 1) does not exist in live device.rawParameters on CPE, issue scoped AddObject first
+            // If target WAN slot (slot > 1) does not exist in live device.rawParameters on CPE, issue scoped AddObject on WANPPPConnection
             const targetParamName = validParams[0]?.name || '';
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
 
+            const isPppoeConn = targetParamName.includes('WANPPPConnection');
+            const targetConnObj = isPppoeConn ? 'WANPPPConnection.' : 'WANIPConnection.';
+            const targetObjectName = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${targetConnObj}`;
+
             const slotExistsInRaw = Object.keys(dev.rawParameters || {}).some(k =>
-              k.includes(`WANConnectionDevice.${targetSlot}.`)
+              k.includes(`WANConnectionDevice.${targetSlot}.${targetConnObj}`)
             );
 
             if (targetSlot > 1 && !slotExistsInRaw && session.stage !== 'ADD_OBJECT_SENT') {
@@ -1349,7 +1354,7 @@ ${stringElements}
   <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
   <soapenv:Body>
     <cwmp:AddObject>
-      <ObjectName>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.</ObjectName>
+      <ObjectName>${targetObjectName}</ObjectName>
       <ParameterKey>${pendingCmd._id}</ParameterKey>
     </cwmp:AddObject>
   </soapenv:Body>
@@ -1366,7 +1371,7 @@ ${stringElements}
                 rawXml: addObjectXml,
                 timestamp: new Date(),
               }).catch(() => {});
-              console.log(`[Native CWMP OUT] Dispatched AddObject RPC for WANConnectionDevice on ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
+              console.log(`[Native CWMP OUT] Dispatched AddObject RPC for ${targetObjectName} on ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
               return addObjectXml;
             }
 
@@ -1741,15 +1746,21 @@ ${stringElements}
         const rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues || [];
         const normalizedParams = rawParams.map((p: any) => {
           let name = Array.isArray(p) ? p[0] : (p.name || p.path);
-          // Rebuild parameter path with the actual created instance number
-          name = name.replace(/WANConnectionDevice\.\d+\./, `WANConnectionDevice.${instanceNum}.`);
+          // Rebuild parameter path with the actual created connection instance number (e.g. WANPPPConnection.1)
+          name = name.replace(/WANPPPConnection\.\d+\./, `WANPPPConnection.${instanceNum}.`);
+          name = name.replace(/WANIPConnection\.\d+\./, `WANIPConnection.${instanceNum}.`);
           const val = Array.isArray(p) ? p[1] : p.value;
           const type = Array.isArray(p) ? (p[2] || 'xsd:string') : (p.type || 'xsd:string');
           return { name, value: val, type };
         });
 
         // Persist resolved cpeObjectPath back to device.wanProfiles in MongoDB
-        const resolvedCpePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${instanceNum}.WANPPPConnection.1.`;
+        const sampleParam = normalizedParams[0]?.name || '';
+        const slotMatch = sampleParam.match(/WANConnectionDevice\.(\d+)\./);
+        const targetSlot = slotMatch ? slotMatch[1] : '2';
+        const connObj = sampleParam.includes('WANPPPConnection') ? 'WANPPPConnection' : 'WANIPConnection';
+        const resolvedCpePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connObj}.${instanceNum}.`;
+
         const profileId = String((pendingCmd.parameters as any)?.profile?._id || '');
         const profileName = String((pendingCmd.parameters as any)?.profile?.name || '');
         const profileVlan = (pendingCmd.parameters as any)?.profile?.vlanId;

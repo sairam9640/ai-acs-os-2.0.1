@@ -1455,6 +1455,25 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
       }
     }
 
+    // Deduplicate profiles: Keep only 1 Management profile and unique profiles
+    const seenMgmt = new Set<string>();
+    const seenNames = new Set<string>();
+    const deduped: any[] = [];
+
+    for (const p of device.wanProfiles) {
+      const isMgmt = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.bearerService === 'TR069' || p.name?.includes('TR069') || Boolean(p.isProtected);
+      if (isMgmt) {
+        if (seenMgmt.has('mgmt')) continue;
+        seenMgmt.add('mgmt');
+      } else {
+        const key = p._id ? String(p._id) : (p.name || p.connectionType);
+        if (seenNames.has(key)) continue;
+        seenNames.add(key);
+      }
+      deduped.push(p);
+    }
+    device.wanProfiles = deduped;
+
     let hasModifications = false;
     const profiles = device.wanProfiles.map((p: any, idx: number) => {
       const isManagement = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.name?.includes('TR069') || p.bearerService === 'TR069' || Boolean(p.isProtected);
