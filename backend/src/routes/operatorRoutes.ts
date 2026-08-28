@@ -1251,7 +1251,7 @@ operatorRouter.delete('/devices/:id/wifi/ssid/:instance', async (req: Authentica
 /**
  * Helper to build TR-069 Parameter values for WAN profile provisioning
  */
-function buildTr069WanParams(profile: any, device: any): Array<[string, any, string]> {
+async function buildTr069WanParams(profile: any, device: any): Promise<Array<[string, any, string]>> {
   const params: Array<[string, any, string]> = [];
   const modelUpper = String(device?.modelName || '').toUpperCase();
   const isTr181 = modelUpper.includes('TR181') || modelUpper.includes('DEVICE2');
@@ -1324,18 +1324,26 @@ function buildTr069WanParams(profile: any, device: any): Array<[string, any, str
       }
     }
 
-    // VLAN Tagging Configuration (Applicable to both PPPoE & IPoE/VOIP)
+    // VLAN Tagging Configuration (Applicable to both PPPoE & IPoE/VOIP) - Discovery First
     const hasVlan = (profile.vlanEnabled !== false && profile.vlanId && Number(profile.vlanId) > 0) || profile.vlanMode === 'TAG';
-    if (hasVlan) {
-      if (/4410|Platinum/i.test(String(device?.modelName || ''))) {
-        params.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_GX_VLAN.Enable', true, 'xsd:boolean']);
-        params.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_GX_VLAN.VLANID', Number(profile.vlanId), 'xsd:unsignedInt']);
-        params.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_GX_VLAN.Mode', 'TAG', 'xsd:string']);
-        if (profile.vlanPriority8021p !== undefined) {
-          params.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_GX_VLAN.Priority', Number(profile.vlanPriority8021p), 'xsd:unsignedInt']);
-        }
+    if (hasVlan && profile.vlanId) {
+      const cachedVlanParam = await SupportedParameterCache.findOne({
+        vendor: 'GENEXIS',
+        parameterPath: { $regex: /vlan/i },
+        status: 'SUPPORTED',
+        writable: true
+      });
+
+      if (cachedVlanParam) {
+        params.push([cachedVlanParam.parameterPath, Number(profile.vlanId), 'xsd:unsignedInt']);
       } else {
-        params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
+        const isBlacklisted = await SupportedParameterCache.findOne({
+          parameterPath: `${basePath}.VLANID`,
+          status: 'UNSUPPORTED'
+        });
+        if (!isBlacklisted) {
+          params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
+        }
       }
     }
   }
@@ -1601,7 +1609,7 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
     const savedProfile = device.wanProfiles[device.wanProfiles.length - 1];
 
     // Queue TR-069 command
-    const tr069Params = buildTr069WanParams(savedProfile, device);
+    const tr069Params = await buildTr069WanParams(savedProfile, device);
     if (tr069Params.length > 0) {
       await DeviceCommand.create({
         tenantId: device.tenantId,
@@ -1763,7 +1771,7 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
     await device.save();
 
     // Queue TR-069 parameters
-    const tr069Params = buildTr069WanParams(currentProfile, device);
+    const tr069Params = await buildTr069WanParams(currentProfile, device);
     if (tr069Params.length > 0) {
       await DeviceCommand.create({
         tenantId: device.tenantId,
@@ -2037,7 +2045,7 @@ operatorRouter.post('/devices/:id/wan/profiles/:profileId/rollback', async (req:
     await device.save();
 
     // Queue TR-069 rollback command
-    const tr069Params = buildTr069WanParams(currentProfile, device);
+    const tr069Params = await buildTr069WanParams(currentProfile, device);
     if (tr069Params.length > 0) {
       await DeviceCommand.create({
         tenantId: device.tenantId,

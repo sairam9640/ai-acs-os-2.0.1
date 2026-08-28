@@ -1673,11 +1673,57 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
       timestamp: new Date(),
     }).catch(() => {});
 
+    // Handle GetParameterNamesResponse from CPE
+    if (xml.includes('GetParameterNamesResponse')) {
+      console.log(`[Native CWMP IN] CPE returned GetParameterNamesResponse for ${device.serialNumber}`);
+      CwmpSessionLog.create({
+        tenantId: tenant?._id,
+        deviceId: device?._id,
+        serialNumber: device.serialNumber,
+        sessionId: session?.sessionId || incomingSessionId || 'unknown',
+        cwmpId: '2',
+        direction: 'CPE_TO_ACS',
+        rpcMethod: 'GetParameterNamesResponse',
+        httpStatus: 200,
+        rawXml: xml,
+        timestamp: new Date(),
+      }).catch(() => {});
+
+      const matches = xml.matchAll(/<ParameterInfoStruct>\s*<Name>([^<]+)<\/Name>\s*<Writable>([^<]+)<\/Writable>\s*<\/ParameterInfoStruct>/gi);
+      for (const m of matches) {
+        const pName = m[1].trim();
+        const isWritable = m[2].trim() === '1' || m[2].trim() === 'true';
+        SupportedParameterCache.findOneAndUpdate(
+          { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: pName },
+          { $set: { status: 'SUPPORTED', writable: isWritable, lastSeenAt: new Date() } },
+          { upsert: true }
+        ).catch(() => {});
+      }
+
+      await DeviceCommand.updateMany(
+        { deviceId: device._id, action: { $in: ['CUSTOM_RPC', 'GET_PARAMETER_NAMES'] }, status: { $in: ['sent', 'sending'] } },
+        { $set: { status: 'success', completedAt: new Date() } }
+      );
+      return null;
+    }
+
     // Handle SOAP Fault (e.g. Fault 9002 / 9003 / 9005 during SPV or GPV)
     if (fault?.isFault) {
       console.warn(
         `[CWMP ACS] CPE returned SOAP Fault ${fault.faultCode}: ${fault.faultString} during stage ${session?.stage}`
       );
+
+      // Extract specific SetParameterValuesFault parameter name if present and blacklist it
+      const failedParamMatch = xml.match(/<ParameterName>([^<]+)<\/ParameterName>/i);
+      if (failedParamMatch && failedParamMatch[1]) {
+        const failedParam = failedParamMatch[1].trim();
+        console.warn(`[CWMP ACS] 🛑 Blacklisting invalid parameter '${failedParam}' for ${session?.vendor || 'GENEXIS'} ${session?.modelName || ''} due to Fault ${fault.faultCode}`);
+        SupportedParameterCache.findOneAndUpdate(
+          { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: failedParam },
+          { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
+          { upsert: true }
+        ).catch(() => {});
+      }
 
       // If SPV failed, mark command as failed with exact fault error reason
       await DeviceCommand.updateMany(
