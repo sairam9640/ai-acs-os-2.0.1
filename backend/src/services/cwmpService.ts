@@ -1962,6 +1962,7 @@ Timestamp: ${new Date().toISOString()}
     const ssid24 = this.getFirstParam(pMap, ['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', 'Device.WiFi.SSID.1.SSID']);
     const pass24 = this.getFirstParam(pMap, [
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.PreSharedKey',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.KeyPassphrase',
       'Device.WiFi.AccessPoint.1.Security.KeyPassphrase',
     ]);
@@ -1979,8 +1980,10 @@ Timestamp: ${new Date().toISOString()}
     ]);
     const pass5g = this.getFirstParam(pMap, [
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.PreSharedKey',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.PreSharedKey',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase',
       'Device.WiFi.AccessPoint.2.Security.KeyPassphrase',
     ]);
@@ -1995,25 +1998,51 @@ Timestamp: ${new Date().toISOString()}
       'Device.WiFi.AccessPoint.2.Security.ModeEnabled',
     ]);
 
-    const pppoeUser = this.getFirstParam(pMap, [
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2.Username',
-      'Device.PPP.Interface.1.Username',
-    ]);
-    const pppStatus = this.getFirstParam(pMap, [
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
-      'Device.PPP.Interface.1.ConnectionStatus',
-    ]);
-    const pppIp = this.getFirstParam(pMap, [
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
-      'Device.IP.Interface.1.IPv4Address.1.IPAddress',
-    ]);
-    const rawVlan = this.getFirstParam(pMap, [
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_HW_VLAN',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_CT-COM_VlanID',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_ZTE-COM_VLAN',
-      'Device.Ethernet.VLANTermination.1.VLANID',
-    ]);
+    // Multi-slot dynamic search for customer PPPoE credentials across slots 1..8
+    let pppoeUser = '';
+    let pppStatus = '';
+    let pppIp = '';
+    let rawVlan = '';
+
+    for (let s = 1; s <= 8; s++) {
+      const user = pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.1.Username`);
+      if (user) {
+        pppoeUser = user;
+        pppStatus = pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.1.ConnectionStatus`) || '';
+        pppIp = pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.1.ExternalIPAddress`) || '';
+        rawVlan = pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.1.X_HW_VLAN`) ||
+                  pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.1.X_CT-COM_VlanID`) ||
+                  pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.1.VLANID`) || '';
+        break;
+      }
+    }
+
+    if (!pppoeUser) {
+      pppoeUser = this.getFirstParam(pMap, [
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
+        'Device.PPP.Interface.1.Username',
+      ]) || '';
+      pppStatus = this.getFirstParam(pMap, [
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ConnectionStatus',
+        'Device.PPP.Interface.1.ConnectionStatus',
+      ]) || '';
+      pppIp = this.getFirstParam(pMap, [
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress',
+        'Device.IP.Interface.1.IPv4Address.1.IPAddress',
+      ]) || '';
+      rawVlan = this.getFirstParam(pMap, [
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_HW_VLAN',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.X_CT-COM_VlanID',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_ZTE-COM_VLAN',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.X_CT-COM_VlanID',
+        'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.VLANID',
+        'Device.Ethernet.VLANTermination.1.VLANID',
+      ]) || '';
+    }
+
     const rawHosts = this.getFirstParam(pMap, [
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
       'Device.Hosts.HostNumberOfEntries',
@@ -2039,13 +2068,15 @@ Timestamp: ${new Date().toISOString()}
       if (beacon5g) device.wifi5g.securityMode = beacon5g;
     }
 
-    if (device.wanProfiles && device.wanProfiles.length > 0) {
-      if (pppoeUser) device.wanProfiles[0].pppoeUsername = pppoeUser;
-      if (pppStatus) device.wanProfiles[0].status = (pppStatus === 'Connected' ? 'Connected' : 'Connecting');
-      if (pppIp) device.wanProfiles[0].ipAddress = pppIp;
+    // Target the customer Internet profile specifically, protecting Management WAN
+    const targetWanProf = (device.wanProfiles || []).find((p: any) => !p.isProtected && p.serviceType !== 'TR069') || device.wanProfiles?.[0];
+    if (targetWanProf) {
+      if (pppoeUser) targetWanProf.pppoeUsername = pppoeUser;
+      if (pppStatus) targetWanProf.status = (pppStatus === 'Connected' ? 'Connected' : 'Connecting');
+      if (pppIp) targetWanProf.ipAddress = pppIp;
       if (rawVlan) {
         const v = parseInt(rawVlan, 10);
-        if (!isNaN(v)) device.wanProfiles[0].vlanId = v;
+        if (!isNaN(v)) targetWanProf.vlanId = v;
       }
     }
     if (rawHosts) {
