@@ -1138,7 +1138,6 @@ export class CwmpService {
         // Priority 1: High-priority configuration & diagnostic commands (SET_WIFI_CONFIG, SET_WAN_CONFIG, REBOOT_DEVICE, etc.)
         let pendingCmd = await DeviceCommand.findOne({
           deviceId: dev._id,
-          tenantId: dev.tenantId,
           action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
           status: { $in: ['pending', 'queued', 'authorized', 'created', 'sending', 'sent'] }
         }).sort({ queuedAt: 1, createdAt: 1 });
@@ -1147,7 +1146,6 @@ export class CwmpService {
         if (!pendingCmd) {
           pendingCmd = await DeviceCommand.findOne({
             deviceId: dev._id,
-            tenantId: dev.tenantId,
             status: { $in: ['pending', 'queued', 'authorized', 'created', 'sending', 'sent'] }
           }).sort({ queuedAt: -1, createdAt: -1 });
         }
