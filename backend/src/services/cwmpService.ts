@@ -1680,21 +1680,6 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
       return null;
     }
 
-    CwmpSessionLog.create({
-      tenantId: tenant?._id,
-      deviceId: device?._id,
-      serialNumber: device.serialNumber,
-      sessionId: session?.sessionId || incomingSessionId || 'unknown',
-      cwmpId: '3',
-      direction: 'CPE_TO_ACS',
-      rpcMethod: fault?.isFault ? 'Fault' : 'GetParameterValuesResponse',
-      httpStatus: 200,
-      rawXml: CwmpXmlParser.maskSensitiveData(xml),
-      faultCode: fault?.faultCode,
-      faultString: fault?.faultString,
-      timestamp: new Date(),
-    }).catch(() => {});
-
     // Handle GetParameterNamesResponse from CPE
     if (xml.includes('GetParameterNamesResponse')) {
       console.log(`[Native CWMP IN] CPE returned GetParameterNamesResponse for ${device.serialNumber}`);
@@ -1723,11 +1708,26 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
       }
 
       await DeviceCommand.updateMany(
-        { deviceId: device._id, action: { $in: ['CUSTOM_RPC', 'GET_PARAMETER_NAMES'] }, status: { $in: ['sent', 'sending'] } },
+        { deviceId: device._id, action: { $in: ['CUSTOM_RPC', 'GET_PARAMETER_NAMES'] }, status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
         { $set: { status: 'success', completedAt: new Date() } }
       );
       return null;
     }
+
+    CwmpSessionLog.create({
+      tenantId: tenant?._id,
+      deviceId: device?._id,
+      serialNumber: device.serialNumber,
+      sessionId: session?.sessionId || incomingSessionId || 'unknown',
+      cwmpId: '3',
+      direction: 'CPE_TO_ACS',
+      rpcMethod: fault?.isFault ? 'Fault' : 'GetParameterValuesResponse',
+      httpStatus: 200,
+      rawXml: CwmpXmlParser.maskSensitiveData(xml),
+      faultCode: fault?.faultCode,
+      faultString: fault?.faultString,
+      timestamp: new Date(),
+    }).catch(() => {});
 
     // Handle SOAP Fault (e.g. Fault 9002 / 9003 / 9005 during SPV or GPV)
     if (fault?.isFault) {
