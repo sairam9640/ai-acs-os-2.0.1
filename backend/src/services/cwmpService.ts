@@ -69,7 +69,7 @@ export interface ActiveSessionContext {
   clientIp: string;
   tenantId: string;
   tenantSlug: string;
-  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'ADD_OBJECT_SENT' | 'SPV_SENT' | 'CUSTOM_RPC_SENT' | 'COMPLETED';
+  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'WAN_SLOT_GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'ADD_OBJECT_SENT' | 'SPV_SENT' | 'CUSTOM_RPC_SENT' | 'COMPLETED';
   activeOpticalCandidate?: string;
   supportedOpticalPath?: string;
   timestamp: number;
@@ -1328,7 +1328,7 @@ ${stringElements}
             // Validate against SupportedParameterCache (reject known unsupported vendor parameters, never core params)
             const validParams: Array<{ name: string; value: any; type: string }> = [];
             for (const p of normalizedParams) {
-              const isCoreParam = /Username|Password|NATEnabled|Enable$/i.test(p.name);
+              const isCoreParam = /Username|Password|NATEnabled$/i.test(p.name);
               if (!isCoreParam) {
                 const cached = await SupportedParameterCache.findOne({
                   parameterPath: p.name,
@@ -1342,10 +1342,40 @@ ${stringElements}
               validParams.push(p);
             }
 
-            // If target WAN slot does not exist in live device.rawParameters on CPE, issue scoped AddObject
+            // Check if parent slot exists before issuing AddObject (Issue 2)
             const targetParamName = validParams[0]?.name || '';
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
+
+            const parentSlotExists = Object.keys(dev.rawParameters || {}).some(k =>
+              k.includes(`WANConnectionDevice.${targetSlot}.`)
+            );
+
+            if (targetSlot > 1 && !parentSlotExists && session.stage !== 'WAN_SLOT_GPN_SENT') {
+              // Discover real topology first instead of guessing
+              session.stage = 'WAN_SLOT_GPN_SENT';
+              const gpnXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterNames>
+      <ParameterPath>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.</ParameterPath>
+      <NextLevel>1</NextLevel>
+    </cwmp:GetParameterNames>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+              console.log(`[Native CWMP OUT] Checking parent slot existence via GPN on WANConnectionDevice. for ${session.serialNumber}`);
+              return gpnXml;
+            }
+
+            if (targetSlot > 1 && !parentSlotExists && session.stage === 'WAN_SLOT_GPN_SENT') {
+              // Confirmed absent after discovery -> fail clearly, don't retry blindly
+              pendingCmd.status = 'failed';
+              pendingCmd.errorMessage = 'TOPOLOGY_MISMATCH: WANConnectionDevice.' + targetSlot + ' not present on device';
+              pendingCmd.completedAt = new Date();
+              await pendingCmd.save();
+              return null;
+            }
 
             const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(dev.modelName || session.modelName || ''));
             const isPreAllocatedSlot = isGenexis4410 || targetSlot === 1 || targetSlot === 3;
@@ -1902,7 +1932,7 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
         const fString = spvFaultMatch[3].trim();
         detailedErrorMsg = `Fault ${fCode}: ${fString} (Parameter: ${paramName})`;
         console.warn(`[CWMP ACS] 🛑 Extracted SetParameterValuesFault on '${paramName}': ${detailedErrorMsg}`);
-        const isCoreParam = /Username|Password|NATEnabled|Enable$/i.test(paramName);
+        const isCoreParam = /Username|Password|NATEnabled$/i.test(paramName);
         if (!isCoreParam) {
           SupportedParameterCache.findOneAndUpdate(
             { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: paramName },
@@ -1915,7 +1945,7 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
         if (failedParamMatch && failedParamMatch[1]) {
           const failedParam = failedParamMatch[1].trim();
           detailedErrorMsg = `Fault ${fault.faultCode}: ${fault.faultString} (Parameter: ${failedParam})`;
-          const isCoreParam = /Username|Password|NATEnabled|Enable$/i.test(failedParam);
+          const isCoreParam = /Username|Password|NATEnabled$/i.test(failedParam);
           if (!isCoreParam) {
             SupportedParameterCache.findOneAndUpdate(
               { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: failedParam },

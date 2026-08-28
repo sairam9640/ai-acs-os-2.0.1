@@ -1012,7 +1012,7 @@ operatorRouter.post('/devices/:id/commands/:commandId/retry', async (req: Authen
     let retryParams = { ...oldCmd.parameters };
     if (oldCmd.action === 'SET_WAN_CONFIG') {
       const profileData = oldCmd.parameters?.profile || oldCmd.parameters || {};
-      const cleanWanParams = buildTr069WanParams(profileData, device);
+      const cleanWanParams = await buildTr069WanParams(profileData, device);
       retryParams = {
         ...oldCmd.parameters,
         tr069ParamValues: cleanWanParams,
@@ -1440,11 +1440,11 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
     
     // Auto-migrate legacy mock/stale profile names (e.g. WAN_PPP_1, WAN_IP_2) to canonical live CPE names
     const raw = device.rawParameters || {};
-    const wan1LiveName = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name'] || '2_TR069_R_VID_100';
-    const wan2LiveName = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Name'] || '3_INTERNET_R_VID_488';
-    const wan2LiveUser = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username'] || 'vaishnavi_vpn@tpartyoltmgmt.in';
-    const wan2LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress'] || '10.19.224.32';
-    const wan1LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'] || device.ipAddress || '192.168.22.171';
+    const wan1LiveName = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name'] || 'MGMT_TR069';
+    const wan2LiveName = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Name'] || raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Name'] || '';
+    const wan2LiveUser = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username'] || raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Username'] || '';
+    const wan2LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress'] || raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.ExternalIPAddress'] || '';
+    const wan1LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'] || device.ipAddress || '';
 
     // Deduplicate profiles: Keep exactly 1 Management profile and unique profiles
     const seenMgmt = new Set<string>();
@@ -1473,21 +1473,22 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
       const resolvedBearer = isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : (p.bearerService || p.serviceType || 'INTERNET'));
       
       let canonicalName = p.name;
-      if (!canonicalName || canonicalName === 'WAN_PPP_1' || canonicalName === 'BSNL_INTERNET' || (isPppoe && !canonicalName.includes('INTERNET'))) {
-        canonicalName = wan2LiveName;
-        hasModifications = true;
-      } else if (isManagement && (!canonicalName || canonicalName === 'WAN_IP_2' || !canonicalName.includes('TR069'))) {
+      if ((!canonicalName || canonicalName === 'WAN_PPP_1') && (isPppoe || (!isManagement && !isPppoe))) {
+        if (wan2LiveName) {
+          canonicalName = wan2LiveName;
+          hasModifications = canonicalName !== p.name;
+        }
+      } else if (isManagement && (!canonicalName || canonicalName === 'WAN_IP_2')) {
         canonicalName = wan1LiveName;
-        hasModifications = true;
+        hasModifications = canonicalName !== p.name;
       }
 
-      let resolvedVlanId = isManagement ? 100 : 488;
-      if (p.vlanId && Number(p.vlanId) > 0 && Number(p.vlanId) !== 100) {
-        resolvedVlanId = Number(p.vlanId);
-      } else {
+      let resolvedVlanId = p.vlanId;
+      if (!resolvedVlanId) {
         const vidMatch = String(canonicalName).match(/VID_(\d+)/i);
         if (vidMatch) resolvedVlanId = Number(vidMatch[1]);
       }
+      if (!resolvedVlanId && isManagement) resolvedVlanId = 100;
 
       if (p.vlanId !== resolvedVlanId || p.name !== canonicalName) {
         hasModifications = true;
@@ -1534,12 +1535,12 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
         wanPortBindings: p.wanPortBindings && p.wanPortBindings.length > 0 ? p.wanPortBindings : ['WAN1'],
         lanPortBindings: isManagement ? [] : (p.lanPortBindings && p.lanPortBindings.length > 0 ? p.lanPortBindings : (is2Port ? ['FE', 'GE'] : ['LAN1', 'LAN2'])),
         ssidBindings: isManagement ? [] : (p.ssidBindings && p.ssidBindings.length > 0 ? p.ssidBindings : ['SSID1']),
-        pppoeUsername: isManagement ? '' : (p.pppoeUsername || wan2LiveUser),
+        pppoeUsername: isManagement ? '' : (p.pppoeUsername || wan2LiveUser || ''),
         passwordConfigured: isManagement ? false : true,
         pppoePasswordMasked: '••••••••',
-        ipAddress: isManagement ? wan1LiveIp : (p.ipAddress || wan2LiveIp),
+        ipAddress: isManagement ? (wan1LiveIp || null) : (p.ipAddress || wan2LiveIp || null),
         subnetMask: p.subnetMask || (isManagement ? '255.255.255.0' : '0.0.0.0'),
-        gateway: p.gateway || (isManagement ? '192.168.22.1' : ''),
+        gateway: p.gateway || (isManagement ? '192.168.22.1' : null),
         status: p.status || 'Connected',
         isDefault: isPppoe ? true : false,
         isProtected: isManagement,
