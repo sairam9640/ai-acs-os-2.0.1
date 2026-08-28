@@ -864,7 +864,26 @@ export class CwmpService {
         if (informData.lanHostCount !== undefined) device.lanHostCount = informData.lanHostCount;
 
         if ((informData as any).wanProfiles && (informData as any).wanProfiles.length > 0) {
-          device.wanProfiles = (informData as any).wanProfiles;
+          const incoming = (informData as any).wanProfiles;
+          if (!device.wanProfiles || device.wanProfiles.length === 0) {
+            device.wanProfiles = incoming;
+          } else {
+            for (const inc of incoming) {
+              const existing = device.wanProfiles.find((p: any) =>
+                (inc.cpeObjectPath && p.cpeObjectPath === inc.cpeObjectPath) ||
+                (inc.name && p.name === inc.name) ||
+                (inc.serviceType === 'TR069' && (p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.isProtected))
+              );
+              if (existing) {
+                if (inc.status) existing.status = inc.status;
+                if (inc.ipAddress) existing.ipAddress = inc.ipAddress;
+                if (inc.vlanId) existing.vlanId = inc.vlanId;
+                if (inc.pppoeUsername) existing.pppoeUsername = inc.pppoeUsername;
+              } else {
+                device.wanProfiles.push(inc);
+              }
+            }
+          }
         } else if (device.wanProfiles && device.wanProfiles.length > 0) {
           if (informData.vlanId !== undefined) device.wanProfiles[0].vlanId = informData.vlanId;
           if (informData.pppoeUsername) device.wanProfiles[0].pppoeUsername = informData.pppoeUsername;

@@ -1441,10 +1441,24 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
     const wan2LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress'] || '10.19.224.32';
     const wan1LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'] || device.ipAddress || '192.168.22.171';
 
+    // Ensure both Management WAN and Customer PPPoE profile are present
+    const hasPppoe = device.wanProfiles.some((p: any) => p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || Boolean(p.pppoeUsername));
+    if (!hasPppoe) {
+      const lastPppoeCmd = await DeviceCommand.findOne({
+        deviceId: device._id,
+        action: 'SET_WAN_CONFIG',
+        'parameters.profile.connectionType': 'PPPoE',
+      }).sort({ queuedAt: -1 });
+
+      if (lastPppoeCmd?.parameters?.profile) {
+        device.wanProfiles.push(lastPppoeCmd.parameters.profile);
+      }
+    }
+
     let hasModifications = false;
     const profiles = device.wanProfiles.map((p: any, idx: number) => {
-      const isManagement = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.name?.includes('TR069') || p.bearerService === 'TR069' || idx === 1;
-      const isPppoe = !isManagement && (p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || p.name?.includes('INTERNET') || p.name?.includes('PPP') || p.name === 'WAN_PPP_1' || idx === 0);
+      const isManagement = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.name?.includes('TR069') || p.bearerService === 'TR069' || Boolean(p.isProtected);
+      const isPppoe = !isManagement && (p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || p.serviceType === 'INTERNET' || Boolean(p.pppoeUsername));
       const resolvedBearer = isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : (p.bearerService || p.serviceType || 'INTERNET'));
       
       let canonicalName = p.name;
