@@ -1340,7 +1340,6 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
       if (profile.natEnabled !== undefined) {
         params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
       }
-      params.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
     } else {
       // IP Connection Mode (DHCP / Static IP / TR-069 Management)
       if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069' && !/4410|Platinum/i.test(String(device?.modelName || ''))) {
