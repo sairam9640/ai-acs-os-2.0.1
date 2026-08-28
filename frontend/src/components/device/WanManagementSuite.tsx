@@ -593,29 +593,36 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
 
                   {/* Profile Action Bar */}
                   <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-end space-x-1.5">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloneProfile(prof);
-                      }}
-                      title="Clone this profile"
-                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                    {profiles.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteConfirmProfile(prof);
-                        }}
-                        title="Delete this profile"
-                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    {(prof.bearerService === 'TR069' || prof.name?.includes('TR069') || (prof as any).isProtected) ? (
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded flex items-center">
+                        <Lock className="w-3 h-3 mr-1 text-amber-700" />
+                        <span>Protected Management</span>
+                      </span>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCloneProfile(prof);
+                          }}
+                          title="Clone this profile"
+                          className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirmProfile(prof);
+                          }}
+                          title="Delete this customer profile"
+                          className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1278,14 +1285,20 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
               {/* Form Action Buttons (OK / Cancel / Delete) */}
               <div className="flex items-center justify-between pt-4 border-t border-slate-200">
                 <div>
-                  {profiles.length > 1 && activeForm._id && (
+                  {activeForm && !(activeForm.bearerService === 'TR069' || activeForm.name?.includes('TR069') || (activeForm as any).isProtected) ? (
                     <button
                       type="button"
                       onClick={() => setDeleteConfirmProfile(activeForm)}
-                      className="px-4 py-2 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition"
+                      className="px-4 py-2 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition flex items-center space-x-1"
                     >
-                      Delete
+                      <Trash2 className="w-3.5 h-3.5 mr-1" />
+                      <span>Delete Customer WAN</span>
                     </button>
+                  ) : (
+                    <div className="flex items-center space-x-1.5 text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold">
+                      <Lock className="w-3.5 h-3.5 text-amber-700" />
+                      <span>TR-069 Management Protected (Cannot Delete)</span>
+                    </div>
                   )}
                 </div>
 
@@ -1379,18 +1392,26 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       <Modal
         isOpen={Boolean(deleteConfirmProfile)}
         onClose={() => setDeleteConfirmProfile(null)}
-        title="Delete WAN Connection"
+        title="Delete Customer WAN Connection"
       >
         <div className="space-y-4">
-          <p className="text-xs text-slate-700">
-            Are you sure you want to delete WAN Profile <strong>{deleteConfirmProfile?.name}</strong>?
-          </p>
+          <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 space-y-1.5">
+            <p className="font-bold text-sm text-rose-900">Are you sure you want to delete this Customer WAN?</p>
+            <div className="font-mono text-[11px] bg-white/70 p-2.5 rounded-lg border border-rose-200/80 space-y-1">
+              <div>Profile Name: <strong>{deleteConfirmProfile?.name}</strong></div>
+              <div>CPE Object: <strong>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.</strong></div>
+              <div>Service: <strong>{deleteConfirmProfile?.bearerService || 'INTERNET'} (VLAN: {deleteConfirmProfile?.vlanId})</strong></div>
+            </div>
+            <p className="text-[11px] text-rose-700 pt-1">
+              This will disable and reset the customer Internet interface on the physical ONT. Management WAN1 (TR-069, VLAN 100) is permanently protected and will remain 100% active.
+            </p>
+          </div>
           <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
-            <Button type="button" variant="secondary" onClick={() => setDeleteConfirmProfile(null)}>
+            <Button type="button" variant="secondary" onClick={() => setDeleteConfirmProfile(null)} disabled={isSaving}>
               Cancel
             </Button>
-            <Button type="button" variant="primary" onClick={handleDeleteProfile} isLoading={isSaving} className="bg-rose-600 hover:bg-rose-700">
-              Delete Profile
+            <Button type="button" variant="primary" onClick={handleDeleteProfile} isLoading={isSaving} className="bg-rose-600 hover:bg-rose-700 font-bold">
+              {isSaving ? 'Deleting from CPE...' : 'Confirm Delete from CPE'}
             </Button>
           </div>
         </div>
