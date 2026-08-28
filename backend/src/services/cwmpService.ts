@@ -1816,16 +1816,17 @@ Detailed: ${detailedErrorMsg}
 Timestamp: ${new Date().toISOString()}
       `);
 
-      // Only mark configuration commands as failed if the fault occurred during SetParameterValues (SPV)
-      if (session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT') {
+      // Only mark configuration commands as failed if the fault occurred during SetParameterValues (SPV) or AddObject
+      if (session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT' || session?.stage === 'ADD_OBJECT_SENT') {
+        const stageDesc = session?.stage === 'ADD_OBJECT_SENT' ? ' [AddObject Failed]' : '';
         await DeviceCommand.updateMany(
           { deviceId: device._id, status: { $in: ['sent', 'sending'] } },
-          { $set: { status: 'failed', errorMessage: detailedErrorMsg, completedAt: new Date() } }
+          { $set: { status: 'failed', errorMessage: `${detailedErrorMsg}${stageDesc}`, completedAt: new Date() } }
         );
         if (device.pendingConfig && device.pendingConfig.status === 'APPLYING') {
           device.pendingConfig.status = 'FAILED';
           device.pendingConfig.failedAt = new Date();
-          device.pendingConfig.errorMessage = detailedErrorMsg;
+          device.pendingConfig.errorMessage = `${detailedErrorMsg}${stageDesc}`;
         }
         await device.save();
       }

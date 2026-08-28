@@ -1329,20 +1329,28 @@ async function buildTr069WanParams(profile: any, device: any): Promise<Array<[st
     if (hasVlan && profile.vlanId) {
       const cachedVlanParam = await SupportedParameterCache.findOne({
         vendor: 'GENEXIS',
-        parameterPath: { $regex: /vlan/i },
+        parameterPath: { $regex: /(?:^|\.)(?:VLANID|VlanID|VlanId)$/i },
         status: 'SUPPORTED',
         writable: true
       });
 
       if (cachedVlanParam) {
         params.push([cachedVlanParam.parameterPath, Number(profile.vlanId), 'xsd:unsignedInt']);
-      } else {
-        const isBlacklisted = await SupportedParameterCache.findOne({
-          parameterPath: `${basePath}.VLANID`,
-          status: 'UNSUPPORTED'
+      }
+    }
+
+    // Dedicated Multicast/IPTV VLAN (Only if explicitly enabled and distinct from Internet WAN)
+    if (profile.serviceUsage?.iptvBridge || profile.serviceUsage?.iptvDhcp || profile.multicastVlanId) {
+      const mcastVlan = profile.multicastVlanId || profile.multicastVlan;
+      if (mcastVlan && Number(mcastVlan) > 0) {
+        const cachedMcastParam = await SupportedParameterCache.findOne({
+          vendor: 'GENEXIS',
+          parameterPath: { $regex: /MulticastVlan/i },
+          status: 'SUPPORTED',
+          writable: true
         });
-        if (!isBlacklisted) {
-          params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
+        if (cachedMcastParam) {
+          params.push([cachedMcastParam.parameterPath, Number(mcastVlan), 'xsd:int']);
         }
       }
     }
