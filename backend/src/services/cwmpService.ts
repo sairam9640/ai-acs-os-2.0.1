@@ -1245,12 +1245,15 @@ export class CwmpService {
             await pendingCmd.save();
 
             session.stage = 'BASELINE_SENT';
-            const baselineParams = CwmpVendorProfiles.getSafeBaselineParameters(session.vendor, session.modelName);
+            const requestedParams = (pendingCmd as any).parameters?.parameterNames || (pendingCmd as any).parameters?.paths;
+            const targetParams = requestedParams && requestedParams.length > 0
+              ? requestedParams
+              : CwmpVendorProfiles.getSafeBaselineParameters(session.vendor, session.modelName);
             console.log(
-              `[Native CWMP OUT] Dispatched Summon Live GPV for ${session.serialNumber} (${session.modelName}) | Cmd: ${pendingCmd._id} | Params: [${baselineParams.length}]`
+              `[Native CWMP OUT] Dispatched GPV for ${session.serialNumber} (${session.modelName}) | Cmd: ${pendingCmd._id} | Params: [${targetParams.length}]`
             );
 
-            const stringElements = baselineParams.map((p) => `        <string>${p}</string>`).join('\n');
+            const stringElements = targetParams.map((p: string) => `        <string>${p}</string>`).join('\n');
             const gpvXml = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
   <soapenv:Header>
@@ -1258,7 +1261,7 @@ export class CwmpService {
   </soapenv:Header>
   <soapenv:Body>
     <cwmp:GetParameterValues>
-      <ParameterNames soapenv:arrayType="xsd:string[${baselineParams.length}]">
+      <ParameterNames soapenv:arrayType="xsd:string[${targetParams.length}]">
 ${stringElements}
       </ParameterNames>
     </cwmp:GetParameterValues>
