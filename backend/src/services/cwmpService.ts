@@ -870,17 +870,22 @@ export class CwmpService {
           } else {
             for (const inc of incoming) {
               const isIncMgmt = inc.serviceType === 'TR069' || inc.serviceType === 'VOIP/TR069' || inc.name?.includes('TR069') || inc.name?.includes('WAN_IP');
+              const isIncPppoe = inc.connectionType === 'PPPoE' || Boolean(inc.pppoeUsername) || inc.name?.includes('WAN_PPP');
               const existing = device.wanProfiles.find((p: any) =>
                 (inc.cpeObjectPath && p.cpeObjectPath === inc.cpeObjectPath) ||
                 (inc.name && p.name === inc.name) ||
-                (isIncMgmt && (p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.isProtected || p.name?.includes('TR069') || p.name?.includes('WAN_IP')))
+                (isIncMgmt && (p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.isProtected || p.name?.includes('TR069') || p.name?.includes('WAN_IP'))) ||
+                (isIncPppoe && (p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || (inc.pppoeUsername && p.pppoeUsername === inc.pppoeUsername)))
               );
               if (existing) {
                 if (inc.status) existing.status = inc.status;
                 if (inc.ipAddress) existing.ipAddress = inc.ipAddress;
                 if (inc.vlanId) existing.vlanId = inc.vlanId;
                 if (inc.pppoeUsername) existing.pppoeUsername = inc.pppoeUsername;
-              } else if (!isIncMgmt) {
+                if (isIncPppoe && !existing.cpeObjectPath) {
+                  existing.cpeObjectPath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.';
+                }
+              } else {
                 device.wanProfiles.push(inc);
               }
             }
