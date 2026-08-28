@@ -1678,15 +1678,36 @@ ${stringElements}
 
     // Handle AddObjectResponse from CPE
     if (xml.includes('AddObjectResponse')) {
+      // 1. Locate the exact in-flight command that triggered AddObject
+      const pendingCmd = await DeviceCommand.findOne({ 
+        deviceId: device._id, 
+        status: 'sending',
+        action: 'SET_WAN_CONFIG' 
+      }).sort({ sentAt: -1 }) || await DeviceCommand.findOne({ 
+        deviceId: device._id, 
+        status: { $in: ['queued', 'sending', 'sent'] },
+        action: 'SET_WAN_CONFIG'
+      }).sort({ queuedAt: -1 });
+
       const instMatch = xml.match(/<InstanceNumber>(\d+)<\/InstanceNumber>/i);
-      const instanceNum = instMatch ? instMatch[1] : '2';
+      if (!instMatch || !instMatch[1]) {
+        console.error(`[Native CWMP IN] CPE AddObjectResponse missing valid InstanceNumber element for ${device.serialNumber}`);
+        if (pendingCmd) {
+          pendingCmd.status = 'failed';
+          pendingCmd.errorMessage = 'CPE AddObjectResponse did not return a valid <InstanceNumber> element.';
+          pendingCmd.completedAt = new Date();
+          await pendingCmd.save();
+        }
+        return null;
+      }
+
+      const instanceNum = instMatch[1];
       console.log(`[Native CWMP IN] CPE created new WAN connection instance ${instanceNum} for ${device.serialNumber}`);
       
       if (session) {
         session.stage = 'SPV_SENT';
       }
 
-      const pendingCmd = await DeviceCommand.findOne({ deviceId: device._id, status: { $in: ['queued', 'sending', 'sent'] } }).sort({ queuedAt: -1 });
       if (pendingCmd) {
         const rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues || [];
         const normalizedParams = rawParams.map((p: any) => {
@@ -1701,15 +1722,24 @@ ${stringElements}
         // Persist resolved cpeObjectPath back to device.wanProfiles in MongoDB
         const resolvedCpePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${instanceNum}.WANPPPConnection.1.`;
         const profileId = String((pendingCmd.parameters as any)?.profile?._id || '');
+        const profileName = String((pendingCmd.parameters as any)?.profile?.name || '');
+        const profileVlan = (pendingCmd.parameters as any)?.profile?.vlanId;
+
         let targetProfile = (device.wanProfiles || []).find((p: any) => p._id && String(p._id) === profileId);
-        if (!targetProfile) {
-          targetProfile = (device.wanProfiles || []).find((p: any) => !p.isProtected && p.serviceType !== 'TR069');
+        if (!targetProfile && profileName && profileName !== 'New WAN Connection') {
+          targetProfile = (device.wanProfiles || []).find((p: any) => p.name === profileName);
         }
+        if (!targetProfile && profileVlan) {
+          targetProfile = (device.wanProfiles || []).find((p: any) => !p.isProtected && p.vlanId === Number(profileVlan));
+        }
+
         if (targetProfile) {
           targetProfile.cpeObjectPath = resolvedCpePath;
           device.markModified('wanProfiles');
           await device.save();
           console.log(`[Native CWMP DB] Persisted resolved cpeObjectPath '${resolvedCpePath}' for profile '${targetProfile.name}' on ${device.serialNumber}`);
+        } else {
+          console.warn(`[Native CWMP DB] Could not uniquely resolve profile for cpeObjectPath '${resolvedCpePath}' on ${device.serialNumber}. Skipping blind overwrite.`);
         }
 
         const spvXml = `<?xml version="1.0" encoding="UTF-8"?>
