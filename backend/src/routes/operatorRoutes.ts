@@ -2036,6 +2036,16 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     if (targetIdx === -1) {
       targetIdx = device.wanProfiles.findIndex((p: any) => p.name && p.name.trim().toLowerCase() === String(profileId).trim().toLowerCase());
     }
+    // Match by loose name or service type if old cached client name like WAN_PPP_1 was sent
+    if (targetIdx === -1 && (/ppp|internet|1|wan/i.test(String(profileId)))) {
+      targetIdx = device.wanProfiles.findIndex((p: any) => p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || p.name?.includes('INTERNET') || (!p.name?.includes('TR069') && p.serviceType !== 'TR069'));
+    }
+    if (targetIdx === -1) {
+      const nonMgmtIdx = device.wanProfiles.findIndex((p: any) => p.serviceType !== 'TR069' && !p.name?.includes('TR069'));
+      if (nonMgmtIdx !== -1) {
+        targetIdx = nonMgmtIdx;
+      }
+    }
 
     if (targetIdx === -1 || targetIdx >= device.wanProfiles.length) {
       return res.status(404).json({ success: false, error: 'Target WAN profile not found.' });
