@@ -2,6 +2,10 @@ import { Schema, model, Document, Types } from 'mongoose';
 
 export type CommandActionType =
   | 'GET_PARAMETERS'
+  | 'GET_PARAMETER_NAMES'
+  | 'GetParameterNames'
+  | 'GetParameterValues'
+  | 'SetParameterValues'
   | 'SUMMON_LIVE_POLL'
   | 'CUSTOM_RPC'
   | 'REFRESH_TELEMETRY'
@@ -72,6 +76,10 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
       type: String,
       enum: [
         'GET_PARAMETERS',
+        'GET_PARAMETER_NAMES',
+        'GetParameterNames',
+        'GetParameterValues',
+        'SetParameterValues',
         'SUMMON_LIVE_POLL',
         'CUSTOM_RPC',
         'REFRESH_TELEMETRY',
