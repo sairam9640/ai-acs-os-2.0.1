@@ -3325,10 +3325,29 @@ export const DeviceDetail: React.FC = () => {
                               {cmd.parameters.wan?.pppoeUsername && <p>• PPPoE Username: <span className="font-bold text-[#1677FF]">{cmd.parameters.wan.pppoeUsername}</span></p>}
                               {cmd.parameters.wan?.vlanId && <p>• VLAN ID: <span className="font-bold text-[#047857]">{cmd.parameters.wan.vlanId}</span></p>}
                               {cmd.parameters.action && <p>• Action: <span className="font-bold text-[#6D28D9]">{cmd.parameters.action}</span></p>}
-                              {cmd.parameters.tr069ParamValues && (
-                                <p className="text-[11px] text-[#64748B]">
-                                  • TR-069 Paths: [{cmd.parameters.tr069ParamValues.length} variables queued]
-                                </p>
+                              {cmd.parameters.tr069ParamValues && cmd.parameters.tr069ParamValues.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
+                                  <p className="text-[10px] uppercase font-bold text-[#64748B] font-sans">
+                                    TR-069 SetParameterValues Dispatched ({cmd.parameters.tr069ParamValues.length}):
+                                  </p>
+                                  {cmd.parameters.tr069ParamValues.map((p: any, idx: number) => {
+                                    const pName = Array.isArray(p) ? p[0] : (p.name || p.path);
+                                    let pVal = Array.isArray(p) ? p[1] : p.value;
+                                    const pType = Array.isArray(p) ? p[2] : p.type;
+                                    if (typeof pName === 'string' && pName.toLowerCase().includes('password')) {
+                                      pVal = '••••••••';
+                                    }
+                                    return (
+                                      <div key={idx} className="flex flex-wrap items-center justify-between text-[11px] bg-slate-50 p-1.5 rounded border border-slate-200">
+                                        <span className="text-[#1D4ED8] font-semibold break-all">{pName}</span>
+                                        <div className="flex items-center space-x-2">
+                                          <span className="text-[#0F172A] font-bold">{String(pVal)}</span>
+                                          <span className="text-[9px] text-[#64748B] bg-slate-200 px-1 py-0.2 rounded font-sans">{pType || 'string'}</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               )}
                             </div>
                           )}

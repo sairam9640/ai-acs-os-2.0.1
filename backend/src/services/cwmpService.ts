@@ -1311,22 +1311,63 @@ ${stringElements}
               return { name: p.name || p.path, value: p.value, type: p.type || 'xsd:string' };
             });
 
+            // Validate against SupportedParameterCache (reject known unsupported vendor parameters)
+            const validParams: Array<{ name: string; value: any; type: string }> = [];
+            for (const p of normalizedParams) {
+              const cached = await SupportedParameterCache.findOne({
+                parameterPath: p.name,
+                status: 'UNSUPPORTED'
+              });
+              if (cached) {
+                console.warn(`[CWMP ACS] 🛡️ Suppressed unsupported parameter '${p.name}' before SetParameterValues dispatch.`);
+                continue;
+              }
+              validParams.push(p);
+            }
+
+            if (validParams.length === 0) {
+              console.warn(`[CWMP ACS] ⚠️ No valid parameters remaining to dispatch for Cmd ${pendingCmd._id}. Marking as failed.`);
+              pendingCmd.status = 'failed';
+              pendingCmd.errorMessage = 'VALIDATION_FAILED: All queued parameters are marked unsupported or invalid for this CPE firmware.';
+              pendingCmd.completedAt = new Date();
+              await pendingCmd.save();
+              return null;
+            }
+
+            console.log(`
+[SET_WAN_CONFIG]
+Command ID: ${pendingCmd._id}
+Device ID: ${dev._id}
+CPE Serial: ${session.serialNumber}
+Model: ${session.modelName || dev.modelName}
+Firmware: ${dev.softwareVersion || 'Unknown'}
+
+[QUEUE]
+Created: ${pendingCmd.queuedAt || (pendingCmd as any).createdAt}
+Status: DISPATCHING_SPV
+Parameters: [${validParams.map((p) => p.name).join(', ')}]
+
+[CWMP]
+Session ID: ${session.sessionId}
+RPC sent: SetParameterValues
+            `);
+
             const spvXml = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
   <soapenv:Body>
     <cwmp:SetParameterValues>
-      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[${normalizedParams.length}]">
-${normalizedParams.map((p: any) => `        <ParameterValueStruct>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[${validParams.length}]">
+${validParams.map((p: any) => `        <ParameterValueStruct>
           <Name>${p.name}</Name>
-          <Value xsi:type="${p.type}">${p.value}</Value>
+          <Value xsi:type="${p.type}">${p.name.toLowerCase().includes('password') && p.value ? p.value : p.value}</Value>
         </ParameterValueStruct>`).join('\n')}
       </ParameterList>
       <ParameterKey>${pendingCmd._id}</ParameterKey>
     </cwmp:SetParameterValues>
   </soapenv:Body>
 </soapenv:Envelope>`;
-            console.log(`[Native CWMP OUT] Dispatched SetParameterValues RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id}) | Params: [${normalizedParams.length}]`);
+            console.log(`[Native CWMP OUT] Dispatched SetParameterValues RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id}) | Params: [${validParams.length}]`);
             return spvXml;
           }
         }
@@ -1735,27 +1776,51 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
         `[CWMP ACS] CPE returned SOAP Fault ${fault.faultCode}: ${fault.faultString} during stage ${session?.stage}`
       );
 
-      // Extract specific SetParameterValuesFault parameter name if present and blacklist it
-      const failedParamMatch = xml.match(/<ParameterName>([^<]+)<\/ParameterName>/i);
-      if (failedParamMatch && failedParamMatch[1]) {
-        const failedParam = failedParamMatch[1].trim();
-        console.warn(`[CWMP ACS] 🛑 Blacklisting invalid parameter '${failedParam}' for ${session?.vendor || 'GENEXIS'} ${session?.modelName || ''} due to Fault ${fault.faultCode}`);
+      // Extract specific SetParameterValuesFault parameter name and code if present
+      const spvFaultMatch = xml.match(/<SetParameterValuesFault>[\s\S]*?<ParameterName>([^<]+)<\/ParameterName>[\s\S]*?<FaultCode>([^<]+)<\/FaultCode>[\s\S]*?<FaultString>([^<]+)<\/FaultString>[\s\S]*?<\/SetParameterValuesFault>/i);
+      let detailedErrorMsg = fault.faultString || `CWMP Fault ${fault.faultCode}`;
+      if (spvFaultMatch) {
+        const paramName = spvFaultMatch[1].trim();
+        const fCode = spvFaultMatch[2].trim();
+        const fString = spvFaultMatch[3].trim();
+        detailedErrorMsg = `Fault ${fCode}: ${fString} (Parameter: ${paramName})`;
+        console.warn(`[CWMP ACS] 🛑 Extracted SetParameterValuesFault on '${paramName}': ${detailedErrorMsg}`);
         SupportedParameterCache.findOneAndUpdate(
-          { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: failedParam },
+          { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: paramName },
           { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
           { upsert: true }
         ).catch(() => {});
+      } else {
+        const failedParamMatch = xml.match(/<ParameterName>([^<]+)<\/ParameterName>/i);
+        if (failedParamMatch && failedParamMatch[1]) {
+          const failedParam = failedParamMatch[1].trim();
+          detailedErrorMsg = `Fault ${fault.faultCode}: ${fault.faultString} (Parameter: ${failedParam})`;
+          SupportedParameterCache.findOneAndUpdate(
+            { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: failedParam },
+            { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
+            { upsert: true }
+          ).catch(() => {});
+        }
       }
+
+      console.log(`
+[RESULT]
+Final Status: FAILED
+Fault Code: ${fault.faultCode}
+Fault String: ${fault.faultString}
+Detailed: ${detailedErrorMsg}
+Timestamp: ${new Date().toISOString()}
+      `);
 
       // If SPV failed, mark command as failed with exact fault error reason
       await DeviceCommand.updateMany(
-        { deviceId: device._id, status: { $in: ['sent', 'sending'] } },
-        { $set: { status: 'failed', errorMessage: fault.faultString || `CWMP Fault ${fault.faultCode}`, completedAt: new Date() } }
+        { deviceId: device._id, status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
+        { $set: { status: 'failed', errorMessage: detailedErrorMsg, completedAt: new Date() } }
       );
       if (device.pendingConfig) {
         device.pendingConfig.status = 'FAILED';
         device.pendingConfig.failedAt = new Date();
-        device.pendingConfig.errorMessage = fault.faultString || `CWMP Fault ${fault.faultCode}`;
+        device.pendingConfig.errorMessage = detailedErrorMsg;
       }
       await device.save();
 
