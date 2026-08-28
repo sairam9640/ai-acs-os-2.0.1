@@ -1460,7 +1460,7 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
     const seenNames = new Set<string>();
     const deduped: any[] = [];
 
-    for (const p of device.wanProfiles) {
+    for (const p of (device.wanProfiles as any[])) {
       const isMgmt = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.bearerService === 'TR069' || p.name?.includes('TR069') || Boolean(p.isProtected);
       if (isMgmt) {
         if (seenMgmt.has('mgmt')) continue;
