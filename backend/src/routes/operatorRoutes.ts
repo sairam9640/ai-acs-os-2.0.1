@@ -1298,10 +1298,30 @@ async function buildTr069WanParams(profile: any, device: any): Promise<Array<[st
     const isTr069Mgmt = profile.serviceType === 'TR069' || profile.name?.includes('TR069') || profile.serviceUsage?.tr069;
     
     // PROTECT WAN1: Existing WAN1 is reserved for TR-069 management.
-    // When adding/targeting customer Internet data, target WAN2 (or instance 2) so WAN1 is never overwritten.
-    const wanIndex = (!isTr069Mgmt && device?.wanProfiles && device.wanProfiles.length > 1) ? 2 : 1;
-    const baseConn = isPppoe ? `WANPPPConnection.${wanIndex === 2 ? 1 : wanIndex}` : `WANIPConnection.${wanIndex}`;
-    const basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${wanIndex}.${baseConn}`;
+    // Dynamically match existing slot from rawParameters or cpeObjectPath; fallback to slot 2 for new customer WANs
+    const raw = device?.rawParameters || {};
+    let basePath = profile.cpeObjectPath ? profile.cpeObjectPath.replace(/\.$/, '') : '';
+
+    if (!basePath) {
+      // Search live rawParameters for an existing matching instance
+      for (let slot = 1; slot <= 8; slot++) {
+        const pppName = raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.Name`];
+        const ipName = raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.Name`];
+        if (isPppoe && pppName && (pppName === profile.name || (profile.vlanId && pppName.includes(String(profile.vlanId))))) {
+          basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1`;
+          break;
+        } else if (!isPppoe && ipName && (ipName === profile.name || (profile.vlanId && ipName.includes(String(profile.vlanId))))) {
+          basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1`;
+          break;
+        }
+      }
+    }
+
+    if (!basePath) {
+      const wanIndex = isTr069Mgmt ? 1 : 2;
+      const baseConn = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
+      basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${wanIndex}.${baseConn}`;
+    }
 
     const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
 
