@@ -599,6 +599,18 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                 type="button"
                 variant="secondary"
                 size="sm"
+                onClick={fetchProfiles}
+                className="text-xs"
+                title="Pull latest live WAN parameters directly from ONT"
+              >
+                <RotateCcw className="w-3.5 h-3.5 mr-1 text-purple-600" />
+                <span>Refresh Live CPE</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
                 onClick={() => setShowTr069Mapping(!showTr069Mapping)}
                 className="text-xs"
               >
@@ -610,6 +622,21 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
 
           {activeForm ? (
             <form onSubmit={handleOpenDiffModal} className="p-6 space-y-6">
+              {/* TR-069 Protection Alert Banner */}
+              {(activeForm.bearerService === 'TR069' || activeForm.name?.includes('TR069') || (activeForm as any).isProtected) && (
+                <div className="p-3.5 bg-amber-50/80 border border-amber-300/80 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center space-x-2.5">
+                    <Lock className="w-4 h-4 text-amber-700" />
+                    <div>
+                      <span className="text-xs font-bold text-amber-900">TR-069 Management WAN (Locked & Protected)</span>
+                      <p className="text-[11px] text-amber-700">
+                        This WAN interface maintains remote ACS connectivity (DHCP, VLAN 100). Customer Internet operations cannot overwrite it.
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant="warning" className="text-[10px] font-bold">Read-Only</Badge>
+                </div>
+              )}
               {/* Top Configuration Table matching Router Interface */}
               <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-200 space-y-4">
                 {/* Row 1: TransMode */}

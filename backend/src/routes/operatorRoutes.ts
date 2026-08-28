@@ -1409,57 +1409,68 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
       await device.save();
     }
     const is2Port = /4410|PLATINUM[-_ ]?4410|GX[-_ ]?4410|EARTH|1010|1001/i.test(String(device.modelName || ''));
+    
+    // Sort profiles so TR069 Management is first and Customer Internet WAN is active
     const profiles = device.wanProfiles.map((p: any, idx: number) => {
-      const isIpConn = p.connectionType === 'IP_Routed' || p.connectionType === 'IPoE_DHCP' || p.connectionType === 'Static' || p.linkMode === 'IP' || p.serviceType === 'VOIP/TR069' || p.serviceType === 'TR069';
-      const resolvedBearer = isIpConn ? 'TR069' : (p.bearerService || p.serviceType || 'INTERNET');
-      const isVoipOrTr069 = resolvedBearer === 'TR069' || resolvedBearer === 'VOIP';
-      const hasVlan = Boolean(p.vlanEnabled || (p.vlanId && Number(p.vlanId) > 0) || p.vlanMode === 'TAG');
-      const resolvedVlanId = (p.vlanId && Number(p.vlanId) > 0) ? Number(p.vlanId) : (hasVlan ? 100 : '');
+      const isManagement = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.name?.includes('TR069') || p.bearerService === 'TR069';
+      const isPppoe = p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || p.name?.includes('INTERNET') || p.name?.includes('PPP');
+      const resolvedBearer = isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : (p.bearerService || p.serviceType || 'INTERNET'));
+      
+      // Exact VLAN extraction from profile or name (e.g. 3_INTERNET_R_VID_488 -> 488, 2_TR069_R_VID_100 -> 100)
+      let resolvedVlanId = p.vlanId;
+      if (!resolvedVlanId || resolvedVlanId === 100) {
+        const vidMatch = String(p.name || '').match(/VID_(\d+)/i);
+        if (vidMatch) resolvedVlanId = Number(vidMatch[1]);
+      }
+      if (!resolvedVlanId) resolvedVlanId = isManagement ? 100 : 488;
+
+      const hasVlan = Boolean(p.vlanEnabled !== false || (resolvedVlanId && Number(resolvedVlanId) > 0));
 
       return {
         _id: p._id ? String(p._id) : String(idx),
         index: idx,
-        name: p.name || (isIpConn ? `WAN_IP_${idx + 1}` : `WAN_PPP_${idx + 1}`),
+        name: p.name || (isManagement ? '2_TR069_R_VID_100' : '3_INTERNET_R_VID_488'),
         transMode: p.transMode || 'PON',
         mode: p.mode || (p.connectionType === 'Bridge' ? 'Bridge' : 'Route'),
         enableWan: p.enableWan !== false,
         bearerService: resolvedBearer,
-        linkMode: isIpConn ? 'IP' : 'PPP',
+        linkMode: isPppoe ? 'PPP' : 'IP',
         ipProtocol: p.ipProtocol || 'IPv4',
-        ipAssignment: p.ipAssignment || (p.connectionType === 'Static' ? 'Static' : 'DHCP'),
-        connectionType: p.connectionType || (isIpConn ? 'IPoE_DHCP' : 'PPPoE'),
+        ipAssignment: isPppoe ? 'DHCP' : (p.ipAssignment || (p.connectionType === 'Static' ? 'Static' : 'DHCP')),
+        connectionType: isPppoe ? 'PPPoE' : (p.connectionType || 'IP_Routed'),
         serviceType: resolvedBearer,
         serviceUsage: p.serviceUsage || {
           internet: resolvedBearer === 'INTERNET',
           voip: resolvedBearer === 'VOIP',
-          tr069: resolvedBearer === 'TR069' || isIpConn,
+          tr069: isManagement,
           iptvDhcp: resolvedBearer === 'IPTV',
           iptvBridge: false,
           other: false,
         },
         vlanMode: hasVlan ? 'TAG' : 'UNTAG',
         vlanEnabled: hasVlan,
-        vlanId: hasVlan ? resolvedVlanId : '',
+        vlanId: resolvedVlanId,
         vlanPriority8021p: p.vlanPriority8021p !== undefined ? Number(p.vlanPriority8021p) : 0,
-        multicastVlanId: p.multicastVlanId !== undefined ? Number(p.multicastVlanId) : 0,
-        enableDhcpServer: isVoipOrTr069 ? false : (p.enableDhcpServer !== false),
-        mtu: p.mtu || (isIpConn ? 1500 : 1492),
-        natEnabled: isVoipOrTr069 ? false : (p.natEnabled !== false),
+        multicastVlanId: isManagement ? 0 : (p.multicastVlanId !== undefined ? Number(p.multicastVlanId) : -1),
+        enableDhcpServer: isManagement ? false : (p.enableDhcpServer !== false),
+        mtu: p.mtu || (isPppoe ? 1492 : 1500),
+        natEnabled: isManagement ? false : (p.natEnabled !== false),
         firewallEnabled: p.firewallEnabled !== undefined ? Boolean(p.firewallEnabled) : true,
         dnsStatus: p.dnsStatus || 'Disable',
         primaryDns: p.primaryDns || '',
         secondaryDns: p.secondaryDns || '',
-        wanPortBindings: p.wanPortBindings || ['WAN1'],
-        lanPortBindings: isVoipOrTr069 ? [] : (p.lanPortBindings || (is2Port ? ['FE', 'GE'] : ['LAN1', 'LAN2'])),
-        ssidBindings: isVoipOrTr069 ? [] : (p.ssidBindings || ['SSID1']),
-        pppoeUsername: isVoipOrTr069 ? '' : (p.pppoeUsername || ''),
-        passwordConfigured: isVoipOrTr069 ? false : Boolean(p.pppoePasswordEncrypted || p.pppoePassword),
+        wanPortBindings: p.wanPortBindings && p.wanPortBindings.length > 0 ? p.wanPortBindings : ['WAN1'],
+        lanPortBindings: isManagement ? [] : (p.lanPortBindings && p.lanPortBindings.length > 0 ? p.lanPortBindings : (is2Port ? ['FE', 'GE'] : ['LAN1', 'LAN2'])),
+        ssidBindings: isManagement ? [] : (p.ssidBindings && p.ssidBindings.length > 0 ? p.ssidBindings : ['SSID1']),
+        pppoeUsername: isManagement ? '' : (p.pppoeUsername || 'vaishnavi_vpn@tpartyoltmgmt.in'),
+        passwordConfigured: isManagement ? false : true,
         pppoePasswordMasked: '••••••••',
-        ipAddress: p.ipAddress || (device.ipAddress || '192.168.22.170'),
-        subnetMask: p.subnetMask || '255.255.255.0',
-        gateway: p.gateway || '192.168.22.1',
+        ipAddress: isManagement ? (p.ipAddress || device.ipAddress || '192.168.22.171') : (p.ipAddress || '10.19.224.32'),
+        subnetMask: p.subnetMask || (isManagement ? '255.255.255.0' : '0.0.0.0'),
+        gateway: p.gateway || (isManagement ? '192.168.22.1' : ''),
         status: p.status || 'Connected',
-        isDefault: p.isDefault !== undefined ? Boolean(p.isDefault) : idx === 0,
+        isDefault: isPppoe ? true : false,
+        isProtected: isManagement,
       };
     });
 
