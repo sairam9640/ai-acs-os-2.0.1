@@ -42,6 +42,7 @@ import { DeviceCommand } from '../models/DeviceCommand.js';
 import { Alert } from '../models/Incident.js';
 import { User } from '../models/User.js';
 import { buildTr069WanParams } from '../routes/operatorRoutes.js';
+import { triggerGenieAcsConnectionRequest } from './connectionRequestService.js';
 
 export interface CwmpHitLog {
   timestamp: Date;
@@ -1365,6 +1366,7 @@ ${stringElements}
   </soapenv:Body>
 </soapenv:Envelope>`;
               console.log(`[Native CWMP OUT] Checking parent slot existence via GPN on WANConnectionDevice. for ${session.serialNumber}`);
+              triggerGenieAcsConnectionRequest(session.serialNumber).catch(() => {});
               return gpnXml;
             }
 
@@ -1413,6 +1415,7 @@ ${stringElements}
                 timestamp: new Date(),
               }).catch(() => {});
               console.log(`[Native CWMP OUT] Dispatched AddObject RPC for ${targetObjectName} on ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
+              triggerGenieAcsConnectionRequest(session.serialNumber).catch(() => {});
               return addObjectXml;
             }
 

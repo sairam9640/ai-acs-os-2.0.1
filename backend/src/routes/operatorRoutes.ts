@@ -18,6 +18,7 @@ import { SupportedParameterCache } from '../models/SupportedParameterCache.js';
 import { CwmpVendorProfiles } from '../services/cwmpVendorProfiles.js';
 import { decodeXmlEntities } from '../services/cwmpXmlParser.js';
 import { CwmpService } from '../services/cwmpService.js';
+import { triggerGenieAcsConnectionRequest } from '../services/connectionRequestService.js';
 import { PendingDeviceMapping } from '../models/PendingDeviceMapping.js';
 import { CustomerService } from '../services/customerService.js';
 import { DeviceManagementService } from '../services/deviceManagementService.js';
@@ -1048,6 +1049,8 @@ operatorRouter.post('/devices/:id/commands/:commandId/retry', async (req: Authen
       correlationId: newCmd.correlationId,
     });
 
+    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+
     return res.json({
       success: true,
       message: `Command [${oldCmd.action}] re-queued for CPE execution.`,
@@ -1748,6 +1751,8 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
       await syncCustomerWanConfig(device, savedProfile);
     }
 
+    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+
     return res.json({
       success: true,
       message: `New WAN Profile [${savedProfile.name}] created and queued for TR-069 provisioning.`,
@@ -1909,6 +1914,8 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
     if (targetIdx === 0 || currentProfile.isDefault) {
       await syncCustomerWanConfig(device, currentProfile);
     }
+
+    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
 
     return res.json({
       success: true,
@@ -2557,59 +2564,7 @@ operatorRouter.delete('/devices/:id', async (req: AuthenticatedRequest, res: Res
 });
 
 /**
- * 8.0.5 Summon / Live Telemetry Poll Trigger
- */
-/**
- * Helper to trigger on-demand TR-069 Connection Request via internal GenieACS NBI
- */
-async function triggerGenieAcsConnectionRequest(serialNumber: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    // 1. Find device ID in GenieACS NBI
-    const queryPath = `/devices/?query={"_id":{"$regex":"${encodeURIComponent(serialNumber)}","$options":"i"}}&projection=_id`;
-    const req = http.request({
-      hostname: '127.0.0.1',
-      port: 7557,
-      path: queryPath,
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      timeout: 3000
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => {
-        try {
-          const devs = JSON.parse(data);
-          if (Array.isArray(devs) && devs.length > 0) {
-            const genieId = devs[0]._id;
-            // 2. Queue refresh task with immediate connection_request
-            const taskReq = http.request({
-              hostname: '127.0.0.1',
-              port: 7557,
-              path: `/devices/${encodeURIComponent(genieId)}/tasks?connection_request`,
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-              },
-              timeout: 3000
-            }, (taskRes) => {
-              resolve(taskRes.statusCode === 200 || taskRes.statusCode === 202);
-            });
-            taskReq.on('error', () => resolve(false));
-            taskReq.write(JSON.stringify({ name: 'refreshObject', objectName: '' }));
-            taskReq.end();
-          } else {
-            resolve(false);
-          }
-        } catch {
-          resolve(false);
-        }
-      });
-    });
-    req.on('error', () => resolve(false));
-    req.end();
-  });
-}
+ * 8.0.5 Summon / Live Telemetry Poll Trigger (Dispatches Real Connection Request)
 
 /**
  * 8.0.5 Summon / Live Telemetry Poll Trigger (Dispatches Real Connection Request)
