@@ -1939,24 +1939,26 @@ operatorRouter.post('/devices/:id/wan/sync-live', async (req: AuthenticatedReque
     const device = await Device.findOne({ $or: [{ _id: Types.ObjectId.isValid(id) ? id : undefined }, { serialNumber: id }] });
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
-    // Queue GetParameterValues on WANDevice to trigger an immediate active read-back
-    const liveTargetParams = [
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.X_CT-COM_ServiceList',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionType',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.AddressingType',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Name',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Enable',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.NATEnabled',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ConnectionType',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ConnectionStatus',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.X_CT-COM_ServiceList',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.X_CT-COM_MulticastVlan',
-    ];
+    // Queue GetParameterValues on all potential WANDevice slots (1..8) to discover every live WAN connection
+    const liveTargetParams: string[] = [];
+    for (let slot = 1; slot <= 8; slot++) {
+      liveTargetParams.push(
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.Name`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.X_CT-COM_ServiceList`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.ConnectionType`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.AddressingType`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.ConnectionStatus`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.ExternalIPAddress`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.Name`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.Username`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.Enable`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.NATEnabled`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.ConnectionType`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.ConnectionStatus`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.ExternalIPAddress`,
+        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.X_CT-COM_ServiceList`
+      );
+    }
 
     await DeviceCommand.create({
       tenantId: device.tenantId,
@@ -2063,21 +2065,38 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       return res.status(404).json({ success: false, error: 'No WAN profiles exist to delete.' });
     }
 
-    let targetIdx = device.wanProfiles.findIndex((p: any) => p._id && String(p._id) === profileId);
-    if (targetIdx === -1 && !isNaN(parseInt(profileId, 10))) {
-      targetIdx = parseInt(profileId, 10);
-    }
+    const cleanProfId = decodeURIComponent(String(profileId || '').trim());
+    
+    let targetIdx = device.wanProfiles.findIndex((p: any) => p._id && String(p._id) === cleanProfId);
+    
     if (targetIdx === -1) {
-      targetIdx = device.wanProfiles.findIndex((p: any) => p.name && p.name.trim().toLowerCase() === String(profileId).trim().toLowerCase());
+      targetIdx = device.wanProfiles.findIndex((p: any) => p.cpeObjectPath && (p.cpeObjectPath.trim() === cleanProfId || p.cpeObjectPath.trim() === `${cleanProfId}.`));
     }
-    // Match by loose name or service type if old cached client name like WAN_PPP_1 was sent
-    if (targetIdx === -1 && (/ppp|internet|1|wan/i.test(String(profileId)))) {
-      targetIdx = device.wanProfiles.findIndex((p: any) => p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || p.name?.includes('INTERNET') || (!p.name?.includes('TR069') && p.serviceType !== 'TR069'));
+    
+    if (targetIdx === -1 && !isNaN(parseInt(cleanProfId, 10)) && parseInt(cleanProfId, 10) >= 0 && parseInt(cleanProfId, 10) < device.wanProfiles.length) {
+      targetIdx = parseInt(cleanProfId, 10);
     }
+
     if (targetIdx === -1) {
-      const nonMgmtIdx = device.wanProfiles.findIndex((p: any) => p.serviceType !== 'TR069' && !p.name?.includes('TR069'));
-      if (nonMgmtIdx !== -1) {
-        targetIdx = nonMgmtIdx;
+      targetIdx = device.wanProfiles.findIndex((p: any) => p.name && p.name.trim().toLowerCase() === cleanProfId.toLowerCase());
+    }
+
+    // Match by loose keyword if client sent old identifier like WAN_PPP_1, INTERNET, or 488
+    if (targetIdx === -1 && (/ppp|internet|488|wan_2|wan2|wan_ppp_1/i.test(cleanProfId))) {
+      targetIdx = device.wanProfiles.findIndex((p: any) => 
+        (p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || p.name?.includes('INTERNET') || p.name?.includes('488') || p.name === 'WAN_PPP_1') &&
+        !p.name?.includes('TR069') && p.serviceType !== 'TR069' && p.vlanId !== 100
+      );
+    }
+
+    // Fallback: If only 1 deletable (non-management) profile exists in device.wanProfiles, target it safely
+    if (targetIdx === -1) {
+      const nonMgmtIndices = device.wanProfiles
+        .map((p: any, idx: number) => ({ p, idx }))
+        .filter(({ p }: any) => p.serviceType !== 'TR069' && !p.name?.includes('TR069') && p.vlanId !== 100 && !p.isProtected);
+      
+      if (nonMgmtIndices.length === 1) {
+        targetIdx = nonMgmtIndices[0].idx;
       }
     }
 
