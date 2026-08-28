@@ -1251,7 +1251,7 @@ operatorRouter.delete('/devices/:id/wifi/ssid/:instance', async (req: Authentica
 /**
  * Helper to build TR-069 Parameter values for WAN profile provisioning
  */
-async function buildTr069WanParams(profile: any, device: any): Promise<Array<[string, any, string]>> {
+export async function buildTr069WanParams(profile: any, device: any): Promise<Array<[string, any, string]>> {
   const params: Array<[string, any, string]> = [];
   const modelUpper = String(device?.modelName || '').toUpperCase();
   const isTr181 = modelUpper.includes('TR181') || modelUpper.includes('DEVICE2');
