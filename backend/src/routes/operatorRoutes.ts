@@ -1410,26 +1410,50 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
     }
     const is2Port = /4410|PLATINUM[-_ ]?4410|GX[-_ ]?4410|EARTH|1010|1001/i.test(String(device.modelName || ''));
     
-    // Sort profiles so TR069 Management is first and Customer Internet WAN is active
+    // Auto-migrate legacy mock/stale profile names (e.g. WAN_PPP_1, WAN_IP_2) to canonical live CPE names
+    const raw = device.rawParameters || {};
+    const wan1LiveName = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name'] || '2_TR069_R_VID_100';
+    const wan2LiveName = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Name'] || '3_INTERNET_R_VID_488';
+    const wan2LiveUser = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username'] || 'vaishnavi_vpn@tpartyoltmgmt.in';
+    const wan2LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress'] || '10.19.224.32';
+    const wan1LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'] || device.ipAddress || '192.168.22.171';
+
+    let hasModifications = false;
     const profiles = device.wanProfiles.map((p: any, idx: number) => {
-      const isManagement = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.name?.includes('TR069') || p.bearerService === 'TR069';
-      const isPppoe = p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || p.name?.includes('INTERNET') || p.name?.includes('PPP');
+      const isManagement = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.name?.includes('TR069') || p.bearerService === 'TR069' || idx === 1;
+      const isPppoe = !isManagement && (p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || p.name?.includes('INTERNET') || p.name?.includes('PPP') || p.name === 'WAN_PPP_1' || idx === 0);
       const resolvedBearer = isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : (p.bearerService || p.serviceType || 'INTERNET'));
       
-      // Exact VLAN extraction from profile or name (e.g. 3_INTERNET_R_VID_488 -> 488, 2_TR069_R_VID_100 -> 100)
-      let resolvedVlanId = p.vlanId;
-      if (!resolvedVlanId || resolvedVlanId === 100) {
-        const vidMatch = String(p.name || '').match(/VID_(\d+)/i);
+      let canonicalName = p.name;
+      if (!canonicalName || canonicalName === 'WAN_PPP_1' || canonicalName === 'BSNL_INTERNET' || (isPppoe && !canonicalName.includes('INTERNET'))) {
+        canonicalName = wan2LiveName;
+        hasModifications = true;
+      } else if (isManagement && (!canonicalName || canonicalName === 'WAN_IP_2' || !canonicalName.includes('TR069'))) {
+        canonicalName = wan1LiveName;
+        hasModifications = true;
+      }
+
+      let resolvedVlanId = isManagement ? 100 : 488;
+      if (p.vlanId && Number(p.vlanId) > 0 && Number(p.vlanId) !== 100) {
+        resolvedVlanId = Number(p.vlanId);
+      } else {
+        const vidMatch = String(canonicalName).match(/VID_(\d+)/i);
         if (vidMatch) resolvedVlanId = Number(vidMatch[1]);
       }
-      if (!resolvedVlanId) resolvedVlanId = isManagement ? 100 : 488;
 
-      const hasVlan = Boolean(p.vlanEnabled !== false || (resolvedVlanId && Number(resolvedVlanId) > 0));
+      if (p.vlanId !== resolvedVlanId || p.name !== canonicalName) {
+        hasModifications = true;
+      }
+
+      const hasVlan = true;
+      const cpePath = isManagement 
+        ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.'
+        : 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.';
 
       return {
         _id: p._id ? String(p._id) : String(idx),
         index: idx,
-        name: p.name || (isManagement ? '2_TR069_R_VID_100' : '3_INTERNET_R_VID_488'),
+        name: canonicalName,
         transMode: p.transMode || 'PON',
         mode: p.mode || (p.connectionType === 'Bridge' ? 'Bridge' : 'Route'),
         enableWan: p.enableWan !== false,
@@ -1447,13 +1471,13 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
           iptvBridge: false,
           other: false,
         },
-        vlanMode: hasVlan ? 'TAG' : 'UNTAG',
-        vlanEnabled: hasVlan,
+        vlanMode: 'TAG',
+        vlanEnabled: true,
         vlanId: resolvedVlanId,
         vlanPriority8021p: p.vlanPriority8021p !== undefined ? Number(p.vlanPriority8021p) : 0,
         multicastVlanId: isManagement ? 0 : (p.multicastVlanId !== undefined ? Number(p.multicastVlanId) : -1),
         enableDhcpServer: isManagement ? false : (p.enableDhcpServer !== false),
-        mtu: p.mtu || (isPppoe ? 1492 : 1500),
+        mtu: isPppoe ? 1492 : 1500,
         natEnabled: isManagement ? false : (p.natEnabled !== false),
         firewallEnabled: p.firewallEnabled !== undefined ? Boolean(p.firewallEnabled) : true,
         dnsStatus: p.dnsStatus || 'Disable',
@@ -1462,17 +1486,26 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
         wanPortBindings: p.wanPortBindings && p.wanPortBindings.length > 0 ? p.wanPortBindings : ['WAN1'],
         lanPortBindings: isManagement ? [] : (p.lanPortBindings && p.lanPortBindings.length > 0 ? p.lanPortBindings : (is2Port ? ['FE', 'GE'] : ['LAN1', 'LAN2'])),
         ssidBindings: isManagement ? [] : (p.ssidBindings && p.ssidBindings.length > 0 ? p.ssidBindings : ['SSID1']),
-        pppoeUsername: isManagement ? '' : (p.pppoeUsername || 'vaishnavi_vpn@tpartyoltmgmt.in'),
+        pppoeUsername: isManagement ? '' : (p.pppoeUsername || wan2LiveUser),
         passwordConfigured: isManagement ? false : true,
         pppoePasswordMasked: '••••••••',
-        ipAddress: isManagement ? (p.ipAddress || device.ipAddress || '192.168.22.171') : (p.ipAddress || '10.19.224.32'),
+        ipAddress: isManagement ? wan1LiveIp : (p.ipAddress || wan2LiveIp),
         subnetMask: p.subnetMask || (isManagement ? '255.255.255.0' : '0.0.0.0'),
         gateway: p.gateway || (isManagement ? '192.168.22.1' : ''),
         status: p.status || 'Connected',
         isDefault: isPppoe ? true : false,
         isProtected: isManagement,
+        cpeObjectPath: cpePath,
       };
     });
+
+    if (hasModifications) {
+      device.wanProfiles = profiles.map(p => ({
+        ...p,
+        _id: Types.ObjectId.isValid(p._id) ? new Types.ObjectId(p._id) : new Types.ObjectId(),
+      }));
+      await device.save();
+    }
 
     return res.json({ success: true, profiles, wanProfiles: profiles });
   } catch (error: any) {
@@ -2100,7 +2133,8 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
 
     return res.json({
       success: true,
-      message: `WAN Profile [${removedName}] deleted successfully and disabled on ONT.`,
+      message: `Customer Internet WAN [${removedName}] deleted successfully and disabled on ONT.`,
+      profiles: device.wanProfiles,
       wanProfiles: device.wanProfiles,
     });
   } catch (error: any) {
