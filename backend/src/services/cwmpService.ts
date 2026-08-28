@@ -882,8 +882,8 @@ export class CwmpService {
                 if (inc.ipAddress) existing.ipAddress = inc.ipAddress;
                 if (inc.vlanId) existing.vlanId = inc.vlanId;
                 if (inc.pppoeUsername) existing.pppoeUsername = inc.pppoeUsername;
-                if (isIncPppoe && !existing.cpeObjectPath) {
-                  existing.cpeObjectPath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.';
+                if (isIncPppoe && !(existing as any).cpeObjectPath) {
+                  (existing as any).cpeObjectPath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.';
                 }
               } else {
                 device.wanProfiles.push(inc);
