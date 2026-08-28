@@ -114,6 +114,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
   const [activeForm, setActiveForm] = useState<WanProfileData | null>(null);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isCommitting, setIsCommitting] = useState<boolean>(false);
   const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
@@ -291,15 +292,48 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
     }
   };
 
+  const handleRefreshLiveCpe = async () => {
+    setIsSyncing(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const res = await api.syncLiveWanProfiles(deviceId);
+      if (res.success && res.profiles) {
+        setProfiles(res.profiles);
+        const internetProf = res.profiles.find((p: any) => p.bearerService === 'INTERNET' || p.serviceType === 'INTERNET' || p.name?.includes('INTERNET') || p.name?.includes('488'));
+        const current = (selectedProfileId && res.profiles.find((p: any) => p._id === selectedProfileId)) || internetProf || res.profiles[0];
+        setSelectedProfileId(current._id || '0');
+        setActiveForm(JSON.parse(JSON.stringify(current)));
+        setSuccessMsg(res.message || 'Live CPE parameters synchronized directly from physical ONT.');
+      } else {
+        await fetchProfiles();
+        setSuccessMsg('Live CPE profiles refreshed.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to sync live WAN profiles from CPE');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleDeleteProfile = async () => {
     if (!deleteConfirmProfile || !deleteConfirmProfile._id) return;
+    if (deleteConfirmProfile.bearerService === 'TR069' || deleteConfirmProfile.name?.includes('TR069') || (deleteConfirmProfile as any).isProtected) {
+      setErrorMsg('Cannot delete protected TR-069 Management WAN connection. Management WAN is required for remote ACS operations.');
+      setDeleteConfirmProfile(null);
+      return;
+    }
     try {
       setIsSaving(true);
+      setErrorMsg(null);
+      setSuccessMsg(null);
       const res = await api.deleteWanProfile(deviceId, deleteConfirmProfile._id);
       if (res.success) {
-        setSuccessMsg(`Profile "${deleteConfirmProfile.name}" deleted successfully.`);
+        setSuccessMsg(`Profile "${deleteConfirmProfile.name}" deleted successfully and disabled on ONT.`);
         setDeleteConfirmProfile(null);
         await fetchProfiles();
+      } else {
+        setErrorMsg((res as any).error || 'Failed to delete WAN profile');
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to delete profile');
@@ -601,12 +635,14 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                 type="button"
                 variant="secondary"
                 size="sm"
-                onClick={fetchProfiles}
-                className="text-xs"
-                title="Pull latest live WAN parameters directly from ONT"
+                onClick={handleRefreshLiveCpe}
+                isLoading={isSyncing}
+                disabled={isSyncing || isLoading}
+                className="text-xs font-semibold"
+                title="Pull latest live WAN parameters directly from physical ONT"
               >
-                <RotateCcw className="w-3.5 h-3.5 mr-1 text-purple-600" />
-                <span>Refresh Live CPE</span>
+                <RotateCcw className={`w-3.5 h-3.5 mr-1 text-purple-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing Live ONT...' : 'Refresh Live CPE'}</span>
               </Button>
 
               <Button

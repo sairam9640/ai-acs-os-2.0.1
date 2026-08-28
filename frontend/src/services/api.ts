@@ -562,6 +562,12 @@ class ApiService {
     return this.request(`/operator/devices/${deviceId}/wan/profiles`);
   }
 
+  async syncLiveWanProfiles(deviceId: string) {
+    return this.request(`/operator/devices/${deviceId}/wan/sync-live`, {
+      method: 'POST',
+    });
+  }
+
   async getWanProfile(deviceId: string, profileId: string) {
     return this.request(`/operator/devices/${deviceId}/wan/profiles/${profileId}`);
   }
