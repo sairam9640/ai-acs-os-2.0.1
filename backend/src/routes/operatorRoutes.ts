@@ -1303,7 +1303,10 @@ async function buildTr069WanParams(profile: any, device: any): Promise<Array<[st
     const baseConn = isPppoe ? `WANPPPConnection.${wanIndex === 2 ? 1 : wanIndex}` : `WANIPConnection.${wanIndex}`;
     const basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${wanIndex}.${baseConn}`;
 
-    if (profile.enableWan !== undefined) {
+    const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
+
+    // On Genexis Platinum-4410, WANPPPConnection.1.Enable causes Fault 9005 (not writable).
+    if (!isGenexis4410 && profile.enableWan !== undefined) {
       params.push([`${basePath}.Enable`, Boolean(profile.enableWan), 'xsd:boolean']);
     }
 
@@ -1317,6 +1320,7 @@ async function buildTr069WanParams(profile: any, device: any): Promise<Array<[st
       if (profile.natEnabled !== undefined) {
         params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
       }
+      params.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
     } else {
       // IP Connection Mode (DHCP / Static IP / TR-069 Management)
       if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069' && !/4410|Platinum/i.test(String(device?.modelName || ''))) {

@@ -1285,38 +1285,6 @@ ${stringElements}
             pendingCmd.sentAt = new Date();
             await pendingCmd.save();
 
-            const isPppoeCreation = rawParams.some((p: any) => {
-              const name = Array.isArray(p) ? p[0] : (p.name || p.path || '');
-              return name.includes('WANPPPConnection');
-            });
-
-            if (isPppoeCreation && session.stage !== 'ADD_OBJECT_SENT') {
-              session.stage = 'ADD_OBJECT_SENT';
-              const addObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
-  <soapenv:Body>
-    <cwmp:AddObject>
-      <ObjectName>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.</ObjectName>
-      <ParameterKey>${pendingCmd._id}</ParameterKey>
-    </cwmp:AddObject>
-  </soapenv:Body>
-</soapenv:Envelope>`;
-              CwmpSessionLog.create({
-                tenantId: session.tenantId,
-                deviceId: dev._id,
-                serialNumber: session.serialNumber,
-                sessionId: session.sessionId,
-                cwmpId: '3',
-                direction: 'ACS_TO_CPE',
-                rpcMethod: 'AddObject',
-                httpStatus: 200,
-                rawXml: addObjectXml,
-                timestamp: new Date(),
-              }).catch(() => {});
-              console.log(`[Native CWMP OUT] Dispatched AddObject RPC for WANPPPConnection on ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
-              return addObjectXml;
-            }
             const normalizedParams = rawParams.map((p: any) => {
               if (Array.isArray(p)) return { name: p[0], value: p[1], type: p[2] || 'xsd:string' };
               return { name: p.name || p.path, value: p.value, type: p.type || 'xsd:string' };
