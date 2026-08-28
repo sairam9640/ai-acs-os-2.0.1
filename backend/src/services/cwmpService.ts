@@ -1279,8 +1279,36 @@ ${stringElements}
           }
 
           // STRICT SECURITY GUARD 4: Parameter changes require verified operator request
-          const rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues || [];
-          if (rawParams.length > 0) {
+          let rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues;
+          if (!Array.isArray(rawParams) || rawParams.length === 0) {
+            const prof = (pendingCmd as any).parameters?.profile;
+            if (prof) {
+              const isPppoe = prof.connectionType === 'PPPoE' || prof.linkMode === 'PPP';
+              const isTr069Mgmt = prof.serviceType === 'TR069' || prof.name?.includes('TR069') || prof.serviceUsage?.tr069;
+              const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(dev?.modelName || ''));
+              const targetSlot = isTr069Mgmt ? 1 : 2;
+              const baseConn = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
+              const basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${baseConn}`;
+              
+              const rebuilt: any[] = [];
+              if (!isGenexis4410 && prof.enableWan !== undefined) {
+                rebuilt.push([`${basePath}.Enable`, Boolean(prof.enableWan), 'xsd:boolean']);
+              }
+              if (isPppoe) {
+                if (prof.pppoeUsername) rebuilt.push([`${basePath}.Username`, String(prof.pppoeUsername), 'xsd:string']);
+                if (prof.pppoePasswordEncrypted || prof.pppoePassword) {
+                  rebuilt.push([`${basePath}.Password`, String(prof.pppoePasswordEncrypted || prof.pppoePassword), 'xsd:string']);
+                }
+                if (prof.natEnabled !== undefined) rebuilt.push([`${basePath}.NATEnabled`, Boolean(prof.natEnabled), 'xsd:boolean']);
+                rebuilt.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
+              }
+              rawParams = rebuilt;
+            } else {
+              rawParams = [];
+            }
+          }
+
+          if (Array.isArray(rawParams) && rawParams.length > 0) {
             pendingCmd.status = 'sending';
             pendingCmd.sentAt = new Date();
             await pendingCmd.save();
