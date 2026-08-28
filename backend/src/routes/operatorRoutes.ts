@@ -1317,16 +1317,15 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
       }
     }
 
+    const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
+
     if (!basePath) {
-      const wanIndex = isTr069Mgmt ? 1 : 2;
+      const wanIndex = isTr069Mgmt ? 1 : (isGenexis4410 ? 3 : 2);
       const baseConn = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
       basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${wanIndex}.${baseConn}`;
     }
 
-    const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
-
-    // On Genexis Platinum-4410, WANPPPConnection.1.Enable causes Fault 9005 (not writable).
-    if (!isGenexis4410 && profile.enableWan !== undefined) {
+    if (profile.enableWan !== undefined) {
       params.push([`${basePath}.Enable`, Boolean(profile.enableWan), 'xsd:boolean']);
     }
 
@@ -1340,9 +1339,10 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
       if (profile.natEnabled !== undefined) {
         params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
       }
+      params.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
     } else {
       // IP Connection Mode (DHCP / Static IP / TR-069 Management)
-      if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069' && !/4410|Platinum/i.test(String(device?.modelName || ''))) {
+      if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069') {
         params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
       }
 
@@ -1358,18 +1358,23 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
       }
     }
 
-    // VLAN Tagging Configuration (Applicable to both PPPoE & IPoE/VOIP) - Discovery First
+    // VLAN Tagging Configuration
     const hasVlan = (profile.vlanEnabled !== false && profile.vlanId && Number(profile.vlanId) > 0) || profile.vlanMode === 'TAG';
     if (hasVlan && profile.vlanId) {
-      const cachedVlanParam = await SupportedParameterCache.findOne({
-        vendor: 'GENEXIS',
-        parameterPath: { $regex: /(?:^|\.)(?:VLANID|VlanID|VlanId)$/i },
-        status: 'SUPPORTED',
-        writable: true
-      });
-
-      if (cachedVlanParam) {
-        params.push([cachedVlanParam.parameterPath, Number(profile.vlanId), 'xsd:unsignedInt']);
+      const slotMatch = basePath.match(/WANConnectionDevice\.(\d+)\./);
+      const slotNum = slotMatch ? slotMatch[1] : (isGenexis4410 ? '3' : '2');
+      if (isGenexis4410) {
+        params.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`, Number(profile.vlanId), 'xsd:int']);
+      } else {
+        const cachedVlanParam = await SupportedParameterCache.findOne({
+          vendor: 'GENEXIS',
+          parameterPath: { $regex: /(?:^|\.)(?:VLANID|VlanID|VlanId)$/i },
+          status: 'SUPPORTED',
+          writable: true
+        });
+        if (cachedVlanParam) {
+          params.push([cachedVlanParam.parameterPath, Number(profile.vlanId), 'xsd:unsignedInt']);
+        }
       }
     }
 
@@ -1488,10 +1493,10 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
         hasModifications = true;
       }
 
-      const hasVlan = true;
+      const isGx = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
       const cpePath = isManagement 
         ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.'
-        : 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.';
+        : (isGx ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.' : 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.');
 
       return {
         _id: p._id ? String(p._id) : String(idx),

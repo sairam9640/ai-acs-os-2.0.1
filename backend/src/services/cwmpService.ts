@@ -1342,10 +1342,13 @@ ${stringElements}
               validParams.push(p);
             }
 
-            // If target WAN slot (slot > 1) does not exist in live device.rawParameters on CPE, issue scoped AddObject on WANPPPConnection
+            // If target WAN slot does not exist in live device.rawParameters on CPE, issue scoped AddObject
             const targetParamName = validParams[0]?.name || '';
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
+
+            const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(dev.modelName || session.modelName || ''));
+            const isPreAllocatedSlot = isGenexis4410 || targetSlot === 1 || targetSlot === 3;
 
             const isPppoeConn = targetParamName.includes('WANPPPConnection');
             const targetConnObj = isPppoeConn ? 'WANPPPConnection.' : 'WANIPConnection.';
@@ -1355,7 +1358,7 @@ ${stringElements}
               k.includes(`WANConnectionDevice.${targetSlot}.${targetConnObj}`)
             );
 
-            if (targetSlot > 1 && !slotExistsInRaw && session.stage !== 'ADD_OBJECT_SENT') {
+            if (!isPreAllocatedSlot && targetSlot > 1 && !slotExistsInRaw && session.stage !== 'ADD_OBJECT_SENT') {
               session.stage = 'ADD_OBJECT_SENT';
               const addObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
