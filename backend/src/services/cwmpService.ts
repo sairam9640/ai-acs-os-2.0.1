@@ -1211,6 +1211,30 @@ export class CwmpService {
             return resetXml;
           }
 
+          // Handle Explicit GetParameterNames RPC Discovery
+          if (cmdAction === 'GET_PARAMETER_NAMES' || cmdAction === 'GetParameterNames') {
+            pendingCmd.status = 'sending';
+            pendingCmd.sentAt = new Date();
+            await pendingCmd.save();
+
+            const pPath = (pendingCmd as any).parameters?.parameterPath || 'InternetGatewayDevice.WANDevice.1.';
+            const nextLvl = (pendingCmd as any).parameters?.nextLevel !== undefined ? (pendingCmd as any).parameters.nextLevel : 0;
+            const gpnXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterNames>
+      <ParameterPath>${pPath}</ParameterPath>
+      <NextLevel>${nextLvl}</NextLevel>
+    </cwmp:GetParameterNames>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+            console.log(`[Native CWMP OUT] Dispatched GetParameterNames for ${session.serialNumber} (Path: ${pPath}, Cmd: ${pendingCmd._id})`);
+            return gpnXml;
+          }
+
           // Handle Summon / On-Demand Live Parameter Poll
           if (
             cmdAction === 'GetParameterValues' ||
