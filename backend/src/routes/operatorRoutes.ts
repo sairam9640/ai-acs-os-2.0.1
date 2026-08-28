@@ -1504,6 +1504,7 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
         ...p,
         _id: Types.ObjectId.isValid(p._id) ? new Types.ObjectId(p._id) : new Types.ObjectId(),
       }));
+      device.markModified('wanProfiles');
       await device.save();
     }
 
@@ -2129,6 +2130,7 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     }).catch(() => {});
 
     device.wanProfiles.splice(targetIdx, 1);
+    device.markModified('wanProfiles');
     await device.save();
 
     return res.json({
