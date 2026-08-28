@@ -1441,21 +1441,7 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
     const wan2LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress'] || '10.19.224.32';
     const wan1LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'] || device.ipAddress || '192.168.22.171';
 
-    // Ensure both Management WAN and Customer PPPoE profile are present
-    const hasPppoe = device.wanProfiles.some((p: any) => p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || Boolean(p.pppoeUsername));
-    if (!hasPppoe) {
-      const lastPppoeCmd = await DeviceCommand.findOne({
-        deviceId: device._id,
-        action: 'SET_WAN_CONFIG',
-        'parameters.profile.connectionType': 'PPPoE',
-      }).sort({ queuedAt: -1 });
-
-      if (lastPppoeCmd?.parameters?.profile) {
-        device.wanProfiles.push(lastPppoeCmd.parameters.profile);
-      }
-    }
-
-    // Deduplicate profiles: Keep exactly 1 Management profile and 1 PPPoE profile
+    // Deduplicate profiles: Keep exactly 1 Management profile and unique profiles
     const seenMgmt = new Set<string>();
     const seenPppoe = new Set<string>();
     const deduped: any[] = [];
@@ -2158,7 +2144,16 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     }
 
     if (targetIdx === -1 || targetIdx >= device.wanProfiles.length) {
-      return res.status(404).json({ success: false, error: 'Target WAN profile not found.' });
+      await DeviceCommand.updateMany(
+        { deviceId: device._id, action: 'SET_WAN_CONFIG', status: { $in: ['queued', 'pending', 'sending'] } },
+        { $set: { status: 'cancelled', completedAt: new Date() } }
+      );
+      return res.json({
+        success: true,
+        message: 'Customer WAN Profile removed successfully.',
+        profiles: device.wanProfiles,
+        wanProfiles: device.wanProfiles,
+      });
     }
 
     const targetProfile = device.wanProfiles[targetIdx];
