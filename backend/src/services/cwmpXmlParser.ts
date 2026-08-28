@@ -190,6 +190,7 @@ export class CwmpXmlParser {
 
   /**
    * Normalizes Optical RX power to standard float dBm (e.g. -21.45 dBm)
+   * Supports: 0.1 µW raw power, 0.01 dBm scaled integer, and direct float string.
    */
   static normalizeOpticalRxPower(raw: string | number | undefined): number | undefined {
     if (raw === undefined || raw === null || raw === '') return undefined;
@@ -197,26 +198,24 @@ export class CwmpXmlParser {
     const num = parseFloat(cleanStr);
     if (isNaN(num)) return undefined;
 
-    // Handle 0 or disconnected optical signal (e.g. -40 or 0)
+    // Disconnected optical signal (LOS)
     if (num === 0) return -40.0;
 
-    let dbm: number;
-
-    // Case 1: Scaled integer in 0.001 dBm or 0.1 uW (e.g. 21450 or -21450 => -21.45)
-    if (Math.abs(num) >= 10000) {
-      dbm = Math.abs(num) / 1000;
-    }
-    // Case 2: Scaled integer in 0.01 dBm (e.g. -2140 or 2140 => -21.40)
-    else if (Math.abs(num) >= 100) {
-      dbm = Math.abs(num) / 100;
-    }
-    // Case 3: Standard float dBm (e.g. -21.45 or positive 21.45 => -21.45)
-    else {
-      dbm = Math.abs(num);
+    // Case A: Realtek/Broadcom raw power in 0.1 µW (num > 100) -> convert to dBm
+    // Formula: dBm = 10 * log10((num / 10) / 1000)
+    if (num > 100) {
+      const uW = num / 10;
+      const dbm = 10 * Math.log10(uW / 1000);
+      return Number(dbm.toFixed(2));
     }
 
-    if (dbm > 50) return -40.0;
-    return -Number(dbm.toFixed(2));
+    // Case B: Scaled Integer (e.g. -2145 means -21.45 dBm)
+    if (num < -100) {
+      return Number((num / 100).toFixed(2));
+    }
+
+    // Case C: Standard direct float string (e.g. "-21.45")
+    return Number(num.toFixed(2));
   }
 
   /**
@@ -228,16 +227,19 @@ export class CwmpXmlParser {
     const num = parseFloat(cleanStr);
     if (isNaN(num)) return undefined;
 
-    // Scaled integer in 0.01 dBm (e.g. 240 => 2.40)
-    if (Math.abs(num) >= 100 && Math.abs(num) < 1000) {
+    // Case A: Raw power in 0.1 µW (num > 1000) -> convert to dBm
+    if (num > 1000) {
+      const uW = num / 10;
+      const dbm = 10 * Math.log10(uW / 1000);
+      return Number(dbm.toFixed(2));
+    }
+
+    // Case B: Scaled integer in 0.01 dBm (e.g. 240 => +2.40 dBm)
+    if (num >= 100 && num <= 1000) {
       return Number((num / 100).toFixed(2));
     }
 
-    // Scaled integer in 0.001 dBm (e.g. 2400 => 2.40)
-    if (Math.abs(num) >= 1000) {
-      return Number((num / 1000).toFixed(2));
-    }
-
+    // Case C: Direct float string (e.g. 2.45)
     return Number(num.toFixed(2));
   }
 
