@@ -68,7 +68,7 @@ export interface ActiveSessionContext {
   clientIp: string;
   tenantId: string;
   tenantSlug: string;
-  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'ADD_OBJECT_SENT' | 'COMPLETED';
+  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'ADD_OBJECT_SENT' | 'SPV_SENT' | 'CUSTOM_RPC_SENT' | 'COMPLETED';
   activeOpticalCandidate?: string;
   supportedOpticalPath?: string;
   timestamp: number;
@@ -1370,6 +1370,7 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
     </cwmp:SetParameterValues>
   </soapenv:Body>
 </soapenv:Envelope>`;
+            session.stage = 'SPV_SENT';
             console.log(`[Native CWMP OUT] Dispatched SetParameterValues RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id}) | Params: [${validParams.length}]`);
             return spvXml;
           }
@@ -1808,26 +1809,28 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
 
       console.log(`
 [RESULT]
-Final Status: FAILED
+Stage: ${session?.stage}
 Fault Code: ${fault.faultCode}
 Fault String: ${fault.faultString}
 Detailed: ${detailedErrorMsg}
 Timestamp: ${new Date().toISOString()}
       `);
 
-      // If SPV failed, mark command as failed with exact fault error reason
-      await DeviceCommand.updateMany(
-        { deviceId: device._id, status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
-        { $set: { status: 'failed', errorMessage: detailedErrorMsg, completedAt: new Date() } }
-      );
-      if (device.pendingConfig) {
-        device.pendingConfig.status = 'FAILED';
-        device.pendingConfig.failedAt = new Date();
-        device.pendingConfig.errorMessage = detailedErrorMsg;
+      // Only mark configuration commands as failed if the fault occurred during SetParameterValues (SPV)
+      if (session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT') {
+        await DeviceCommand.updateMany(
+          { deviceId: device._id, status: { $in: ['sent', 'sending'] } },
+          { $set: { status: 'failed', errorMessage: detailedErrorMsg, completedAt: new Date() } }
+        );
+        if (device.pendingConfig && device.pendingConfig.status === 'APPLYING') {
+          device.pendingConfig.status = 'FAILED';
+          device.pendingConfig.failedAt = new Date();
+          device.pendingConfig.errorMessage = detailedErrorMsg;
+        }
+        await device.save();
       }
-      await device.save();
 
-      // If Baseline GPV failed, do not abort the session: fallback to GetParameterNames discovery
+      // If Baseline GPV failed, do not fail operator commands: fallback to GetParameterNames discovery
       if (session?.stage === 'BASELINE_SENT') {
         console.warn(
           `[CWMP ACS] Baseline GPV batch rejected with Fault ${fault.faultCode} on ${session.serialNumber} (${session.modelName}). Dispatching GPN discovery fallback.`
