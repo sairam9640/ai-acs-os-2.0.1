@@ -1293,8 +1293,19 @@ async function buildTr069WanParams(profile: any, device: any): Promise<Array<[st
   } else {
     // 100% Safe Broadband Forum TR-098 Standard Data Model (Zero Fault 9005 / Fault 9003 risk)
     const isPppoe = profile.connectionType === 'PPPoE' || profile.linkMode === 'PPP';
-    const baseConn = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-    const basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.${baseConn}`;
+    
+    // Detect TR-069 Management WAN vs Customer Internet/External WAN
+    const isTr069Mgmt = profile.serviceType === 'TR069' || profile.name?.includes('TR069') || profile.serviceUsage?.tr069;
+    
+    // PROTECT WAN1: Existing WAN1 is reserved for TR-069 management.
+    // When adding/targeting customer Internet data, target WAN2 (or instance 2) so WAN1 is never overwritten.
+    const wanIndex = (!isTr069Mgmt && device?.wanProfiles && device.wanProfiles.length > 1) ? 2 : 1;
+    const baseConn = isPppoe ? `WANPPPConnection.${wanIndex === 2 ? 1 : wanIndex}` : `WANIPConnection.${wanIndex}`;
+    const basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${wanIndex}.${baseConn}`;
+
+    if (profile.enableWan !== undefined) {
+      params.push([`${basePath}.Enable`, Boolean(profile.enableWan), 'xsd:boolean']);
+    }
 
     if (isPppoe) {
       if (profile.pppoeUsername) {
