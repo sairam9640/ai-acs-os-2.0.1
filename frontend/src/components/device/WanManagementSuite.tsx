@@ -88,6 +88,8 @@ export interface WanProfileData {
   periodicInformEnable?: boolean;
   periodicInformInterval?: number;
   voipSipServer?: string;
+  cpeObjectPath?: string;
+  isProtected?: boolean;
   voipSipPort?: number;
   voipAccount?: string;
   voipPassword?: string;
@@ -319,7 +321,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
 
   const handleDeleteProfile = async () => {
     if (!deleteConfirmProfile) return;
-    const targetKey = deleteConfirmProfile._id || deleteConfirmProfile.name;
+    const targetKey = deleteConfirmProfile._id || deleteConfirmProfile.cpeObjectPath || deleteConfirmProfile.name;
     if (!targetKey) {
       setErrorMsg('Invalid profile selected for deletion.');
       setDeleteConfirmProfile(null);
