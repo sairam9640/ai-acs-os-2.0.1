@@ -1306,9 +1306,6 @@ function buildTr069WanParams(profile: any, device: any): Array<[string, any, str
       if (profile.natEnabled !== undefined) {
         params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
       }
-      if (profile.vlanEnabled !== false && profile.vlanId) {
-        params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
-      }
     } else {
       // IP Connection Mode (DHCP / Static IP / TR-069 Management)
       if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069' && !/4410|Platinum/i.test(String(device?.modelName || ''))) {
@@ -1324,6 +1321,21 @@ function buildTr069WanParams(profile: any, device: any): Array<[string, any, str
       if (profile.primaryDns) {
         const dnsStr = `${profile.primaryDns}${profile.secondaryDns ? `,${profile.secondaryDns}` : ''}`;
         params.push([`${basePath}.DNSServers`, dnsStr, 'xsd:string']);
+      }
+    }
+
+    // VLAN Tagging Configuration (Applicable to both PPPoE & IPoE/VOIP)
+    const hasVlan = (profile.vlanEnabled !== false && profile.vlanId && Number(profile.vlanId) > 0) || profile.vlanMode === 'TAG';
+    if (hasVlan) {
+      if (/4410|Platinum/i.test(String(device?.modelName || ''))) {
+        params.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_GX_VLAN.Enable', true, 'xsd:boolean']);
+        params.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_GX_VLAN.VLANID', Number(profile.vlanId), 'xsd:unsignedInt']);
+        params.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_GX_VLAN.Mode', 'TAG', 'xsd:string']);
+        if (profile.vlanPriority8021p !== undefined) {
+          params.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_GX_VLAN.Priority', Number(profile.vlanPriority8021p), 'xsd:unsignedInt']);
+        }
+      } else {
+        params.push([`${basePath}.VLANID`, Number(profile.vlanId), 'xsd:unsignedInt']);
       }
     }
   }
@@ -1374,6 +1386,8 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
       const isIpConn = p.connectionType === 'IP_Routed' || p.connectionType === 'IPoE_DHCP' || p.connectionType === 'Static' || p.linkMode === 'IP' || p.serviceType === 'VOIP/TR069' || p.serviceType === 'TR069';
       const resolvedBearer = isIpConn ? 'TR069' : (p.bearerService || p.serviceType || 'INTERNET');
       const isVoipOrTr069 = resolvedBearer === 'TR069' || resolvedBearer === 'VOIP';
+      const hasVlan = Boolean(p.vlanEnabled || (p.vlanId && Number(p.vlanId) > 0) || p.vlanMode === 'TAG');
+      const resolvedVlanId = (p.vlanId && Number(p.vlanId) > 0) ? Number(p.vlanId) : (hasVlan ? 100 : '');
 
       return {
         _id: p._id ? String(p._id) : String(idx),
@@ -1396,9 +1410,9 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
           iptvBridge: false,
           other: false,
         },
-        vlanMode: p.vlanMode || (p.vlanEnabled ? 'TAG' : 'UNTAG'),
-        vlanEnabled: Boolean(p.vlanEnabled),
-        vlanId: p.vlanEnabled && p.vlanId ? Number(p.vlanId) : (' ' as any),
+        vlanMode: hasVlan ? 'TAG' : 'UNTAG',
+        vlanEnabled: hasVlan,
+        vlanId: hasVlan ? resolvedVlanId : '',
         vlanPriority8021p: p.vlanPriority8021p !== undefined ? Number(p.vlanPriority8021p) : 0,
         multicastVlanId: p.multicastVlanId !== undefined ? Number(p.multicastVlanId) : 0,
         enableDhcpServer: isVoipOrTr069 ? false : (p.enableDhcpServer !== false),
