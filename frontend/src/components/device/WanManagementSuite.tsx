@@ -166,7 +166,9 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       if (res.success && res.profiles) {
         setProfiles(res.profiles);
         if (res.profiles.length > 0) {
-          const current = res.profiles.find((p: any) => p._id === selectedProfileId) || res.profiles[0];
+          // Default to active customer Internet profile (3_INTERNET_R_VID_488) so real Internet VLAN is shown immediately
+          const internetProf = res.profiles.find((p: any) => p.bearerService === 'INTERNET' || p.serviceType === 'INTERNET' || p.name?.includes('INTERNET') || p.name?.includes('488'));
+          const current = (selectedProfileId && res.profiles.find((p: any) => p._id === selectedProfileId)) || internetProf || res.profiles[0];
           setSelectedProfileId(current._id || '0');
           setActiveForm(JSON.parse(JSON.stringify(current)));
         } else {
@@ -182,7 +184,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
 
   const initDefaultProfile = () => {
     const defaultProf: WanProfileData = {
-      name: '2_TR069_R_VID_100',
+      name: '3_INTERNET_R_VID_488',
       transMode: 'PON',
       mode: 'Route',
       enableWan: true,
@@ -194,9 +196,9 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       serviceType: 'INTERNET',
       vlanMode: 'TAG',
       vlanEnabled: true,
-      vlanId: 100,
+      vlanId: 488,
       vlanPriority8021p: 0,
-      multicastVlanId: 0,
+      multicastVlanId: -1,
       enableDhcpServer: true,
       mtu: 1492,
       natEnabled: true,
@@ -206,12 +208,12 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       wanPortBindings: ['WAN1'],
       lanPortBindings: is2PortModel ? ['FE', 'GE'] : ['LAN1', 'LAN2'],
       ssidBindings: ['SSID1'],
-      pppoeUsername: '',
+      pppoeUsername: 'vaishnavi_vpn@tpartyoltmgmt.in',
       pppoePassword: '',
       serviceName: '',
       enablePppoeBridgeMode: false,
-      ipAddress: '',
-      subnetMask: '',
+      ipAddress: '10.19.224.32',
+      subnetMask: '0.0.0.0',
       gateway: '',
       status: 'Connected',
       isDefault: true,
@@ -247,9 +249,9 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       serviceType: 'INTERNET',
       vlanMode: 'TAG',
       vlanEnabled: true,
-      vlanId: 100,
+      vlanId: 488,
       vlanPriority8021p: 0,
-      multicastVlanId: 0,
+      multicastVlanId: -1,
       enableDhcpServer: true,
       mtu: 1492,
       natEnabled: true,
