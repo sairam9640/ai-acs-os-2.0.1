@@ -1233,7 +1233,15 @@ export class CwmpService {
             return gpnXml;
           }
 
-          // Handle Summon / On-Demand Live Parameter Poll
+          // Handle Custom Raw CWMP RPC (for diagnostics & advanced testing)
+          if (cmdAction === 'CUSTOM_RPC' && (pendingCmd as any).parameters?.customXml) {
+            pendingCmd.status = 'sending';
+            pendingCmd.sentAt = new Date();
+            await pendingCmd.save();
+            session.stage = 'CUSTOM_RPC_SENT';
+            console.log(`[Native CWMP OUT] Dispatched CUSTOM_RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
+            return (pendingCmd as any).parameters.customXml;
+          }
           if (
             cmdAction === 'GetParameterValues' ||
             cmdAction === 'SUMMON_LIVE_POLL' ||
