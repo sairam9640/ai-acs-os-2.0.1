@@ -309,6 +309,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
         await fetchProfiles();
         setSuccessMsg('Live CPE profiles refreshed.');
       }
+      onRefreshTelemetry?.();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to sync live WAN profiles from CPE');
     } finally {
@@ -317,7 +318,13 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
   };
 
   const handleDeleteProfile = async () => {
-    if (!deleteConfirmProfile || !deleteConfirmProfile._id) return;
+    if (!deleteConfirmProfile) return;
+    const targetKey = deleteConfirmProfile._id || deleteConfirmProfile.name;
+    if (!targetKey) {
+      setErrorMsg('Invalid profile selected for deletion.');
+      setDeleteConfirmProfile(null);
+      return;
+    }
     if (deleteConfirmProfile.bearerService === 'TR069' || deleteConfirmProfile.name?.includes('TR069') || (deleteConfirmProfile as any).isProtected) {
       setErrorMsg('Cannot delete protected TR-069 Management WAN connection. Management WAN is required for remote ACS operations.');
       setDeleteConfirmProfile(null);
@@ -327,11 +334,12 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       setIsSaving(true);
       setErrorMsg(null);
       setSuccessMsg(null);
-      const res = await api.deleteWanProfile(deviceId, deleteConfirmProfile._id);
+      const res = await api.deleteWanProfile(deviceId, targetKey);
       if (res.success) {
         setSuccessMsg(`Profile "${deleteConfirmProfile.name}" deleted successfully and disabled on ONT.`);
         setDeleteConfirmProfile(null);
         await fetchProfiles();
+        onRefreshTelemetry?.();
       } else {
         setErrorMsg((res as any).error || 'Failed to delete WAN profile');
       }

@@ -2033,6 +2033,9 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     if (targetIdx === -1 && !isNaN(parseInt(profileId, 10))) {
       targetIdx = parseInt(profileId, 10);
     }
+    if (targetIdx === -1) {
+      targetIdx = device.wanProfiles.findIndex((p: any) => p.name && p.name.trim().toLowerCase() === String(profileId).trim().toLowerCase());
+    }
 
     if (targetIdx === -1 || targetIdx >= device.wanProfiles.length) {
       return res.status(404).json({ success: false, error: 'Target WAN profile not found.' });
@@ -3657,7 +3660,25 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
           { name: 'Reboot', protocol: 'TR-069/USP', description: 'Dispatch graceful CPE device reboot RPC', permission: 'DEVICE_ADMIN' },
           { name: 'FactoryReset', protocol: 'TR-069', description: 'Restore ONT firmware parameters to factory defaults', permission: 'DEVICE_SUPERADMIN' },
         ],
-        queue: (await DeviceCommand.find({ deviceId: device._id, tenantId }).sort({ queuedAt: -1 }).limit(30)).map((cmd) => {
+        // Reconcile any stale commands older than 3 minutes so they don't stay stuck in 'pending' / 'Waiting for ONT'
+        queue: (await (async () => {
+          const staleThreshold = new Date(Date.now() - 3 * 60 * 1000);
+          await DeviceCommand.updateMany(
+            {
+              deviceId: device._id,
+              status: { $in: ['pending', 'queued', 'sending', 'sent'] },
+              queuedAt: { $lt: staleThreshold },
+            },
+            {
+              $set: {
+                status: 'timed_out',
+                errorMessage: 'Timeout: ONT session elapsed without acknowledging command.',
+                completedAt: new Date(),
+              },
+            }
+          );
+          return DeviceCommand.find({ deviceId: device._id, tenantId }).sort({ queuedAt: -1 }).limit(30);
+        })()).map((cmd) => {
           let normalizedStatus: string = cmd.status;
           if (cmd.status === 'sent' || cmd.status === 'dispatching') normalizedStatus = 'sending';
           else if (cmd.status === 'timed_out') normalizedStatus = 'expired';
