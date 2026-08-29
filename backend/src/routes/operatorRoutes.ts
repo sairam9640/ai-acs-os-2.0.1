@@ -1525,52 +1525,25 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
     const wan2LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress'] || raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.ExternalIPAddress'] || '';
     const wan1LiveIp = raw['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress'] || device.ipAddress || '';
 
-    // Deduplicate profiles: Keep exactly 1 Management profile and unique profiles
-    const seenMgmt = new Set<string>();
-    const seenPppoe = new Set<string>();
-    const deduped: any[] = [];
-
-    for (const p of (device.wanProfiles as any[])) {
-      const isMgmt = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.bearerService === 'TR069' || p.name?.includes('TR069') || Boolean(p.isProtected);
-      const isPppoe = !isMgmt && (p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || Boolean(p.pppoeUsername));
-
-      if (isMgmt) {
-        if (seenMgmt.has('mgmt')) continue;
-        seenMgmt.add('mgmt');
-      } else if (isPppoe) {
-        if (seenPppoe.has('pppoe')) continue;
-        seenPppoe.add('pppoe');
-      }
-      deduped.push(p);
-    }
-    device.wanProfiles = deduped;
-
     let hasModifications = false;
-    const profiles = device.wanProfiles.map((p: any, idx: number) => {
-      const isManagement = p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.name?.includes('TR069') || p.bearerService === 'TR069' || Boolean(p.isProtected);
-      const isPppoe = !isManagement && (p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || p.serviceType === 'INTERNET' || Boolean(p.pppoeUsername));
-      const resolvedBearer = isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : (p.bearerService || p.serviceType || 'INTERNET'));
+    const profiles = (device.wanProfiles || []).map((p: any, idx: number) => {
+      const isManagement = p.serviceType === 'TR069' || p.bearerService === 'TR069' || (p.name && /TR069/i.test(p.name)) || Boolean(p.isProtected);
+      const isPppoe = p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || Boolean(p.pppoeUsername);
+      const resolvedBearer = p.bearerService || p.serviceType || (isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : 'INTERNET'));
       
       let canonicalName = p.name;
-      if ((!canonicalName || canonicalName === 'WAN_PPP_1') && (isPppoe || (!isManagement && !isPppoe))) {
-        if (wan2LiveName) {
-          canonicalName = wan2LiveName;
-          hasModifications = canonicalName !== p.name;
-        }
-      } else if (isManagement && (!canonicalName || canonicalName === 'WAN_IP_2')) {
-        canonicalName = wan1LiveName;
-        hasModifications = canonicalName !== p.name;
+      if (!canonicalName) {
+        canonicalName = isManagement ? (wan1LiveName || 'MGMT_TR069') : (wan2LiveName || `${resolvedBearer}_${isPppoe ? 'PPPoE' : 'IP'}_${idx + 1}`);
       }
 
       let resolvedVlanId = p.vlanId;
-      if (!resolvedVlanId) {
+      if (resolvedVlanId === undefined || resolvedVlanId === null || isNaN(Number(resolvedVlanId))) {
         const vidMatch = String(canonicalName).match(/VID_(\d+)/i);
-        if (vidMatch) resolvedVlanId = Number(vidMatch[1]);
-      }
-      if (!resolvedVlanId && isManagement) resolvedVlanId = 100;
-
-      if (p.vlanId !== resolvedVlanId || p.name !== canonicalName) {
-        hasModifications = true;
+        if (vidMatch) {
+          resolvedVlanId = Number(vidMatch[1]);
+        } else if (isManagement) {
+          resolvedVlanId = 100;
+        }
       }
 
       const rawKeys = Object.keys(device?.rawParameters || {});
@@ -1587,9 +1560,9 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
           : 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.';
       }
 
-      const cpePath = isManagement 
+      const cpePath = p.cpeObjectPath || (isManagement 
         ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.'
-        : dynamicCustomerPath;
+        : dynamicCustomerPath);
 
       return {
         _id: p._id ? String(p._id) : String(idx),
@@ -1599,26 +1572,26 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
         mode: p.mode || (p.connectionType === 'Bridge' ? 'Bridge' : 'Route'),
         enableWan: p.enableWan !== false,
         bearerService: resolvedBearer,
-        linkMode: isPppoe ? 'PPP' : 'IP',
+        linkMode: isPppoe ? 'PPP' : (p.linkMode || 'IP'),
         ipProtocol: p.ipProtocol || 'IPv4',
         ipAssignment: isPppoe ? 'DHCP' : (p.ipAssignment || (p.connectionType === 'Static' ? 'Static' : 'DHCP')),
         connectionType: isPppoe ? 'PPPoE' : (p.connectionType || 'IP_Routed'),
         serviceType: resolvedBearer,
         serviceUsage: p.serviceUsage || {
           internet: resolvedBearer === 'INTERNET',
-          voip: resolvedBearer === 'VOIP',
+          voip: resolvedBearer === 'VOIP' || resolvedBearer === 'VOICE',
           tr069: isManagement,
           iptvDhcp: resolvedBearer === 'IPTV',
           iptvBridge: false,
-          other: false,
+          other: resolvedBearer === 'OTHER',
         },
-        vlanMode: 'TAG',
-        vlanEnabled: true,
+        vlanMode: p.vlanMode || (resolvedVlanId ? 'TAG' : 'UNTAG'),
+        vlanEnabled: p.vlanEnabled !== undefined ? Boolean(p.vlanEnabled) : Boolean(resolvedVlanId),
         vlanId: resolvedVlanId,
         vlanPriority8021p: p.vlanPriority8021p !== undefined ? Number(p.vlanPriority8021p) : 0,
-        multicastVlanId: isManagement ? 0 : (p.multicastVlanId !== undefined ? Number(p.multicastVlanId) : -1),
+        multicastVlanId: p.multicastVlanId !== undefined ? Number(p.multicastVlanId) : (isManagement ? 0 : -1),
         enableDhcpServer: isManagement ? false : (p.enableDhcpServer !== false),
-        mtu: isPppoe ? 1492 : 1500,
+        mtu: p.mtu || (isPppoe ? 1492 : 1500),
         natEnabled: isManagement ? false : (p.natEnabled !== false),
         firewallEnabled: p.firewallEnabled !== undefined ? Boolean(p.firewallEnabled) : true,
         dnsStatus: p.dnsStatus || 'Disable',
@@ -1627,14 +1600,14 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
         wanPortBindings: p.wanPortBindings && p.wanPortBindings.length > 0 ? p.wanPortBindings : ['WAN1'],
         lanPortBindings: isManagement ? [] : (p.lanPortBindings && p.lanPortBindings.length > 0 ? p.lanPortBindings : (is2Port ? ['FE', 'GE'] : ['LAN1', 'LAN2'])),
         ssidBindings: isManagement ? [] : (p.ssidBindings && p.ssidBindings.length > 0 ? p.ssidBindings : ['SSID1']),
-        pppoeUsername: isManagement ? '' : (p.pppoeUsername || wan2LiveUser || ''),
-        passwordConfigured: isManagement ? false : true,
+        pppoeUsername: isManagement ? '' : (p.pppoeUsername || (idx === 0 ? wan2LiveUser : '')),
+        passwordConfigured: isManagement ? false : (Boolean(p.pppoePasswordEncrypted || p.pppoePassword || p.passwordConfigured)),
         pppoePasswordMasked: '••••••••',
-        ipAddress: isManagement ? (wan1LiveIp || null) : (p.ipAddress || wan2LiveIp || null),
+        ipAddress: isManagement ? (wan1LiveIp || null) : (p.ipAddress || (idx === 0 ? wan2LiveIp : null)),
         subnetMask: p.subnetMask || (isManagement ? '255.255.255.0' : '0.0.0.0'),
         gateway: p.gateway || (isManagement ? '192.168.22.1' : null),
         status: p.status || 'Connected',
-        isDefault: isPppoe ? true : false,
+        isDefault: idx === 0 || p.isDefault === true,
         isProtected: isManagement,
         cpeObjectPath: cpePath,
       };
@@ -3265,7 +3238,30 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
       const rawIp = ipKey ? rawParams[ipKey] : null;
       const rawName = nameKey ? rawParams[nameKey] : null;
       const rawIface = ifaceKey ? rawParams[ifaceKey] : null;
-      const rawActive = activeKey ? (rawParams[activeKey] === '1' || rawParams[activeKey] === true || rawParams[activeKey] === 'true') : true;
+      // Discover active Wi-Fi Associated Device MAC addresses from CPE parameter tree
+      const assocMacs = new Set<string>();
+      for (const k of rawKeys) {
+        if (/AssociatedDevice\.\d+\.(AssociatedDeviceMACAddress|MACAddress)$/i.test(k)) {
+          const mVal = String(rawParams[k] || '').toUpperCase().trim();
+          if (mVal && mVal !== '00:00:00:00:00:00') assocMacs.add(mVal);
+        }
+      }
+
+      const rawActiveVal = activeKey ? String(rawParams[activeKey]).toLowerCase().trim() : null;
+      let isClientOnline = false;
+
+      if (device.status !== 'online') {
+        isClientOnline = false;
+      } else if (rawActiveVal !== null) {
+        isClientOnline = rawActiveVal === '1' || rawActiveVal === 'true' || rawActiveVal === 'active';
+      } else if (rawIface && /eth|lan/i.test(String(rawIface))) {
+        isClientOnline = true;
+      } else if (rawMac && assocMacs.size > 0) {
+        isClientOnline = assocMacs.has(rawMac.toUpperCase());
+      } else {
+        isClientOnline = true;
+      }
+
       const rawLease = leaseKey ? parseInt(String(rawParams[leaseKey]), 10) : null;
 
       if ((rawMac && rawMac !== '00:00:00:00:00:00') || (rawIp && rawIp !== '0.0.0.0')) {
@@ -3288,7 +3284,7 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
           signal: idx === 1 ? '-42 dBm' : idx % 2 === 0 ? '-55 dBm' : '-62 dBm',
           leaseTimeRemaining: rawLease && !isNaN(rawLease) ? `${Math.floor(rawLease / 3600)}h ${Math.floor((rawLease % 3600) / 60)}m` : '23h 12m',
           lastSeen: device.lastInform || new Date(),
-          status: rawActive ? 'Online' : 'Offline',
+          status: isClientOnline ? 'Online' : 'Offline',
         });
       }
     }
@@ -3315,7 +3311,11 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
       if (rawMac && rawMac !== '00:00:00:00:00:00') {
         const key = rawMac.toUpperCase();
         const band = (wlanIdx === '5' || wlanIdx === '2') ? '5GHz High-Speed' : '2.4GHz Primary';
-        if (!clientMap.has(key)) {
+        if (clientMap.has(key)) {
+          const existing = clientMap.get(key);
+          existing.status = device.status === 'online' ? 'Online' : 'Offline';
+          if (rawRssi) existing.signal = `${rawRssi} dBm`;
+        } else {
           const friendlyName = resolveFriendlyDeviceName(null, rawMac, band);
           clientMap.set(key, {
             name: friendlyName,
@@ -3327,7 +3327,7 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
             signal: rawRssi ? `${rawRssi} dBm` : '-50 dBm',
             leaseTimeRemaining: '22h 40m',
             lastSeen: device.lastInform || new Date(),
-            status: 'Online',
+            status: device.status === 'online' ? 'Online' : 'Offline',
           });
         }
       }

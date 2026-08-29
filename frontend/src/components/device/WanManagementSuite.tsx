@@ -379,19 +379,19 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
         ? 'Static'
         : 'IPoE_DHCP';
 
-    const isVoipOrTr069 = activeForm.bearerService === 'VOIP' || activeForm.bearerService === 'TR069';
+    const isManagement = activeForm.bearerService === 'TR069';
     const stagedForm: WanProfileData = {
       ...activeForm,
       connectionType: finalConnectionType,
       serviceType: activeForm.bearerService || 'INTERNET',
       vlanEnabled: activeForm.vlanMode === 'TAG',
-      lanPortBindings: isVoipOrTr069 ? [] : activeForm.lanPortBindings,
-      ssidBindings: isVoipOrTr069 ? [] : activeForm.ssidBindings,
-      enableDhcpServer: isVoipOrTr069 ? false : activeForm.enableDhcpServer,
-      enablePppoeBridgeMode: isVoipOrTr069 ? false : activeForm.enablePppoeBridgeMode,
-      pppoeUsername: isVoipOrTr069 || activeForm.linkMode === 'IP' ? '' : activeForm.pppoeUsername,
-      pppoePassword: isVoipOrTr069 || activeForm.linkMode === 'IP' ? '' : activeForm.pppoePassword,
-      serviceName: isVoipOrTr069 || activeForm.linkMode === 'IP' ? '' : activeForm.serviceName,
+      lanPortBindings: isManagement ? [] : activeForm.lanPortBindings,
+      ssidBindings: isManagement ? [] : activeForm.ssidBindings,
+      enableDhcpServer: isManagement ? false : activeForm.enableDhcpServer,
+      enablePppoeBridgeMode: isManagement ? false : activeForm.enablePppoeBridgeMode,
+      pppoeUsername: activeForm.linkMode === 'IP' ? '' : activeForm.pppoeUsername,
+      pppoePassword: activeForm.linkMode === 'IP' ? '' : activeForm.pppoePassword,
+      serviceName: activeForm.linkMode === 'IP' ? '' : activeForm.serviceName,
     };
 
     const original = profiles.find((p) => p._id === selectedProfileId) || {};
@@ -778,31 +778,11 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                       value={activeForm.bearerService || 'INTERNET'}
                       onChange={(e: any) => {
                         const s = e.target.value;
-                        if (s === 'VOIP' || s === 'TR069') {
-                          setActiveForm({
-                            ...activeForm,
-                            bearerService: s,
-                            serviceType: s,
-                            linkMode: 'IP',
-                            connectionType: 'IPoE_DHCP',
-                            ipAssignment: 'DHCP',
-                            mtu: 1500,
-                            natEnabled: false,
-                            pppoeUsername: '',
-                            pppoePassword: '',
-                            serviceName: '',
-                          });
-                        } else {
-                          setActiveForm({
-                            ...activeForm,
-                            bearerService: s,
-                            serviceType: s,
-                            linkMode: 'PPP',
-                            connectionType: 'PPPoE',
-                            mtu: 1492,
-                            natEnabled: true,
-                          });
-                        }
+                        setActiveForm({
+                          ...activeForm,
+                          bearerService: s,
+                          serviceType: s,
+                        });
                       }}
                       className="w-full sm:w-64 px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
                     >
