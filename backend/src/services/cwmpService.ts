@@ -1779,23 +1779,29 @@ ${stringElements}
       SupportedParameterCache.bulkWrite(cacheUpdates).catch(() => {});
     }
 
-    // 1. Identify confirmed 2.4 GHz & 5 GHz Wi-Fi parameters (TR-098 & TR-181)
-    const wifiSsid = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.1\.SSID$|Device\.WiFi\.SSID\.1\.SSID$/i.test(n));
-    const wifiKey = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.1\..*(KeyPassphrase|PreSharedKey|Key)$|Device\.WiFi\.AccessPoint\.1\.Security\.KeyPassphrase$/i.test(n));
-    const wifiChan = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.1\.Channel$|Device\.WiFi\.Radio\.1\.Channel$/i.test(n));
-    const wifiBeacon = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.1\.BeaconType$|Device\.WiFi\.AccessPoint\.1\.Security\.ModeEnabled$/i.test(n));
+    // Build the query parameter list strictly from parameters that EXIST on the CPE
+    const confirmedParams: string[] = [];
 
-    const wifi5gSsid = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.(2|5)\.SSID$|Device\.WiFi\.SSID\.2\.SSID$/i.test(n));
-    const wifi5gKey = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.(2|5)\..*(KeyPassphrase|PreSharedKey|Key)$|Device\.WiFi\.AccessPoint\.2\.Security\.KeyPassphrase$/i.test(n));
-    const wifi5gChan = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.(2|5)\.Channel$|Device\.WiFi\.Radio\.2\.Channel$/i.test(n));
-    const wifi5gBeacon = names.find((n) => /LANDevice\.\d+\.WLANConfiguration\.(2|5)\.BeaconType$|Device\.WiFi\.AccessPoint\.2\.Security\.ModeEnabled$/i.test(n));
+    // 1. Ingest ALL discovered Wi-Fi parameters across all WLAN instances (SSID 1, 2, 3, 4, 5...)
+    const allWifiParams = names.filter((n) =>
+      /(?:LANDevice\.\d+\.WLANConfiguration\.\d+\.(SSID|PreSharedKey\.\d+\.KeyPassphrase|KeyPassphrase|BeaconType|Channel|Enable|Status|WEPKey\.\d+\.WEPKey)|Device\.WiFi\.(SSID|AccessPoint|Radio)\.\d+\.(SSID|Channel|Enable|Status|Security\.KeyPassphrase|Security\.ModeEnabled))/i.test(n) &&
+      !n.endsWith('.')
+    );
+    for (const p of allWifiParams) {
+      if (!confirmedParams.includes(p)) confirmedParams.push(p);
+    }
 
-    // 2. Identify confirmed WAN parameters (TR-098 & TR-181)
-    const wanUser = names.find((n) => /WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\.Username$|Device\.PPP\.Interface\.\d+\.Username$/i.test(n));
-    const wanIp = names.find((n) => /WANDevice\.\d+\.WANConnectionDevice\.\d+\.(WANPPPConnection|WANIPConnection)\.\d+\.ExternalIPAddress$|Device\.IP\.Interface\.\d+\..*IPAddress$/i.test(n));
-    const wanStatus = names.find((n) => /WANDevice\.\d+\.WANConnectionDevice\.\d+\.(WANPPPConnection|WANIPConnection)\.\d+\.ConnectionStatus$|Device\.PPP\.Interface\.\d+\.ConnectionStatus$/i.test(n));
-    const wanVlan = names.find((n) => /WANDevice\.\d+\.WANConnectionDevice\.\d+\.(WANPPPConnection|WANIPConnection)\.\d+\.(X_HW_VLAN|X_CT-COM_VlanID|X_ZTE-COM_VLAN|VLANID)$|Device\.Ethernet\.VLANTermination\.\d+\.VLANID$/i.test(n));
+    // 2. Ingest ALL discovered WAN parameters across ALL connection instances (WANIPConnection.1..8, WANPPPConnection.1..8)
+    const allWanParams = names.filter((n) =>
+      /(?:WANDevice\.\d+\.WANConnectionDevice\.\d+\.(?:WANPPPConnection|WANIPConnection)\.\d+\.(?:Name|Username|ExternalIPAddress|ConnectionStatus|Enable|ConnectionType|X_CT-COM_ServiceList|X_CT-COM_VlanID|X_HW_VLAN|X_ZTE-COM_VLAN|VLANID|DNSServers|DefaultGateway|SubnetMask|NATEnabled)|WANDevice\.\d+\.WANConnectionDevice\.\d+\.X_CT-COM_WANEponLinkConfig\.(?:VLANIDMark|Mode)|Device\.(?:PPP|IP)\.Interface\.\d+\.(?:Name|Username|Enable|Status|.*IPAddress|ConnectionStatus)|Device\.Ethernet\.VLANTermination\.\d+\.VLANID)/i.test(n) &&
+      !n.endsWith('.')
+    );
+    for (const p of allWanParams) {
+      if (!confirmedParams.includes(p)) confirmedParams.push(p);
+    }
+
     const lanHosts = names.find((n) => /LANDevice\.\d+\.(Hosts\.HostNumberOfEntries|HostNumberOfEntries)$|Device\.Hosts\.HostNumberOfEntries$/i.test(n));
+    if (lanHosts && !confirmedParams.includes(lanHosts)) confirmedParams.push(lanHosts);
 
     // 3. Identify confirmed Optical / PON telemetry parameters
     const opticalRxCandidates = names.filter((n) =>
@@ -1815,24 +1821,6 @@ ${stringElements}
       `[CWMP ACS] Discovered Optical Telemetry on ${session?.serialNumber}: [RX: ${opticalRxCandidates.length}] [TX: ${opticalTxCandidates.length}] [Companions: ${opticalCompanionCandidates.length}]`,
       { rx: opticalRxCandidates, tx: opticalTxCandidates }
     );
-
-    // Build the query parameter list strictly from parameters that EXIST on the CPE
-    const confirmedParams: string[] = [];
-    if (wifiSsid) confirmedParams.push(wifiSsid);
-    if (wifiKey) confirmedParams.push(wifiKey);
-    if (wifiChan) confirmedParams.push(wifiChan);
-    if (wifiBeacon) confirmedParams.push(wifiBeacon);
-
-    if (wifi5gSsid) confirmedParams.push(wifi5gSsid);
-    if (wifi5gKey) confirmedParams.push(wifi5gKey);
-    if (wifi5gChan) confirmedParams.push(wifi5gChan);
-    if (wifi5gBeacon) confirmedParams.push(wifi5gBeacon);
-
-    if (wanUser) confirmedParams.push(wanUser);
-    if (wanIp) confirmedParams.push(wanIp);
-    if (wanStatus) confirmedParams.push(wanStatus);
-    if (wanVlan) confirmedParams.push(wanVlan);
-    if (lanHosts) confirmedParams.push(lanHosts);
 
     // Priority 1: All discovered Optical RX paths
     for (const optRx of opticalRxCandidates) {
@@ -2500,8 +2488,73 @@ Timestamp: ${new Date().toISOString()}
       if (beacon5g) device.wifi5g.securityMode = beacon5g as any;
     }
 
-    // Target the customer Internet profile specifically, protecting Management WAN
-    if (!device.wanProfiles || device.wanProfiles.length === 0) {
+    // Dynamically discover and populate ALL WAN connections from pMap
+    const discoveredWanProfiles: any[] = [];
+    const pMapKeys = Array.from(pMap.keys());
+    
+    // Find all WAN connection prefixes
+    const connPrefixes = Array.from(new Set(
+      pMapKeys.map(k => {
+        const m = k.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.(?:WANPPPConnection|WANIPConnection)\.\d+)\./i);
+        return m ? m[1] : null;
+      }).filter((v): v is string => v !== null)
+    ));
+
+    for (const prefix of connPrefixes) {
+      const isPpp = prefix.includes('WANPPPConnection');
+      const connName = pMap.get(`${prefix}.Name`) || '';
+      const connUser = pMap.get(`${prefix}.Username`) || '';
+      const connIp = pMap.get(`${prefix}.ExternalIPAddress`) || '';
+      const connStatus = pMap.get(`${prefix}.ConnectionStatus`) || (connIp && connIp !== '0.0.0.0' ? 'Connected' : 'Connecting');
+      const connEnable = pMap.get(`${prefix}.Enable`) !== '0' && pMap.get(`${prefix}.Enable`) !== 'false';
+      const slotMatch = prefix.match(/WANConnectionDevice\.(\d+)\./i);
+      const slotNum = slotMatch ? slotMatch[1] : '1';
+
+      // Resolve VLAN ID
+      let connVlan: number | null = null;
+      const vlanRaw = pMap.get(`${prefix}.X_CT-COM_VlanID`) || pMap.get(`${prefix}.X_HW_VLAN`) || pMap.get(`${prefix}.VLANID`) || pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`);
+      if (vlanRaw) {
+        const v = parseInt(String(vlanRaw), 10);
+        if (!isNaN(v) && v > 0) connVlan = v;
+      }
+      if (!connVlan && connName) {
+        const m = connName.match(/VID_(\d+)/i);
+        if (m) connVlan = parseInt(m[1], 10);
+      }
+
+      // Resolve service type
+      const serviceList = pMap.get(`${prefix}.X_CT-COM_ServiceList`) || '';
+      const isTr069 = /TR069/i.test(connName) || /TR069/i.test(serviceList) || (!isPpp && prefix.endsWith('.1') && slotNum === '1');
+      const isVoip = /VOIP|VOICE/i.test(connName) || /VOIP|VOICE/i.test(serviceList);
+      const resolvedService = isTr069 ? 'TR069' : (isVoip ? 'VOIP' : 'INTERNET');
+
+      const fallbackName = `${slotNum}_${resolvedService}_${isPpp ? 'R' : 'IP'}${connVlan ? `_VID_${connVlan}` : ''}`;
+
+      discoveredWanProfiles.push({
+        name: connName || fallbackName,
+        enableWan: connEnable,
+        connectionType: isPpp ? 'PPPoE' : 'IP_Routed',
+        serviceType: resolvedService,
+        bearerService: resolvedService,
+        transMode: 'PON',
+        mode: 'Route',
+        linkMode: isPpp ? 'PPP' : 'IP',
+        ipAssignment: isPpp ? 'DHCP' : 'DHCP',
+        vlanMode: connVlan ? 'TAG' : 'UNTAG',
+        vlanEnabled: Boolean(connVlan),
+        vlanId: connVlan || (isTr069 ? 100 : 488),
+        isProtected: isTr069,
+        cpeObjectPath: `${prefix}.`,
+        pppoeUsername: connUser,
+        ipAddress: connIp || null,
+        status: connStatus === 'Connected' ? 'Connected' : 'Connecting',
+        isDefault: !isTr069,
+      });
+    }
+
+    if (discoveredWanProfiles.length > 0) {
+      device.wanProfiles = discoveredWanProfiles;
+    } else if (!device.wanProfiles || device.wanProfiles.length === 0) {
       device.wanProfiles = [{
         name: 'Internet_TR069',
         connectionType: 'PPPoE',
@@ -2511,18 +2564,39 @@ Timestamp: ${new Date().toISOString()}
         ipAddress: pppIp || '',
         vlanId: rawVlan ? parseInt(rawVlan, 10) || 100 : 100,
       } as any];
-    } else {
-      const targetWanProf = (device.wanProfiles || []).find((p: any) => !p.isProtected && p.serviceType !== 'TR069') || device.wanProfiles[0];
-      if (targetWanProf) {
-        if (pppoeUser) targetWanProf.pppoeUsername = pppoeUser;
-        if (pppStatus) targetWanProf.status = (pppStatus === 'Connected' ? 'Connected' : 'Connecting');
-        if (pppIp) targetWanProf.ipAddress = pppIp;
-        if (rawVlan) {
-          const v = parseInt(rawVlan, 10);
-          if (!isNaN(v)) targetWanProf.vlanId = v;
-        }
+    }
+
+    // Discover and populate ALL SSIDs (SSID 1, 2, 3, 4, 5...)
+    const discoveredSsids: any[] = [];
+    const wlanIndices = Array.from(new Set(
+      pMapKeys.map(k => {
+        const m = k.match(/LANDevice\.\d+\.WLANConfiguration\.(\d+)\./i);
+        return m ? parseInt(m[1], 10) : null;
+      }).filter((v): v is number => v !== null)
+    )).sort((a, b) => a - b);
+
+    for (const wIdx of wlanIndices) {
+      const sName = pMap.get(`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wIdx}.SSID`);
+      if (sName) {
+        const sKey = pMap.get(`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wIdx}.PreSharedKey.1.KeyPassphrase`) || pMap.get(`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wIdx}.KeyPassphrase`) || '';
+        const sChan = pMap.get(`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wIdx}.Channel`);
+        const sBeacon = pMap.get(`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wIdx}.BeaconType`) || 'WPA2-PSK';
+        const sEnable = pMap.get(`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wIdx}.Enable`) !== '0';
+        discoveredSsids.push({
+          instance: wIdx,
+          ssid: sName,
+          password: sKey,
+          channel: sChan ? parseInt(sChan, 10) : 6,
+          securityMode: sBeacon,
+          enabled: sEnable,
+          band: (wIdx === 2 || wIdx === 5) ? '5GHz' : '2.4GHz',
+        });
       }
     }
+    if (discoveredSsids.length > 0) {
+      (device as any).ssids = discoveredSsids;
+    }
+
     if (rawHosts) {
       const h = parseInt(rawHosts, 10);
       if (!isNaN(h)) device.lanHostCount = h;
