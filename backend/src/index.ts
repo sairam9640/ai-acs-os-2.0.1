@@ -31,7 +31,7 @@ const server = http.createServer(app);
 // Enable trust proxy for Nginx reverse proxy so req.hostname and IPs are accurate
 app.set('trust proxy', true);
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 3000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ai_isp_os_db';
 const JWT_SECRET = process.env.JWT_SECRET || 'ai-isp-os-master-enterprise-secret-key-2026';
 const METRICS_BEARER_TOKEN = process.env.METRICS_BEARER_TOKEN || 'metrics_secure_token_2026';
