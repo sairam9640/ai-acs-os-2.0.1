@@ -35,9 +35,13 @@ import {
   Camera,
   Trash2,
   ExternalLink,
-  Lock,
   Search,
   Filter,
+  Laptop,
+  Smartphone,
+  Globe,
+  Network,
+  HardDrive,
 } from 'lucide-react';
 import { Shell } from '../../components/layout/Shell.js';
 import { StateWrapper } from '../../components/ui/StateWrapper.js';
@@ -93,6 +97,24 @@ export const Customer360: React.FC = () => {
 
   // Action Loading
   const [actionLoading, setActionLoading] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
+  const [isRefreshingOnt, setIsRefreshingOnt] = useState(false);
+
+  const handleRefreshOntLive = async () => {
+    if (!data?.device?._id) return;
+    setIsRefreshingOnt(true);
+    try {
+      await api.post(`/operator/devices/${data.device._id}/poll-live`);
+      setFeedback({ type: 'success', message: 'Requested real-time telemetry and connected devices from ONT via TR-069.' });
+      setTimeout(async () => {
+        await fetch360Data();
+        setIsRefreshingOnt(false);
+      }, 2500);
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.response?.data?.error || 'Failed to dispatch live ONT poll' });
+      setIsRefreshingOnt(false);
+    }
+  };
 
   const fetch360Data = async () => {
     if (!id) return;
@@ -513,7 +535,7 @@ export const Customer360: React.FC = () => {
                 <div className="space-y-2 text-xs font-mono">
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Device Model:</span>
-                    <span className="font-bold text-slate-900">{device?.vendor} {device?.modelName || 'Titanium-2122A'}</span>
+                    <span className="font-bold text-slate-900">{`${device?.vendor || ''} ${device?.modelName || ''}`.trim() || 'No ONT Bound'}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Serial Number:</span>
@@ -521,11 +543,11 @@ export const Customer360: React.FC = () => {
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">MAC Address:</span>
-                    <span className="font-bold text-slate-900">{device?.macAddress || '3C:90:66:88:12:F1'}</span>
+                    <span className="font-bold text-slate-900">{device?.macAddress || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Firmware Version:</span>
-                    <span className="font-bold text-slate-900">{device?.softwareVersion || 'V2.1.04-P1'}</span>
+                    <span className="font-bold text-slate-900">{device?.softwareVersion || 'N/A'}</span>
                   </div>
                   <div className="p-2.5 bg-slate-50 rounded-lg space-y-1">
                     <div className="flex justify-between items-center">
@@ -561,7 +583,9 @@ export const Customer360: React.FC = () => {
 
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Connected Clients:</span>
-                    <span className="font-bold text-slate-900">{device?.connectedClients?.length || device?.lanHostCount || 0} Devices Active</span>
+                    <span className="font-bold text-slate-900">
+                      {device?.connectedClients?.filter((c: any) => c.connected !== false).length || device?.lanHostCount || 0} Devices Active
+                    </span>
                   </div>
                 </div>
               </Card>
@@ -640,64 +664,212 @@ export const Customer360: React.FC = () => {
             </Card>
           )}
 
-          {/* TAB 3: OPTICAL & WAN */}
+          {/* TAB 3: OPTICAL, WAN & CONNECTED DEVICES */}
           {activeTab === 'optical' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
-                <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
-                  <Radio className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
-                  Optical Transceiver Telemetry
-                </h3>
-                <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-sans">RX Optical Power</span>
-                    <p className={`text-xl font-black ${opticalColor}`}>{rxPower != null ? `${rxPower.toFixed(2)} dBm` : 'N/A'}</p>
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* Optical Telemetry */}
+                <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                      <Radio className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
+                      Optical Transceiver Telemetry
+                    </h3>
+                    <Badge variant={rxPower != null ? 'info' : 'neutral'} className="text-[10px] font-mono">
+                      {rxPower != null ? 'TR-069 Live PON' : 'Ethernet / Router Mode'}
+                    </Badge>
                   </div>
-                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-sans">TX Optical Power</span>
-                    <p className="text-xl font-black text-slate-800">{device?.currentTxPowerDbm != null ? `${device.currentTxPowerDbm} dBm` : '2.14 dBm'}</p>
+                  <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                    <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                      <span className="text-[10px] text-slate-400 uppercase font-sans">RX Optical Power</span>
+                      <p className={`text-xl font-black ${opticalColor}`}>{rxPower != null ? `${rxPower.toFixed(2)} dBm` : 'N/A'}</p>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                      <span className="text-[10px] text-slate-400 uppercase font-sans">TX Optical Power</span>
+                      <p className="text-xl font-black text-slate-800">{device?.currentTxPowerDbm != null ? `${device.currentTxPowerDbm.toFixed(2)} dBm` : 'N/A'}</p>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                      <span className="text-[10px] text-slate-400 uppercase font-sans">Laser Bias Current</span>
+                      <p className="text-lg font-black text-slate-800">{device?.biasCurrentMa != null ? `${device.biasCurrentMa} mA` : 'N/A'}</p>
+                    </div>
+                    <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                      <span className="text-[10px] text-slate-400 uppercase font-sans">ONT Temperature</span>
+                      <p className="text-lg font-black text-slate-800">{device?.temperatureC != null ? `${device.temperatureC} °C` : 'N/A'}</p>
+                    </div>
                   </div>
-                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-sans">Laser Bias Current</span>
-                    <p className="text-lg font-black text-slate-800">14.2 mA</p>
+                </Card>
+
+                {/* PPPoE WAN Interface */}
+                <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                      <Server className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+                      PPPoE & WAN Network Interface
+                    </h3>
+                    <Badge variant={device?.wanProfiles?.[0]?.status === 'Connected' || device?.status === 'online' ? 'success' : 'warning'}>
+                      {device?.wanProfiles?.[0]?.status || (device?.status === 'online' ? 'Connected' : 'Disconnected')}
+                    </Badge>
                   </div>
-                  <div className="p-3 bg-slate-50 rounded-xl space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-sans">ONT Temperature</span>
-                    <p className="text-lg font-black text-slate-800">41.5 °C</p>
+                  <div className="space-y-2 text-xs font-mono">
+                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                      <span className="text-slate-500 font-sans">PPPoE Username:</span>
+                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.pppoeUsername || device?.pppoeUsername || customer?.wanConfig?.pppoeUsername || 'Not Configured'}</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                      <span className="text-slate-500 font-sans">Assigned External IP:</span>
+                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.ipAddress || device?.externalIpAddress || device?.ipAddress || 'Not Assigned'}</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                      <span className="text-slate-500 font-sans">VLAN Tag:</span>
+                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.vlanId || device?.wanVlan || customer?.wanConfig?.vlanId || 'Untagged'}</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                      <span className="text-slate-500 font-sans">Primary DNS:</span>
+                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.primaryDns || customer?.wanConfig?.dnsPrimary || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                      <span className="text-slate-500 font-sans">Secondary DNS:</span>
+                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.secondaryDns || customer?.wanConfig?.dnsSecondary || 'N/A'}</span>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+
+              {/* LIVE CONNECTED WI-FI & LAN CLIENTS TABLE */}
+              <Card className="overflow-hidden border border-slate-200 bg-white rounded-2xl shadow-xs">
+                <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
+                  <div className="flex items-center space-x-2">
+                    <Network className="w-4 h-4 text-sky-600" />
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">
+                        Live Connected Devices & Wi-Fi Clients
+                        <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-sky-100 text-sky-800 font-mono">
+                          {device?.connectedClients?.length || 0} Registered
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">Real-time LAN Host table & active Wi-Fi associations direct from router via TR-069</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search Host / IP / MAC..."
+                        value={clientSearch}
+                        onChange={(e) => setClientSearch(e.target.value)}
+                        className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-sky-500 w-48 sm:w-60 font-sans"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={handleRefreshOntLive}
+                      disabled={isRefreshingOnt || !device?._id}
+                      className="text-xs bg-sky-600 hover:bg-sky-700 text-white font-bold"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isRefreshingOnt ? 'animate-spin' : ''}`} />
+                      {isRefreshingOnt ? 'Querying ONT...' : 'Refresh Live from ONT'}
+                    </Button>
                   </div>
                 </div>
-              </Card>
 
-              <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
-                <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
-                  <Server className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
-                  PPPoE WAN Network Interface
-                </h3>
-                <div className="space-y-2 text-xs font-mono">
-                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                    <span className="text-slate-500 font-sans">Username:</span>
-                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.pppoeUsername || device?.wanProfiles?.[0]?.username || device?.pppoeUsername || customer?.wanConfig?.pppoeUsername || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                    <span className="text-slate-500 font-sans">Connection Status:</span>
-                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.status || (device?.status === 'online' ? 'Connected' : 'Disconnected')}</span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                    <span className="text-slate-500 font-sans">Assigned IP:</span>
-                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.ipAddress || device?.externalIpAddress || device?.ipAddress || customer?.wanConfig?.staticIp || 'N/A'}</span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                    <span className="text-slate-500 font-sans">VLAN Tag:</span>
-                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.vlanId || device?.wanVlan || customer?.wanConfig?.vlanId || 100}</span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                    <span className="text-slate-500 font-sans">Primary DNS:</span>
-                    <span className="font-bold text-slate-900">{customer?.wanConfig?.dnsPrimary || device?.wanProfiles?.[0]?.primaryDns || '8.8.8.8'}</span>
-                  </div>
-                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                    <span className="text-slate-500 font-sans">Secondary DNS:</span>
-                    <span className="font-bold text-slate-900">{customer?.wanConfig?.dnsSecondary || device?.wanProfiles?.[0]?.secondaryDns || '1.1.1.1'}</span>
-                  </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100/75 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px] tracking-wider">
+                      <tr>
+                        <th className="py-3 px-4">Device Hostname</th>
+                        <th className="py-3 px-4">Connection Interface</th>
+                        <th className="py-3 px-4">Assigned IP</th>
+                        <th className="py-3 px-4">MAC Address</th>
+                        <th className="py-3 px-4 text-center">Status</th>
+                        <th className="py-3 px-4 text-right">Last Active</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono">
+                      {(() => {
+                        const allClients = (device?.connectedClients || []).filter((c: any) => {
+                          if (!clientSearch) return true;
+                          const q = clientSearch.toLowerCase();
+                          return (
+                            (c.hostname && c.hostname.toLowerCase().includes(q)) ||
+                            (c.ip && c.ip.toLowerCase().includes(q)) ||
+                            (c.mac && c.mac.toLowerCase().includes(q))
+                          );
+                        });
+
+                        if (allClients.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={6} className="py-8 text-center text-slate-400 font-sans">
+                                <Network className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                                <p className="font-semibold text-slate-600">No active client devices detected on LAN/Wi-Fi</p>
+                                <p className="text-xs text-slate-400 mt-1">Click "Refresh Live from ONT" to summon real-time host table from router</p>
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return allClients.map((client: any, idx: number) => {
+                          const isWifi5G = client.interfaceType === '5GHz';
+                          const isEthernet = client.interfaceType === 'Ethernet';
+                          const isOnline = client.connected !== false;
+
+                          const DeviceIcon = client.hostname?.match(/iphone|android|phone|galaxy|redmi|poco|pixel/i)
+                            ? Smartphone
+                            : client.hostname?.match(/desktop|pc|laptop|macbook|dell|lenovo|hp|thinkpad/i)
+                            ? Laptop
+                            : client.hostname?.match(/tv|smart|roku|firestick|cast/i)
+                            ? HardDrive
+                            : Globe;
+
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-3 px-4 font-sans font-bold text-slate-900 flex items-center space-x-2">
+                                <div className="p-1.5 rounded-lg bg-slate-100 text-slate-600">
+                                  <DeviceIcon className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <p className="text-xs font-bold text-slate-900 truncate max-w-[200px]">
+                                    {client.hostname || `Device (${client.mac?.slice(-5) || idx + 1})`}
+                                  </p>
+                                  <span className="text-[10px] font-mono text-slate-400 font-normal">
+                                    {client.isBlocked ? 'Blocked' : 'Authorized Client'}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 font-sans">
+                                <Badge
+                                  variant={isWifi5G ? 'info' : isEthernet ? 'warning' : 'neutral'}
+                                  className="text-[10px]"
+                                >
+                                  {isWifi5G ? '5 GHz Wi-Fi' : isEthernet ? 'Ethernet LAN' : '2.4 GHz Wi-Fi'}
+                                </Badge>
+                              </td>
+                              <td className="py-3 px-4 font-bold text-slate-800">
+                                {client.ip || 'DHCP Dynamic'}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 font-semibold">
+                                {client.mac || 'N/A'}
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold font-sans ${
+                                  isOnline
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full mr-1 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
+                                  {isOnline ? 'Connected' : 'Offline'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-right text-slate-400 text-[11px] font-sans">
+                                {client.lastSeen ? new Date(client.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Live'}
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
                 </div>
               </Card>
             </div>
@@ -722,25 +894,27 @@ export const Customer360: React.FC = () => {
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="font-mono font-bold text-sky-700">OPTICAL NETWORK TERMINAL (ONT)</span>
-                    <Badge variant="success">Active</Badge>
+                    <Badge variant={device?.status === 'online' ? 'success' : 'neutral'}>
+                      {device?.status === 'online' ? 'Online' : 'Active'}
+                    </Badge>
                   </div>
-                  <p className="font-bold text-slate-900 text-sm">{assets?.ont?.brand} {assets?.ont?.model || 'Titanium-2122A'}</p>
+                  <p className="font-bold text-slate-900 text-sm">{assets?.ont?.brand || device?.vendor || ''} {assets?.ont?.model || device?.modelName || 'Premise ONT'}</p>
                   <p className="font-mono text-slate-600">Serial: {assets?.ont?.serialNumber || device?.serialNumber || 'N/A'}</p>
-                  <p className="font-mono text-slate-600">MAC: {assets?.ont?.macAddress || '3C:90:66:88:12:F1'}</p>
-                  <p className="font-mono text-[11px] text-slate-500">Warranty Exp: {assets?.ont?.warrantyExpiry ? new Date(assets.ont.warrantyExpiry).toLocaleDateString() : 'Active (24m)'}</p>
+                  <p className="font-mono text-slate-600">MAC: {assets?.ont?.macAddress || device?.macAddress || 'N/A'}</p>
+                  <p className="font-mono text-[11px] text-slate-500">Warranty Exp: {assets?.ont?.warrantyExpiry ? new Date(assets.ont.warrantyExpiry).toLocaleDateString() : 'Active'}</p>
                 </div>
 
                 {/* Secondary Router Card */}
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="font-mono font-bold text-purple-700">WI-FI 6 MESH ROUTER</span>
+                    <span className="font-mono font-bold text-purple-700">SECONDARY ROUTER / MESH</span>
                     <Badge variant={assets?.secondaryRouter ? 'success' : 'neutral'}>
-                      {assets?.secondaryRouter ? 'Assigned' : 'Optional'}
+                      {assets?.secondaryRouter ? 'Assigned' : 'None'}
                     </Badge>
                   </div>
-                  <p className="font-bold text-slate-900 text-sm">{assets?.secondaryRouter?.brand || 'TP-Link'} {assets?.secondaryRouter?.model || 'Archer AX12 Dual-Band'}</p>
-                  <p className="font-mono text-slate-600">Serial: {assets?.secondaryRouter?.serialNumber || 'SN-RTR-99201'}</p>
-                  <p className="font-mono text-[11px] text-slate-500">Warranty: Active (12m)</p>
+                  <p className="font-bold text-slate-900 text-sm">{assets?.secondaryRouter ? `${assets?.secondaryRouter?.brand} ${assets?.secondaryRouter?.model}` : 'Not Assigned'}</p>
+                  <p className="font-mono text-slate-600">Serial: {assets?.secondaryRouter?.serialNumber || 'None'}</p>
+                  <p className="font-mono text-[11px] text-slate-500">Status: {assets?.secondaryRouter ? 'Active' : 'Optional'}</p>
                 </div>
 
                 {/* SFP Transceiver & Fiber Drop */}

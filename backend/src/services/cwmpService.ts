@@ -1811,13 +1811,13 @@ ${stringElements}
       if (confirmedParams.length < 32 && !confirmedParams.includes(comp)) confirmedParams.push(comp);
     }
 
-    // Priority 4: Discovered LAN Host details & Associated Wi-Fi Devices
+    // Priority 4: Discovered LAN Host details & Associated Wi-Fi Devices (HostName, MAC, IP, Active, Interface)
     const hostParams = names.filter((n) =>
-      /(LANDevice\.\d+\.Hosts\.Host\.\d+\.(IPAddress|MACAddress|HostName|Active|InterfaceType)|LANDevice\.\d+\.WLANConfiguration\.\d+\.AssociatedDevice\.\d+\.(AssociatedDeviceMACAddress|AssociatedDeviceIPAddress)|Device\.Hosts\.Host\.\d+\.(IPAddress|PhysAddress|HostName|Active))/i.test(n) &&
+      /(LANDevice\.\d+\.Hosts\.Host\.\d+\.(IPAddress|MACAddress|HostName|UserHostName|ClientID|Active|InterfaceType|LeaseTimeRemaining)|LANDevice\.\d+\.WLANConfiguration\.\d+\.AssociatedDevice\.\d+\.(AssociatedDeviceMACAddress|AssociatedDeviceIPAddress|AssociatedDeviceHostName|AssociatedDeviceAuthenticationState)|Device\.Hosts\.Host\.\d+\.(IPAddress|PhysAddress|HostName|Active|InterfaceType))/i.test(n) &&
       !n.endsWith('.')
     );
     for (const hp of hostParams) {
-      if (confirmedParams.length < 48 && !confirmedParams.includes(hp)) confirmedParams.push(hp);
+      if (confirmedParams.length < 96 && !confirmedParams.includes(hp)) confirmedParams.push(hp);
     }
 
     if (session && confirmedParams.length > 0) {
@@ -2486,11 +2486,14 @@ Timestamp: ${new Date().toISOString()}
 
     // Parse Connected LAN / Wi-Fi Clients from pMap
     const clientMap: Map<string, any> = new Map();
+    
     for (const [key, val] of pMap.entries()) {
       if (!val || val === '' || val === '0.0.0.0' || val === '00:00:00:00:00:00') continue;
-      const hostMatch = key.match(/(?:LANDevice\.\d+\.Hosts\.Host|Device\.Hosts\.Host)\.(\d+)\.(MACAddress|PhysAddress|IPAddress|HostName|Active|InterfaceType)/i);
+      
+      // 1. LAN Hosts parsing
+      const hostMatch = key.match(/(?:LANDevice\.\d+\.Hosts\.Host|Device\.Hosts\.Host)\.(\d+)\.(MACAddress|PhysAddress|IPAddress|HostName|UserHostName|ClientID|Active|InterfaceType|LeaseTimeRemaining)/i);
       if (hostMatch) {
-        const idx = hostMatch[1];
+        const idx = `host_${hostMatch[1]}`;
         const field = hostMatch[2].toLowerCase();
         if (!clientMap.has(idx)) {
           clientMap.set(idx, {
@@ -2504,21 +2507,73 @@ Timestamp: ${new Date().toISOString()}
           });
         }
         const c = clientMap.get(idx);
-        if (field === 'macaddress' || field === 'physaddress') c.mac = val.toUpperCase();
-        if (field === 'ipaddress') c.ip = val;
-        if (field === 'hostname') c.hostname = val;
-        if (field === 'interfacetype') {
-          c.interfaceType = /5g/i.test(val) ? '5GHz' : /ethernet|eth/i.test(val) ? 'Ethernet' : '2.4GHz';
+        if (field === 'macaddress' || field === 'physaddress') c.mac = String(val).toUpperCase().trim();
+        if (field === 'ipaddress') c.ip = String(val).trim();
+        if (field === 'hostname' || field === 'userhostname' || field === 'clientid') {
+          const cleanName = String(val).replace(/["']/g, '').trim();
+          if (cleanName && cleanName !== 'unknown' && cleanName !== 'undefined') c.hostname = cleanName;
         }
-        if (field === 'active') c.connected = val === '1' || val.toLowerCase() === 'true';
+        if (field === 'interfacetype') {
+          c.interfaceType = /5g/i.test(val) ? '5GHz' : /ethernet|eth|lan/i.test(val) ? 'Ethernet' : '2.4GHz';
+        }
+        if (field === 'active') {
+          c.connected = val === '1' || val.toLowerCase() === 'true' || val.toLowerCase() === 'active';
+        }
+      }
+
+      // 2. Wi-Fi Associated Devices parsing
+      const wlanMatch = key.match(/LANDevice\.\d+\.WLANConfiguration\.(\d+)\.AssociatedDevice\.(\d+)\.(AssociatedDeviceMACAddress|AssociatedDeviceIPAddress|AssociatedDeviceHostName|AssociatedDeviceAuthenticationState)/i);
+      if (wlanMatch) {
+        const wlanBand = wlanMatch[1];
+        const idx = `wlan_${wlanBand}_${wlanMatch[2]}`;
+        const field = wlanMatch[3].toLowerCase();
+        if (!clientMap.has(idx)) {
+          clientMap.set(idx, {
+            mac: '',
+            ip: '',
+            hostname: '',
+            interfaceType: (wlanBand === '2' || wlanBand === '5') ? '5GHz' : '2.4GHz',
+            connected: true,
+            isBlocked: false,
+            lastSeen: new Date(),
+          });
+        }
+        const c = clientMap.get(idx);
+        if (field === 'associateddevicemacaddress') c.mac = String(val).toUpperCase().trim();
+        if (field === 'associateddeviceipaddress') c.ip = String(val).trim();
+        if (field === 'associateddevicehostname') {
+          const cleanName = String(val).replace(/["']/g, '').trim();
+          if (cleanName && cleanName !== 'unknown') c.hostname = cleanName;
+        }
+        if (field === 'associateddeviceauthenticationstate') {
+          c.connected = val === '1' || /true|authenticated/i.test(val);
+        }
       }
     }
-    const parsedClients = Array.from(clientMap.values()).filter((c: any) => c.mac || c.ip);
+
+    // Deduplicate clients by MAC / IP address
+    const uniqueClientsMap = new Map<string, any>();
+    for (const c of clientMap.values()) {
+      if (!c.mac && !c.ip) continue;
+      const key = c.mac || c.ip;
+      if (uniqueClientsMap.has(key)) {
+        const existing = uniqueClientsMap.get(key);
+        if (!existing.hostname && c.hostname) existing.hostname = c.hostname;
+        if (!existing.ip && c.ip) existing.ip = c.ip;
+        if (!existing.mac && c.mac) existing.mac = c.mac;
+        if (c.interfaceType !== '2.4GHz') existing.interfaceType = c.interfaceType;
+      } else {
+        uniqueClientsMap.set(key, c);
+      }
+    }
+
+    const parsedClients = Array.from(uniqueClientsMap.values());
     if (parsedClients.length > 0) {
       device.connectedClients = parsedClients.map((c: any) => ({
         ...c,
-        hostname: c.hostname || (c.mac ? `Host (${c.mac.slice(-5)})` : 'Connected Device'),
+        hostname: c.hostname || (c.mac ? `Device (${c.mac.replace(/[:-]/g, '').slice(-4).toUpperCase()})` : `Client ${c.ip}`),
       }));
+      device.lanHostCount = device.connectedClients.filter((c: any) => c.connected !== false).length || parsedClients.length;
     }
 
     device.lastParameterSyncStatus = 'PARTIAL_SUCCESS';

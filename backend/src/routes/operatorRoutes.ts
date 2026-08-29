@@ -422,6 +422,39 @@ operatorRouter.get('/devices/:id', async (req: AuthenticatedRequest, res: Respon
 });
 
 /**
+ * 8.0 Live Poll Telemetry & Connected Devices from CPE
+ */
+operatorRouter.post('/devices/:id/poll-live', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const device = await Device.findOne({ _id: req.params.id, tenantId });
+    if (!device) return res.status(404).json({ success: false, error: 'Device not found in tenant context' });
+
+    await DeviceCommand.create({
+      tenantId: device.tenantId,
+      deviceId: device._id,
+      customerId: device.customerId,
+      serialNumber: device.serialNumber,
+      commandType: 'SUMMON_LIVE_POLL',
+      action: 'SUMMON_LIVE_POLL',
+      status: 'pending',
+      queuedAt: new Date(),
+    });
+
+    if (device.serialNumber) {
+      triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+    }
+
+    return res.json({
+      success: true,
+      message: 'Real-time telemetry and connected clients discovery dispatched to CPE.',
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * 8.0.1 Dedicated ONT Inspect — Returns sanitised live telemetry + hardware.
  * NEVER returns: cwmpPassword, wifi passwords, pppoePasswordEncrypted, or JWT.
  * All telemetry fields are null when not received from TR-069; never fabricated.
