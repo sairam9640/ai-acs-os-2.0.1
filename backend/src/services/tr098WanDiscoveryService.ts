@@ -223,10 +223,10 @@ export function discoverLiveTr098WanTree(
     }
   }
 
-  // Fallback: If no explicit management tag, slot 1 containing WANIPConnection is marked management
-  if (mgmtSlot === undefined && slots.has(1)) {
+  // Fallback: If no explicit management tag, check if slot 1 contains ONLY WANIPConnection AND multiple slots exist
+  if (mgmtSlot === undefined && slots.has(1) && slots.size > 1) {
     const slot1 = slots.get(1)!;
-    if (slot1.ipConnections.length > 0) {
+    if (slot1.ipConnections.length > 0 && slot1.pppConnections.length === 0) {
       slot1.isManagementSlot = true;
       mgmtSlot = 1;
     }
@@ -363,33 +363,34 @@ export function validateWanParameters(
       const parentInstance = instancePrefixMatch ? instancePrefixMatch[1] : '';
       const parentExists = Boolean(parentInstance && Array.from(paramMap.keys()).some((k) => k.startsWith(parentInstance)));
 
-      // If this is a standard TR-098 WAN parameter on an active/fallback slot, allow it through for CPE dispatch
       const isStandardWanCore = /\.(?:Username|Password|Enable|ConnectionType|NATEnabled|ExternalIPAddress|SubnetMask|DefaultGateway|DNSServers)$/i.test(path);
-      if (isStandardWanCore) {
+
+      if (parentExists && isStandardWanCore) {
         validParams.push([path, val, type]);
         continue;
+      }
+
+      // If parent instance doesn't exist on device (e.g. requested WANPPPConnection.2 on a device that only has WANPPPConnection.1)
+      if (!parentExists && isStandardWanCore) {
+        const confirmedPppInstanceKey = Array.from(paramMap.keys()).find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
+        if (confirmedPppInstanceKey) {
+          const m = confirmedPppInstanceKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
+          if (m) {
+            const redirectedPath = path.replace(parentInstance, m[1]);
+            validParams.push([redirectedPath, val, type]);
+            continue;
+          }
+        }
       }
 
       if (isOptional) {
         omittedOptional.push(path);
         continue;
-      } else if (isRequired) {
+      } else if (isRequired && !hasDiscoveredWanTree) {
         validParams.push([path, val, type]);
         continue;
       } else {
-        // Vendor extension or VLAN
-        if (path.includes('VLANIDMark') || path.includes('VLANID')) {
-          const slotPrefixMatch = path.match(/^(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+)\./);
-          const slotPrefix = slotPrefixMatch ? slotPrefixMatch[1] : '';
-          const slotExists = Boolean(slotPrefix && Array.from(paramMap.keys()).some((k) => k.startsWith(slotPrefix)));
-          if (slotExists || !hasDiscoveredWanTree) {
-            validParams.push([path, val, type]);
-            continue;
-          }
-          omittedOptional.push(path);
-        } else {
-          omittedOptional.push(path);
-        }
+        omittedOptional.push(path);
         continue;
       }
     }
@@ -459,14 +460,18 @@ export async function buildDynamicTr098WanParams(
       : Array.from(normalizeParameterMap(rawParams).keys());
 
     // Search for existing confirmed PPPoE connection instances across slots 1..8
-    const existingPppKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
-    const existingIpKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANIPConnection\.\d+\./i.test(k));
+    const pppInst1Key = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.1\./i.test(k));
+    const pppAnyKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
+    const ipInst1Key = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANIPConnection\.1\./i.test(k));
+    const ipAnyKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANIPConnection\.\d+\./i.test(k));
 
-    if (isPppoe && existingPppKey) {
-      const m = existingPppKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
+    if (isPppoe && (pppInst1Key || pppAnyKey)) {
+      const matchKey = pppInst1Key || pppAnyKey;
+      const m = matchKey!.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
       if (m) basePath = m[1];
-    } else if (!isPppoe && existingIpKey) {
-      const m = existingIpKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANIPConnection\.\d+)/i);
+    } else if (!isPppoe && (ipInst1Key || ipAnyKey)) {
+      const matchKey = ipInst1Key || ipAnyKey;
+      const m = matchKey!.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANIPConnection\.\d+)/i);
       if (m) basePath = m[1];
     } else if (profile.cpeObjectPath) {
       basePath = profile.cpeObjectPath.replace(/\.$/, '');
@@ -512,15 +517,41 @@ export async function buildDynamicTr098WanParams(
     }
   }
 
-  // Dynamic VLAN Path Generation
+  // Dynamic VLAN Path Generation based on live discovered parameter tree
   const hasVlan = (profile.vlanEnabled !== false && profile.vlanId && Number(profile.vlanId) > 0) || profile.vlanMode === 'TAG';
   if (hasVlan && profile.vlanId) {
-    const slotMatch = basePath.match(/WANConnectionDevice\.(\d+)\./);
-    const slotNum = slotMatch ? slotMatch[1] : '2';
+    const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
+      ? Object.keys(rawParams)
+      : Array.from(normalizeParameterMap(rawParams).keys());
 
-    // Check if slot has discovered VLAN config, or find exact VLAN path from discovered tree
-    const targetVlanPath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`;
-    rawCandidateParams.push([targetVlanPath, Number(profile.vlanId), 'xsd:int']);
+    const slotMatch = basePath.match(/WANConnectionDevice\.(\d+)\./);
+    const slotNum = slotMatch ? slotMatch[1] : '1';
+
+    // Check if the CPE parameter tree has any known VLAN parameter for this slot/connection
+    const ctComVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\.X_CT-COM_WANEponLinkConfig\\.VLANIDMark`, 'i').test(k));
+    const ctComVlan2 = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\..*\\.X_CT-COM_VlanID`, 'i').test(k));
+    const hwVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\..*\\.X_HW_VLAN`, 'i').test(k));
+    const zteVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\.X_ZTE-COM_VLAN`, 'i').test(k));
+    const stdVlan = rawKeys.find(k => new RegExp(`${basePath.replace(/\./g, '\\.')}\\.VLANID`, 'i').test(k));
+
+    if (ctComVlan) {
+      rawCandidateParams.push([ctComVlan, Number(profile.vlanId), 'xsd:int']);
+    } else if (ctComVlan2) {
+      rawCandidateParams.push([ctComVlan2, Number(profile.vlanId), 'xsd:unsignedInt']);
+    } else if (hwVlan) {
+      rawCandidateParams.push([hwVlan, Number(profile.vlanId), 'xsd:unsignedInt']);
+    } else if (zteVlan) {
+      rawCandidateParams.push([zteVlan, Number(profile.vlanId), 'xsd:unsignedInt']);
+    } else if (stdVlan) {
+      rawCandidateParams.push([stdVlan, Number(profile.vlanId), 'xsd:unsignedInt']);
+    } else {
+      // If no tree has been discovered yet (initial bootstrap), try CT-COM default only if device is CTC/EPON
+      const isEpon = String(device?.modelName || '').toLowerCase().includes('epon') || String(device?.vendor || '').includes('CHINA');
+      if (isEpon) {
+        const targetVlanPath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`;
+        rawCandidateParams.push([targetVlanPath, Number(profile.vlanId), 'xsd:int']);
+      }
+    }
   }
 
   // NOTE: Requirement 5: MulticastVlan is explicitly removed from Internet WAN task!

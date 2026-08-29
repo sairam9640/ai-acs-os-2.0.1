@@ -2258,6 +2258,7 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     const removedName = targetProfile.name;
 
     // Queue TR-069 command to disable customer WAN connection on the physical ONT
+    const disablePayload = await buildTr069WanParams({ ...targetProfile, enableWan: false, pppoeUsername: '' }, device);
     await DeviceCommand.create({
       tenantId: device.tenantId,
       deviceId: device._id,
@@ -2265,16 +2266,11 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       parameters: {
         operation: 'DELETE_OR_DISABLE',
         targetProfile: removedName,
-        tr069ParamValues: [
+        tr069ParamValues: disablePayload.length > 0 ? disablePayload : [
           {
-            name: 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Enable',
+            name: 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Enable',
             value: 'false',
             type: 'xsd:boolean',
-          },
-          {
-            name: 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
-            value: '',
-            type: 'xsd:string',
           },
         ],
       },
