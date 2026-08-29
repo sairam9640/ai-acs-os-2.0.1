@@ -2800,7 +2800,7 @@ export const DeviceDetail: React.FC = () => {
                           <tr key={idx} className="hover:bg-[#F8FAFC]">
                             <td className="p-3.5 font-bold text-[#1677FF]">Ch {sv.channel}</td>
                             <td className="p-3.5 text-[#0F172A] font-bold">{sv.ssid}</td>
-                            <td className="p-3.5 text-[#64748B]">{sv.bssid || '00:E0:CA:01:02:03'}</td>
+                            <td className="p-3.5 text-[#64748B]">{sv.bssid || 'N/A'}</td>
                             <td className="p-3.5 text-[#6D28D9] font-medium">{sv.band}</td>
                             <td className="p-3.5 text-[#334155]">{sv.widthMhz} MHz</td>
                             <td className="p-3.5 font-bold text-[#047857]">{sv.rssiDbm} dBm</td>

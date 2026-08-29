@@ -1495,25 +1495,22 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
     if (!device.wanProfiles || device.wanProfiles.length === 0) {
-      device.wanProfiles = [{
-        name: 'BSNL_INTERNET',
-        connectionType: 'PPPoE',
-        serviceType: 'INTERNET',
-        serviceUsage: { internet: true, voip: false, tr069: false, iptvDhcp: false, iptvBridge: false, other: false },
-        vlanEnabled: true,
-        vlanId: 100,
-        vlanPriority8021p: 0,
-        mtu: 1492,
-        natEnabled: true,
-        firewallEnabled: true,
-        wanPortBindings: ['WAN1'],
-        lanPortBindings: ['LAN1', 'LAN2', 'LAN3', 'LAN4'],
-        ssidBindings: ['2.4GHz SSID-1', '5GHz SSID-1'],
-        status: 'Connected',
-        ipAddress: device.ipAddress || null,
-        isDefault: true,
-      }] as any;
-      await device.save();
+      const raw = device.rawParameters || {};
+      const discoveredConns = extractWANConnections(raw);
+      if (discoveredConns.length > 0) {
+        device.wanProfiles = discoveredConns.map((conn, idx) => ({
+          name: conn.serviceType ? `${conn.serviceType}_${conn.type === 'WANPPPConnection' ? 'PPPoE' : 'IP'}` : `WAN_${idx + 1}`,
+          connectionType: conn.type === 'WANPPPConnection' ? 'PPPoE' : 'IP_Routed',
+          serviceType: conn.serviceType || 'INTERNET',
+          status: conn.status || (device.status === 'online' ? 'Connected' : 'Connecting'),
+          pppoeUsername: conn.username || '',
+          ipAddress: conn.externalIP || device.ipAddress || null,
+          vlanId: conn.vlanId || 100,
+          vlanEnabled: Boolean(conn.vlanId),
+          isDefault: idx === 0,
+        })) as any;
+        await device.save();
+      }
     }
     const is2Port = /4410|PLATINUM[-_ ]?4410|GX[-_ ]?4410|EARTH|1010|1001/i.test(String(device.modelName || ''));
     
@@ -2146,13 +2143,13 @@ operatorRouter.post('/devices/:id/wan/sync-live', async (req: AuthenticatedReque
         wanPortBindings: p.wanPortBindings && p.wanPortBindings.length > 0 ? p.wanPortBindings : ['WAN1'],
         lanPortBindings: isManagement ? [] : (p.lanPortBindings && p.lanPortBindings.length > 0 ? p.lanPortBindings : (is2Port ? ['FE', 'GE'] : ['LAN1', 'LAN2'])),
         ssidBindings: isManagement ? [] : (p.ssidBindings && p.ssidBindings.length > 0 ? p.ssidBindings : ['SSID1']),
-        pppoeUsername: isManagement ? '' : (p.pppoeUsername || 'vaishnavi_vpn@tpartyoltmgmt.in'),
-        passwordConfigured: isManagement ? false : true,
+        pppoeUsername: isManagement ? '' : (p.pppoeUsername || ''),
+        passwordConfigured: isManagement ? false : Boolean(p.pppoePasswordEncrypted || p.pppoePassword),
         pppoePasswordMasked: '••••••••',
-        ipAddress: isManagement ? (p.ipAddress || device.ipAddress || '192.168.22.171') : (p.ipAddress || '10.19.224.32'),
-        subnetMask: p.subnetMask || (isManagement ? '255.255.255.0' : '0.0.0.0'),
-        gateway: p.gateway || (isManagement ? '192.168.22.1' : ''),
-        status: p.status || 'Connected',
+        ipAddress: isManagement ? (p.ipAddress || device.ipAddress || null) : (p.ipAddress || null),
+        subnetMask: p.subnetMask || (isManagement ? '255.255.255.0' : null),
+        gateway: p.gateway || null,
+        status: p.status || (device.status === 'online' ? 'Connected' : 'Connecting'),
         isDefault: isPppoe ? true : false,
         isProtected: isManagement,
       };
@@ -3141,17 +3138,33 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
     // Optical Telemetry Resolution (Dynamic Extraction + Live Calibrated Levels)
     const rxParamKey = rawKeys.find((k) => /Optical(Rx|Receive)Power|RxPower|ReceivePower/i.test(k));
     const txParamKey = rawKeys.find((k) => /Optical(Tx|Transmit)Power|TxPower|TransmitPower/i.test(k));
-    const rawRxVal = rxParamKey ? parseFloat(String(rawParams[rxParamKey])) : null;
-    const rawTxVal = txParamKey ? parseFloat(String(rawParams[txParamKey])) : null;
 
-    const rxDbm = d.opticalRxPower !== undefined && d.opticalRxPower !== null ? d.opticalRxPower : 
-                  (d.opticalPowerDbm !== undefined && d.opticalPowerDbm !== null ? d.opticalPowerDbm : 
-                  (d.currentRxPowerDbm !== undefined && d.currentRxPowerDbm !== null ? d.currentRxPowerDbm : 
-                  (!isNaN(rawRxVal as number) && rawRxVal !== null ? rawRxVal : (device.status === 'online' ? -19.4 : null))));
+    let rxDbm: number | null = null;
+    let txDbm: number | null = null;
 
-    const txDbm = d.opticalTxPower !== undefined && d.opticalTxPower !== null ? d.opticalTxPower : 
-                  (d.currentTxPowerDbm !== undefined && d.currentTxPowerDbm !== null ? d.currentTxPowerDbm : 
-                  (!isNaN(rawTxVal as number) && rawTxVal !== null ? rawTxVal : (device.status === 'online' ? 2.3 : null)));
+    if (d.currentRxPowerDbm !== undefined && d.currentRxPowerDbm !== null) {
+      rxDbm = d.currentRxPowerDbm;
+    } else if (d.opticalRxPower !== undefined && d.opticalRxPower !== null) {
+      rxDbm = d.opticalRxPower;
+    } else if (d.opticalPowerDbm !== undefined && d.opticalPowerDbm !== null) {
+      rxDbm = d.opticalPowerDbm;
+    } else if (rxParamKey && rawParams[rxParamKey] !== undefined && rawParams[rxParamKey] !== null && rawParams[rxParamKey] !== '') {
+      const norm = CwmpVendorProfiles.normalizeOpticalRx(d.manufacturer, rxParamKey, String(rawParams[rxParamKey]));
+      if (norm && norm.isReliable) {
+        rxDbm = norm.normalizedValue;
+      }
+    }
+
+    if (d.currentTxPowerDbm !== undefined && d.currentTxPowerDbm !== null) {
+      txDbm = d.currentTxPowerDbm;
+    } else if (d.opticalTxPower !== undefined && d.opticalTxPower !== null) {
+      txDbm = d.opticalTxPower;
+    } else if (txParamKey && rawParams[txParamKey] !== undefined && rawParams[txParamKey] !== null && rawParams[txParamKey] !== '') {
+      const norm = CwmpVendorProfiles.normalizeOpticalTx(d.manufacturer, txParamKey, String(rawParams[txParamKey]));
+      if (norm) {
+        txDbm = norm.normalizedValue;
+      }
+    }
     const sourceLabel = isUsp ? 'USP' : (rxDbm != null ? 'TR-069' : 'Cached');
 
     // Calculate Authoritative Quality Ratings
@@ -3334,70 +3347,46 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
     }
 
     connectedDevices = Array.from(clientMap.values());
+    const liveOnlineCount = connectedDevices.filter((c: any) => c.status === 'Online').length;
 
-    // 4. If device reports active connected host count (e.g. 8 hosts) but firmware doesn't expose individual hostnames, enumerate active lease inventory
-    if (connectedDevices.length === 0 && d.lanHostCount && d.lanHostCount > 0) {
-      const count = Math.min(d.lanHostCount, 32);
-      const baseOui = (device.macAddress ? device.macAddress.slice(0, 8) : 'A8:E2:07').toUpperCase();
-      connectedDevices = Array.from({ length: count }, (_, i) => {
-        const idx = i + 1;
-        const lastHex = (idx + 15).toString(16).padStart(2, '0').toUpperCase();
-        const secondHex = (idx * 7 % 90 + 10).toString(16).padStart(2, '0').toUpperCase();
-        const mac = `${baseOui}:${secondHex}:${lastHex}`;
-        const iface = idx % 2 === 0 ? '5GHz High-Speed' : '2.4GHz Primary';
+    // Build Complete Dynamic Parameter Discovery Tree directly from reported CPE parameters
+    let discoveryTree: any[] = [];
+    if (rawKeys.length > 0) {
+      discoveryTree = rawKeys.sort().map((path) => {
+        const val = rawParams[path];
+        const isWritable = /SSID|Password|KeyPassphrase|Channel|Enable|Username|VLAN|VlanID/i.test(path);
         return {
-          name: resolveFriendlyDeviceName(null, mac, iface),
-          hostname: `client-${idx}.lan`,
-          ip: `192.168.1.${100 + idx}`,
-          mac,
-          connectionType: iface,
-          interface: idx % 2 === 0 ? '5GHz Wi-Fi' : '2.4GHz Wi-Fi',
-          signal: idx === 1 ? '-42 dBm' : idx % 2 === 0 ? '-52 dBm' : '-61 dBm',
-          leaseTimeRemaining: '21h 30m',
+          path,
+          value: val !== undefined && val !== null ? String(val) : '',
+          type: typeof val === 'number' ? 'unsignedInt' : typeof val === 'boolean' ? 'boolean' : 'string',
+          writable: isWritable,
+          category: CwmpVendorProfiles.classifyParameter(path),
+          source: 'Physical CPE (TR-069)',
+          status: 'LIVE',
           lastSeen: device.lastInform || new Date(),
-          status: 'Online',
+        };
+      });
+    } else {
+      const cachedCapabilities = await SupportedParameterCache.find(
+        device.modelName
+          ? { modelName: device.modelName }
+          : { vendor: device.manufacturer || 'GENEXIS' }
+      ).sort({ parameterPath: 1 });
+
+      discoveryTree = cachedCapabilities.map((cap: any) => {
+        const val = rawParams[cap.parameterPath];
+        return {
+          path: cap.parameterPath,
+          value: val !== undefined && val !== null ? String(val) : '—',
+          type: 'string',
+          writable: cap.writable ?? false,
+          category: cap.category || CwmpVendorProfiles.classifyParameter(cap.parameterPath),
+          source: 'Capability Profile',
+          status: val !== undefined ? 'LIVE' : cap.status,
+          lastSeen: cap.lastVerified || device.lastInform || new Date(),
         };
       });
     }
-
-    const liveOnlineCount = connectedDevices.filter((c: any) => c.status === 'Online').length;
-
-    // Build Complete Dynamic Parameter Discovery Tree
-    const cachedCapabilities = await SupportedParameterCache.find({
-      $or: [
-        { modelName: device.modelName || 'Titanium-2122A' },
-        { vendor: device.manufacturer || 'GENEXIS' },
-      ],
-    }).sort({ parameterPath: 1 });
-
-    const discoveryTree = cachedCapabilities.length > 0
-      ? cachedCapabilities.map((cap: any) => {
-          const val = rawParams[cap.parameterPath];
-          return {
-            path: cap.parameterPath,
-            value: val !== undefined && val !== null ? String(val) : '—',
-            type: typeof val === 'number' ? 'unsignedInt' : typeof val === 'boolean' ? 'boolean' : 'string',
-            writable: cap.writable ?? /SSID|Password|KeyPassphrase|Channel|Enable|Username|VLAN|VlanID/i.test(cap.parameterPath),
-            category: cap.category || CwmpVendorProfiles.classifyParameter(cap.parameterPath),
-            source: 'Physical CPE (TR-069)',
-            status: val !== undefined ? 'LIVE' : cap.status,
-            lastSeen: cap.lastVerified || device.lastInform || new Date(),
-          };
-        })
-      : rawKeys.map((path) => {
-          const val = rawParams[path];
-          const isWritable = /SSID|Password|KeyPassphrase|Channel|Enable|Username|VLAN|VlanID/i.test(path);
-          return {
-            path,
-            value: val !== undefined && val !== null ? String(val) : '',
-            type: typeof val === 'number' ? 'unsignedInt' : typeof val === 'boolean' ? 'boolean' : 'string',
-            writable: isWritable,
-            category: CwmpVendorProfiles.classifyParameter(path),
-            source: 'Physical CPE (TR-069)',
-            status: 'LIVE',
-            lastSeen: device.lastInform || new Date(),
-          };
-        });
 
     // Real Ethernet Ports Status: Check how many LAN ports this hardware model has (Platinum-4410 has 2 ports: Port 1 GE, Port 2 FE)
     const is2PortModel = /4410|platinum[-_ ]?4410|gx[-_ ]?4410|earth|sy[-_ ]?gpon[-_ ]?1010|st[-_ ]?1001/i.test(`${device.manufacturer || ''} ${device.modelName || ''}`);
@@ -3501,19 +3490,6 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
                       (idx === 1 ? d.wifi24?.password : (idx === 2 || idx === 5) ? d.wifi5g?.password : null) ||
                       (customerObj?.wanConfig?.wifiPassword || null);
 
-        // Deterministic factory default passphrase resolution if firmware security masks plaintext key
-        if (!passVal && (ssidVal || idx === 1 || idx === 2)) {
-          const serialSuffix = (device.serialNumber ? device.serialNumber.replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase() : '8410');
-          const macSuffix = (device.macAddress ? device.macAddress.replace(/[: -]/g, '').slice(-6).toUpperCase() : 'A635F8');
-          if (device.manufacturer?.includes('GENEXIS') || device.modelName?.includes('Titanium') || device.modelName?.includes('Platinum') || device.modelName?.includes('EARTH')) {
-            passVal = `B43D08${serialSuffix}`;
-          } else if (device.modelName?.includes('RH821') || device.modelName?.includes('HGU')) {
-            passVal = `Pass@${serialSuffix}`;
-          } else {
-            passVal = `Pass@${macSuffix}`;
-          }
-        }
-
         const beaconVal = beaconKey ? rawParams[beaconKey] : (idx === 1 ? d.wifi24?.securityMode : 'WPA2-PSK');
         const isEnabled = enableKey ? (rawParams[enableKey] === '1' || rawParams[enableKey] === true || rawParams[enableKey] === 'true') : true;
 
@@ -3582,7 +3558,7 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
     const realWanUptimeSec = wanUptimeKey ? parseInt(String(rawParams[wanUptimeKey]), 10) : null;
     const realWanUptimeStr = !isNaN(realWanUptimeSec as number) && (realWanUptimeSec as number) > 0
       ? `${Math.floor((realWanUptimeSec as number) / 86400)}d ${Math.floor(((realWanUptimeSec as number) % 86400) / 3600)}h ${Math.floor(((realWanUptimeSec as number) % 3600) / 60)}m`
-      : null;
+      : (d.uptimeSeconds ? `${Math.floor(d.uptimeSeconds / 86400)}d ${Math.floor((d.uptimeSeconds % 86400) / 3600)}h` : null);
 
     const mainWanVlan = d.wanProfiles?.[0]?.vlanEnabled ? d.wanProfiles?.[0]?.vlanId : null;
 
@@ -3593,20 +3569,20 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
           id: device._id,
           deviceIdStr: (device as any).deviceIdStr || device.serialNumber,
           serialNumber: device.serialNumber,
-          model: device.modelName || 'Titanium-2122A',
-          vendor: device.manufacturer || 'GENEXIS',
-          oui: (device as any).oui || (device.serialNumber ? device.serialNumber.slice(0, 6).toUpperCase() : '00259E'),
-          firmwareVersion: device.softwareVersion || 'V1.0',
-          softwareVersion: device.softwareVersion || 'V1.0',
-          hardwareVersion: device.hardwareVersion || 'V1.0',
-          status: device.status || 'online',
-          uptime: realWanUptimeStr || '14d 8h 22m',
+          model: device.modelName || 'GPON ONT',
+          vendor: device.manufacturer || 'Generic',
+          oui: (device as any).oui || (device.serialNumber ? device.serialNumber.slice(0, 6).toUpperCase() : 'N/A'),
+          firmwareVersion: device.softwareVersion || 'N/A',
+          softwareVersion: device.softwareVersion || 'N/A',
+          hardwareVersion: device.hardwareVersion || 'N/A',
+          status: device.status || 'offline',
+          uptime: realWanUptimeStr || 'N/A',
           lastInform: device.lastInform || new Date(),
           lastSeen: device.lastInform || new Date(),
           ip: realWanIp || 'Unassigned',
           wanIp: realWanIp || 'Unassigned',
-          mac: (device.macAddress || '00:E0:CA:01:02:03').toUpperCase(),
-          wanMac: (device.macAddress || '00:E0:CA:01:02:03').toUpperCase(),
+          mac: (device.macAddress || 'N/A').toUpperCase(),
+          wanMac: (device.macAddress || 'N/A').toUpperCase(),
           protocol: protocolLabel,
           dataModel: dataModelLabel,
           quality: overallHealthScore != null && overallHealthScore >= 80 ? 'Excellent' : overallHealthScore != null && overallHealthScore >= 60 ? 'Good' : overallHealthScore != null ? 'Fair' : 'INSUFFICIENT_DATA',
@@ -3708,29 +3684,11 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
           mtu: d.wanProfiles?.[0]?.mtu || 1492,
           natEnabled: d.wanProfiles?.[0]?.natEnabled !== false,
           firewallEnabled: d.wanProfiles?.[0]?.firewallEnabled !== false,
-          profiles: (d.wanProfiles && d.wanProfiles.length > 0 ? d.wanProfiles : [{
-            name: 'BSNL_INTERNET',
-            connectionType: 'PPPoE',
-            serviceType: 'INTERNET',
-            serviceUsage: { internet: true, voip: false, tr069: false, iptvDhcp: false, iptvBridge: false, other: false },
-            vlanEnabled: false,
-            vlanId: null,
-            vlanPriority8021p: 0,
-            mtu: 1492,
-            natEnabled: true,
-            firewallEnabled: true,
-            wanPortBindings: ['WAN1'],
-            lanPortBindings: ['LAN1', 'LAN2', 'LAN3', 'LAN4'],
-            ssidBindings: ['2.4GHz SSID-1', '5GHz SSID-1'],
-            pppoeUsername: d.wanProfiles?.[0]?.pppoeUsername || '',
-            ipAddress: realWanIp || undefined,
-            status: device.status === 'online' ? 'Connected' : 'Inactive',
-            isDefault: true,
-          }]).map((p: any, idx: number) => ({
+          profiles: (d.wanProfiles && d.wanProfiles.length > 0 ? d.wanProfiles : []).map((p: any, idx: number) => ({
             _id: p._id ? String(p._id) : String(idx),
             index: idx,
-            name: p.name || `WAN_Profile_${idx + 1}`,
-            connectionType: p.connectionType || 'IP_Routed',
+            name: p.name || `WAN_${idx + 1}`,
+            connectionType: p.connectionType || 'PPPoE',
             serviceType: p.serviceType || 'INTERNET',
             serviceUsage: p.serviceUsage || {
               internet: true,
@@ -3747,12 +3705,12 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
             natEnabled: p.natEnabled !== undefined ? Boolean(p.natEnabled) : true,
             firewallEnabled: p.firewallEnabled !== undefined ? Boolean(p.firewallEnabled) : true,
             wanPortBindings: p.wanPortBindings || ['WAN1'],
-            lanPortBindings: p.lanPortBindings || ['LAN1', 'LAN2', 'LAN3', 'LAN4'],
+            lanPortBindings: p.lanPortBindings || (is2PortModel ? ['LAN1', 'LAN2'] : ['LAN1', 'LAN2', 'LAN3', 'LAN4']),
             ssidBindings: p.ssidBindings || ['2.4GHz SSID-1', '5GHz SSID-1'],
             pppoeUsername: p.pppoeUsername || realWanUser || '',
             passwordConfigured: Boolean(p.pppoePasswordEncrypted || p.pppoePassword),
             pppoePasswordMasked: '••••••••',
-            ipAddress: realWanIp || p.ipAddress || device.ipAddress || '192.168.22.170',
+            ipAddress: realWanIp || p.ipAddress || device.ipAddress || null,
             gateway: realWanGateway || p.gateway || null,
             dns: realWanDns || p.dns || null,
             subnetMask: realWanSubnet || p.subnetMask || null,
@@ -3763,10 +3721,7 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
         connectedDevices,
         lanHostCount: liveOnlineCount || (d.lanHostCount !== undefined ? d.lanHostCount : connectedDevices.length),
         liveOnlineCount,
-        siteSurvey: d.neighborWiFiSurvey && d.neighborWiFiSurvey.length > 0 ? d.neighborWiFiSurvey : [
-          { channel: 6, ssid: primary24?.ssid || 'Main Wi-Fi 2.4G', bssid: device.macAddress || '00:E0:CA:01:02:03', band: '2.4 GHz', widthMhz: 20, rssiDbm: -38, security: 'WPA2-PSK' },
-          { channel: 44, ssid: primary5g?.ssid || 'Main Wi-Fi 5G', bssid: device.macAddress || '00:E0:CA:01:02:04', band: '5.0 GHz', widthMhz: 80, rssiDbm: -42, security: 'WPA2-PSK' }
-        ],
+        siteSurvey: d.neighborWiFiSurvey && d.neighborWiFiSurvey.length > 0 ? d.neighborWiFiSurvey : [],
         diagnostics: d.diagnosticHistory || [],
         ports,
         portsStatus: 'LIVE',

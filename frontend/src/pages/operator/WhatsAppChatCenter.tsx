@@ -475,7 +475,7 @@ export const WhatsAppChatCenter: React.FC = () => {
                       <span className="text-[10px] text-slate-400 uppercase font-bold font-sans">TR-069 CPE Telemetry</span>
                       <p className="text-slate-800">Status: {selectedThread.customer?.deviceStatus}</p>
                       <p className="text-emerald-700 font-bold">
-                        RX Power: {selectedThread.customer?.opticalPower != null ? `${selectedThread.customer.opticalPower} dBm` : '-19.45 dBm'}
+                        RX Power: {selectedThread.customer?.opticalPower != null ? `${selectedThread.customer.opticalPower} dBm` : 'N/A'}
                       </p>
                     </div>
 

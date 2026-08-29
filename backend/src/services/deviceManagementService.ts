@@ -134,45 +134,74 @@ export class DeviceManagementService {
       previousState = { wanProfiles: device.wanProfiles };
     }
 
-    // Step 3: Build TR-069 Parameter List for physical CPE dispatch
+    // Step 3: Build TR-069 Parameter List for physical CPE dispatch.
+    // Bug 2 fix: Detect data model from device.rawParameters — never send TR-098 and TR-181 together.
+    const rawParamKeys = Object.keys((device as any).rawParameters || {});
+    const hasTr181Raw = rawParamKeys.some(k => k.startsWith('Device.'));
+    const hasTr098Raw = rawParamKeys.some(k => k.startsWith('InternetGatewayDevice.'));
+    // Default to TR-098 unless device exclusively reported TR-181
+    const useTr181 = hasTr181Raw && !hasTr098Raw;
+
     const tr069ParamValues: Array<[string, string, string]> = [];
     if (action === 'SET_WIFI_CONFIG') {
-      if (parameters.wifi24?.ssid) {
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', String(parameters.wifi24.ssid), 'xsd:string']);
-        tr069ParamValues.push(['Device.WiFi.SSID.1.SSID', String(parameters.wifi24.ssid), 'xsd:string']);
-      }
-      if (parameters.wifi24?.password) {
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase', String(parameters.wifi24.password), 'xsd:string']);
-        tr069ParamValues.push(['Device.WiFi.AccessPoint.1.Security.KeyPassphrase', String(parameters.wifi24.password), 'xsd:string']);
-      }
-      if (parameters.wifi24?.channel) {
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel', String(parameters.wifi24.channel), 'xsd:unsignedInt']);
-      }
-      if (parameters.wifi5g?.ssid) {
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID', String(parameters.wifi5g.ssid), 'xsd:string']);
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID', String(parameters.wifi5g.ssid), 'xsd:string']);
-        tr069ParamValues.push(['Device.WiFi.SSID.2.SSID', String(parameters.wifi5g.ssid), 'xsd:string']);
-      }
-      if (parameters.wifi5g?.password) {
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase', String(parameters.wifi5g.password), 'xsd:string']);
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase', String(parameters.wifi5g.password), 'xsd:string']);
-        tr069ParamValues.push(['Device.WiFi.AccessPoint.2.Security.KeyPassphrase', String(parameters.wifi5g.password), 'xsd:string']);
-      }
-      if (parameters.wifi5g?.channel) {
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel', String(parameters.wifi5g.channel), 'xsd:unsignedInt']);
+      if (useTr181) {
+        // TR-181 only
+        if (parameters.wifi24?.ssid) tr069ParamValues.push(['Device.WiFi.SSID.1.SSID', String(parameters.wifi24.ssid), 'xsd:string']);
+        if (parameters.wifi24?.password) tr069ParamValues.push(['Device.WiFi.AccessPoint.1.Security.KeyPassphrase', String(parameters.wifi24.password), 'xsd:string']);
+        if (parameters.wifi24?.channel) tr069ParamValues.push(['Device.WiFi.Radio.1.Channel', String(parameters.wifi24.channel), 'xsd:unsignedInt']);
+        if (parameters.wifi5g?.ssid) tr069ParamValues.push(['Device.WiFi.SSID.2.SSID', String(parameters.wifi5g.ssid), 'xsd:string']);
+        if (parameters.wifi5g?.password) tr069ParamValues.push(['Device.WiFi.AccessPoint.2.Security.KeyPassphrase', String(parameters.wifi5g.password), 'xsd:string']);
+        if (parameters.wifi5g?.channel) tr069ParamValues.push(['Device.WiFi.Radio.2.Channel', String(parameters.wifi5g.channel), 'xsd:unsignedInt']);
+      } else {
+        // TR-098 — detect actual 5GHz WLANConfiguration instance from rawParameters (never hardcode .5 AND .2 together)
+        const wlan5gInstance = rawParamKeys
+          .map(k => { const m = k.match(/WLANConfiguration\.(\d+)\.SSID$/i); return m ? parseInt(m[1], 10) : null; })
+          .filter((v): v is number => v !== null && v >= 2)
+          .sort((a, b) => a - b)[0] || 5; // default .5 if CPE hasn't reported yet
+
+        if (parameters.wifi24?.ssid) {
+          tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', String(parameters.wifi24.ssid), 'xsd:string']);
+        }
+        if (parameters.wifi24?.password) {
+          tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase', String(parameters.wifi24.password), 'xsd:string']);
+        }
+        if (parameters.wifi24?.channel) {
+          tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel', String(parameters.wifi24.channel), 'xsd:unsignedInt']);
+        }
+        if (parameters.wifi5g?.ssid) {
+          tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.SSID`, String(parameters.wifi5g.ssid), 'xsd:string']);
+        }
+        if (parameters.wifi5g?.password) {
+          tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.PreSharedKey.1.KeyPassphrase`, String(parameters.wifi5g.password), 'xsd:string']);
+        }
+        if (parameters.wifi5g?.channel) {
+          tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.Channel`, String(parameters.wifi5g.channel), 'xsd:unsignedInt']);
+        }
       }
     } else if (action === 'SET_WAN_CONFIG') {
-      tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Enable', 'true', 'xsd:boolean']);
+      // Bug 3 fix: Dynamically resolve the confirmed PPPoE path from device.rawParameters.
+      // The CPE may use WANConnectionDevice.2.WANPPPConnection.1 (or any other slot).
+      const confirmedPppKey = rawParamKeys.find(k =>
+        /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\.Username$/i.test(k)
+      );
+      let confirmedPppPrefix = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1';
+      if (confirmedPppKey) {
+        const m = confirmedPppKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
+        if (m) confirmedPppPrefix = m[1];
+      }
+      console.log(`[DevMgmt] Resolved PPPoE dispatch path: ${confirmedPppPrefix} (source: ${confirmedPppKey ? 'rawParameters' : 'default fallback'})`);
+
+      tr069ParamValues.push([`${confirmedPppPrefix}.Enable`, 'true', 'xsd:boolean']);
       if (parameters.pppoeUsername) {
-        tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username', String(parameters.pppoeUsername), 'xsd:string']);
+        tr069ParamValues.push([`${confirmedPppPrefix}.Username`, String(parameters.pppoeUsername), 'xsd:string']);
       }
       if (parameters.pppoePassword) {
-        tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Password', String(parameters.pppoePassword), 'xsd:string']);
+        tr069ParamValues.push([`${confirmedPppPrefix}.Password`, String(parameters.pppoePassword), 'xsd:string']);
       }
-      tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.NATEnabled', String(parameters.natEnabled !== false), 'xsd:boolean']);
-      tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionType', 'IP_Routed', 'xsd:string']);
+      tr069ParamValues.push([`${confirmedPppPrefix}.NATEnabled`, String(parameters.natEnabled !== false), 'xsd:boolean']);
+      // Note: ConnectionType is read-only on WANPPPConnection — never set it or CPE returns Fault 9003.
       if (parameters.vlanId) {
-        tr069ParamValues.push(['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.VLANID', String(parameters.vlanId), 'xsd:unsignedInt']);
+        tr069ParamValues.push([`${confirmedPppPrefix}.VLANID`, String(parameters.vlanId), 'xsd:unsignedInt']);
       }
     }
 
@@ -200,75 +229,72 @@ export class DeviceManagementService {
       rollbackOnFailure: true,
     });
 
-    // Step 4: Apply state to Device and Customer records
-    const verification = await this.applyAndVerifyDeviceState(device, action, parameters);
 
-    if (verification.success) {
-      command.status = 'success';
-      command.completedAt = new Date();
-      command.verifiedAt = new Date();
-      command.verificationResult = {
-        verified: true,
-        readBackValues: verification.readBackValues,
-        mismatches: [],
-      };
-      await command.save();
-
-      // Trigger Connection Request so physical ONT synchronizes immediately
-      triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
-
-      // Record Audit Log
-      await recordAuditLog({
-        tenantId,
-        actorId: user.id,
-        actorEmail: user.email,
-        actorRole: user.role,
-        action: `DEVICE_COMMAND_${action}`,
-        targetResource: 'Device',
-        targetId: device._id.toString(),
-        targetIdentifier: device.serialNumber,
-        beforeState: previousState,
-        afterState: parameters,
-        correlationId,
-        result: 'SUCCESS',
-      });
-
-      return {
-        commandId: command._id.toString(),
-        status: 'success',
-        message: `Command ${action} executed and verified successfully on device ${device.serialNumber}.`,
-        verified: true,
-        readBackValues: verification.readBackValues,
-      };
-    } else {
-      command.status = 'failed';
-      command.completedAt = new Date();
-      command.errorMessage = verification.errorMessage || 'Verification readback failed.';
-      await command.save();
-
-      await recordAuditLog({
-        tenantId,
-        actorId: user.id,
-        actorEmail: user.email,
-        actorRole: user.role,
-        action: `DEVICE_COMMAND_${action}`,
-        targetResource: 'Device',
-        targetId: device._id.toString(),
-        targetIdentifier: device.serialNumber,
-        beforeState: previousState,
-        afterState: parameters,
-        correlationId,
-        result: 'FAILURE',
-        failureReason: verification.errorMessage,
-      });
-
-      return {
-        commandId: command._id.toString(),
-        status: 'failed',
-        message: `Command execution failed verification: ${verification.errorMessage}`,
-        verified: false,
-      };
+    // Bug 1 fix: Do NOT pre-mark the command 'success' here. Only do an optimistic DB pre-apply
+    // for immediate UI feedback. The real lifecycle is:
+    //   cwmpService.checkPendingRpcOrPoll → SetParameterValues → Verification GPV → 'verified'/'verification_failed'
+    try {
+      if (action === 'SET_WIFI_CONFIG') {
+        if (parameters.wifi24) device.wifi24 = { ...device.wifi24, ...parameters.wifi24 } as any;
+        if (parameters.wifi5g) device.wifi5g = { ...device.wifi5g, ...parameters.wifi5g } as any;
+        await device.save();
+      } else if (action === 'SET_WAN_CONFIG') {
+        if (!device.wanProfiles || device.wanProfiles.length === 0) {
+          (device.wanProfiles as any) = [{
+            name: 'Internet_PPPoE',
+            connectionType: 'PPPoE',
+            serviceType: 'INTERNET',
+            status: 'Connecting',
+            vlanId: Number(parameters.vlanId) || 100,
+            pppoeUsername: parameters.pppoeUsername || '',
+          }];
+        } else {
+          if (parameters.vlanId !== undefined) device.wanProfiles[0].vlanId = Number(parameters.vlanId);
+          if (parameters.pppoeUsername !== undefined) (device.wanProfiles[0] as any).pppoeUsername = parameters.pppoeUsername;
+          if (parameters.pppoePassword) (device.wanProfiles[0] as any).pppoePasswordEncrypted = parameters.pppoePassword;
+        }
+        device.markModified('wanProfiles');
+        await device.save();
+        if (device.customerId) {
+          await Customer.updateOne(
+            { _id: device.customerId },
+            { $set: {
+              'wanConfig.pppoeUsername': (device.wanProfiles[0] as any).pppoeUsername,
+              'wanConfig.vlanId': device.wanProfiles[0].vlanId,
+            }}
+          ).catch(() => {});
+        }
+      }
+    } catch (preApplyErr: any) {
+      console.warn(`[DevMgmt] Optimistic DB pre-apply failed (non-fatal, CWMP will still proceed): ${preApplyErr.message}`);
     }
+
+    // Command stays in 'queued' status — cwmpService picks it up on the next CWMP empty POST.
+    // Trigger immediate Connection Request so the ONT calls back as soon as possible.
+    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+
+    await recordAuditLog({
+      tenantId,
+      actorId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      action: `DEVICE_COMMAND_${action}`,
+      targetResource: 'Device',
+      targetId: device._id.toString(),
+      targetIdentifier: device.serialNumber,
+      beforeState: previousState,
+      afterState: parameters,
+      correlationId,
+      result: 'SUCCESS',
+    });
+
+    console.log(`[DevMgmt] Command ${command._id} (${action}) queued for CWMP delivery to ${device.serialNumber}.`);
+    return {
+      commandId: command._id.toString(),
+      status: 'queued',
+      message: `Command ${action} queued for ${device.serialNumber}. Changes will be applied and verified at next CWMP session.`,
+      verified: false,
+    };
   }
 
   /**

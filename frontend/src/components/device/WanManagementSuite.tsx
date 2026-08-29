@@ -187,7 +187,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
 
   const initDefaultProfile = () => {
     const defaultProf: WanProfileData = {
-      name: '3_INTERNET_R_VID_488',
+      name: 'New WAN Connection',
       transMode: 'PON',
       mode: 'Route',
       enableWan: true,
@@ -199,7 +199,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       serviceType: 'INTERNET',
       vlanMode: 'TAG',
       vlanEnabled: true,
-      vlanId: 488,
+      vlanId: 100,
       vlanPriority8021p: 0,
       multicastVlanId: -1,
       enableDhcpServer: true,
@@ -209,16 +209,16 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       primaryDns: '',
       secondaryDns: '',
       wanPortBindings: ['WAN1'],
-      lanPortBindings: is2PortModel ? ['FE', 'GE'] : ['LAN1', 'LAN2'],
+      lanPortBindings: is2PortModel ? ['FE', 'GE'] : ['LAN1', 'LAN2', 'LAN3', 'LAN4'],
       ssidBindings: ['SSID1'],
-      pppoeUsername: 'vaishnavi_vpn@tpartyoltmgmt.in',
+      pppoeUsername: '',
       pppoePassword: '',
       serviceName: '',
       enablePppoeBridgeMode: false,
-      ipAddress: '10.19.224.32',
+      ipAddress: '',
       subnetMask: '0.0.0.0',
       gateway: '',
-      status: 'Connected',
+      status: 'Connecting',
       isDefault: true,
     };
     setProfiles([defaultProf]);

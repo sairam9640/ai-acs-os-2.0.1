@@ -222,7 +222,7 @@ export class WhatsAppBotService {
       lower === 'help' ||
       lower === '0'
     ) {
-      const rxPower = device?.currentRxPowerDbm != null ? `${device.currentRxPowerDbm} dBm` : '-19.45 dBm';
+      const rxPower = device?.currentRxPowerDbm != null ? `${device.currentRxPowerDbm} dBm` : 'Not Reported';
       const devStatus = device?.status === 'online' ? '🟢 Online' : '🔴 Offline';
 
       replyText =
@@ -230,7 +230,7 @@ export class WhatsAppBotService {
         `*${tenantName} Self-Service Bot*\n\n` +
         `📱 *Account #:* \`${customer.accountNumber}\`\n` +
         `📦 *Active Plan:* ${customer.servicePlan?.name || 'Broadband Plan'} (₹${customer.servicePlan?.price || 699}/mo)\n` +
-        `📡 *ONT Device:* ${device?.vendor || device?.manufacturer || 'Genexis'} (${devStatus}, ${rxPower})\n\n` +
+        `📡 *ONT Device:* ${device?.vendor || device?.manufacturer || 'ONT'} (${devStatus}, ${rxPower})\n\n` +
         `Please choose an option by replying with the number:\n\n` +
         `1️⃣ *View Wi-Fi Name (SSID) & Password*\n` +
         `2️⃣ *Change Wi-Fi Name (SSID)*\n` +
@@ -245,17 +245,17 @@ export class WhatsAppBotService {
     } else if (session.currentStep === 'MAIN_MENU') {
       if (text === '1') {
         // 1. View Wi-Fi Details
-        const wifi24 = device?.wifi24 || device?.wifi24g || { ssid: 'ApexFiber_2.4G', password: '••••••••' };
-        const wifi5g = device?.wifi5g || { ssid: 'ApexFiber_5G', password: '••••••••' };
-        const pass = wifi5g.password || wifi24.password || customer.wanConfig?.pppoePassword || 'SecureWifiPass2026';
+        const wifi24 = device?.wifi24 || device?.wifi24g || { ssid: 'Not Configured', password: '••••••••' };
+        const wifi5g = device?.wifi5g || { ssid: 'Not Configured', password: '••••••••' };
+        const pass = wifi5g.password || wifi24.password || customer.wanConfig?.pppoePassword || 'Masked / Protected by CPE';
 
         replyText =
           `📶 *Your Current Wi-Fi Configuration:*\n\n` +
-          `• *2.4GHz SSID:* \`${wifi24.ssid || 'ApexFiber_2.4G'}\`\n` +
-          `• *5GHz SSID:* \`${wifi5g.ssid || 'ApexFiber_5G_Fast'}\`\n` +
+          `• *2.4GHz SSID:* \`${wifi24.ssid || 'Not Configured'}\`\n` +
+          `• *5GHz SSID:* \`${wifi5g.ssid || 'Not Configured'}\`\n` +
           `• *Wi-Fi Password:* \`${pass}\`\n` +
-          `• *Security Mode:* WPA2-PSK (AES)\n` +
-          `• *Optical Signal:* ${device?.currentRxPowerDbm != null ? `${device.currentRxPowerDbm} dBm` : '-19.45 dBm (Healthy)'}\n\n` +
+          `• *Security Mode:* WPA2-PSK\n` +
+          `• *Optical Signal:* ${device?.currentRxPowerDbm != null ? `${device.currentRxPowerDbm} dBm` : 'Not Reported'}\n\n` +
           `👉 _Reply *2* to change Wi-Fi Name, *3* to change Password, or *Menu* for options._`;
 
         nextStep = 'MAIN_MENU';
@@ -277,48 +277,52 @@ export class WhatsAppBotService {
         nextStep = 'AWAITING_NEW_PASSWORD';
       } else if (text === '4') {
         // 4. View Connected Devices
-        const clients: IConnectedClient[] = device?.connectedClients || [
-          { mac: 'F4:D4:88:5A:21:40', hostname: 'MacBook-Pro-M3', ip: '192.168.1.104', interfaceType: '5GHz', signalDbm: -42, connected: true, isBlocked: false, lastSeen: new Date() },
-          { mac: '90:2B:D2:7C:E1:92', hostname: 'iPhone-15-Pro', ip: '192.168.1.108', interfaceType: '5GHz', signalDbm: -49, connected: true, isBlocked: false, lastSeen: new Date() },
-          { mac: '64:16:66:3A:88:12', hostname: 'LG-Smart-OLED-TV', ip: '192.168.1.112', interfaceType: '2.4GHz', signalDbm: -58, connected: true, isBlocked: false, lastSeen: new Date() },
-          { mac: 'D8:3B:BF:14:02:AA', hostname: 'PlayStation-5', ip: '192.168.1.120', interfaceType: 'Ethernet', signalDbm: 0, connected: true, isBlocked: false, lastSeen: new Date() },
-        ];
+        const clients: IConnectedClient[] = device?.connectedClients || [];
 
-        let clientListStr = '';
-        clients.forEach((c, idx) => {
-          const statusIcon = c.isBlocked ? '🚫 (Blocked)' : '🟢 (Active)';
-          clientListStr += `${idx + 1}. *${c.hostname}* (${c.ip})\n   └ Band: ${c.interfaceType} • MAC: \`${c.mac}\` ${statusIcon}\n`;
-        });
+        if (clients.length === 0) {
+          replyText =
+            `📱 *Connected Devices:*\n\n` +
+            `No active client devices currently detected on this ONT.\n\n` +
+            `👉 _Reply *Menu* for main options._`;
+        } else {
+          let clientListStr = '';
+          clients.forEach((c, idx) => {
+            const statusIcon = c.isBlocked ? '🚫 (Blocked)' : '🟢 (Active)';
+            clientListStr += `${idx + 1}. *${c.hostname}* (${c.ip || 'DHCP'})\n   └ Band: ${c.interfaceType} • MAC: \`${c.mac}\` ${statusIcon}\n`;
+          });
 
-        replyText =
-          `📱 *Connected Devices (${clients.length} Devices Found):*\n\n` +
-          `${clientListStr}\n` +
-          `👉 _Reply *5* to Block or Unblock a device, or *Menu* for options._`;
+          replyText =
+            `📱 *Connected Devices (${clients.length} Devices Found):*\n\n` +
+            `${clientListStr}\n` +
+            `👉 _Reply *5* to Block or Unblock a device, or *Menu* for options._`;
+        }
 
         nextStep = 'MAIN_MENU';
       } else if (text === '5') {
         // 5. Block / Unblock Device Prompt
-        const clients: IConnectedClient[] = device?.connectedClients || [
-          { mac: 'F4:D4:88:5A:21:40', hostname: 'MacBook-Pro-M3', ip: '192.168.1.104', interfaceType: '5GHz', signalDbm: -42, connected: true, isBlocked: false, lastSeen: new Date() },
-          { mac: '90:2B:D2:7C:E1:92', hostname: 'iPhone-15-Pro', ip: '192.168.1.108', interfaceType: '5GHz', signalDbm: -49, connected: true, isBlocked: false, lastSeen: new Date() },
-          { mac: '64:16:66:3A:88:12', hostname: 'LG-Smart-OLED-TV', ip: '192.168.1.112', interfaceType: '2.4GHz', signalDbm: -58, connected: true, isBlocked: false, lastSeen: new Date() },
-          { mac: 'D8:3B:BF:14:02:AA', hostname: 'PlayStation-5', ip: '192.168.1.120', interfaceType: 'Ethernet', signalDbm: 0, connected: true, isBlocked: false, lastSeen: new Date() },
-        ];
+        const clients: IConnectedClient[] = device?.connectedClients || [];
 
-        let optionsStr = '';
-        clients.forEach((c, idx) => {
-          const action = c.isBlocked ? 'Unblock' : 'Block';
-          optionsStr += `• Reply *${idx + 1}* to ${action} *${c.hostname}* (\`${c.mac}\`)\n`;
-        });
+        if (clients.length === 0) {
+          replyText =
+            `🚫 *Block / Unblock Device:*\n\n` +
+            `No registered client devices found on your router.\n` +
+            `You can reply with the exact *MAC Address* (e.g. \`CC:F7:35:91:19:9D\`) to block it directly.\n\n` +
+            `_Reply *Menu* to return._`;
+        } else {
+          let optionsStr = '';
+          clients.forEach((c, idx) => {
+            const action = c.isBlocked ? 'Unblock' : 'Block';
+            optionsStr += `• Reply *${idx + 1}* to ${action} *${c.hostname}* (\`${c.mac}\`)\n`;
+          });
+
+          replyText =
+            `🚫 *Block / Unblock Client Device:*\n\n` +
+            `${optionsStr}\n` +
+            `Or reply with the exact *MAC Address* (e.g. \`CC:F7:35:91:19:9D\`).\n` +
+            `_Reply *Menu* to cancel._`;
+        }
 
         session.tempData.clientList = clients.map((c) => ({ mac: c.mac, hostname: c.hostname, isBlocked: c.isBlocked }));
-
-        replyText =
-          `🚫 *Block / Unblock Client Device:*\n\n` +
-          `${optionsStr}\n` +
-          `Or reply with the exact *MAC Address* (e.g. \`F4:D4:88:5A:21:40\`).\n` +
-          `_Reply *Menu* to cancel._`;
-
         nextStep = 'AWAITING_BLOCK_DEVICE';
       } else if (text === '6') {
         // 6. Reboot ONT Terminal

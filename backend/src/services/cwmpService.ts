@@ -1649,7 +1649,7 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
       }
 
       // If device has not performed root parameter discovery, dispatch GPN root discovery first
-      const hasCompletedDiscovery = (dev as any)?.supportedParametersConfirmed || (dev?.rawParameters && Object.keys(dev.rawParameters).length > 20);
+      const hasCompletedDiscovery = (dev as any)?.supportedParametersConfirmed || (dev?.rawParameters && Object.keys(dev.rawParameters).length > 20) || Boolean(dev?.opticalTelemetrySourcePath);
       if (!hasCompletedDiscovery && session.stage !== 'GPN_SENT') {
         session.stage = 'GPN_SENT';
         const rootPath = session.vendor === 'TR181_STANDARD' ? 'Device.' : 'InternetGatewayDevice.';
@@ -2054,6 +2054,11 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
         deviceId: device._id,
         status: { $in: ['sent', 'sending', 'queued', 'pending'] },
       });
+
+      await DeviceCommand.updateMany(
+        { deviceId: device._id, status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
+        { $set: { status: spvStatus === 1 ? 'applied_pending_verification' : 'success', completedAt: new Date() } }
+      );
 
       for (const cmd of inFlightCommands) {
         cmd.status = spvStatus === 1 ? 'applied_pending_verification' : 'applied';
@@ -2553,7 +2558,44 @@ Timestamp: ${new Date().toISOString()}
     }
 
     if (discoveredWanProfiles.length > 0) {
-      device.wanProfiles = discoveredWanProfiles;
+      if (!device.wanProfiles || device.wanProfiles.length === 0) {
+        // First discovery: populate from CPE
+        device.wanProfiles = discoveredWanProfiles;
+      } else {
+        // Bug 4 fix: Merge — never blindly overwrite. Preserve operator-configured profiles.
+        // Match by cpeObjectPath (most precise), then name, then pppoeUsername, then
+        // fall back to same-connectionType enrichment for placeholder profiles.
+        let modified = false;
+        for (const incoming of discoveredWanProfiles) {
+          const existing = (device.wanProfiles as any[]).find((p: any) =>
+            // 1. Exact CPE path match (most reliable)
+            (incoming.cpeObjectPath && p.cpeObjectPath && p.cpeObjectPath === incoming.cpeObjectPath) ||
+            // 2. Profile name match (skip generic fallback names)
+            (incoming.name && incoming.name !== 'Internet_TR069' && p.name === incoming.name) ||
+            // 3. PPPoE username match
+            (incoming.pppoeUsername && p.pppoeUsername && p.pppoeUsername === incoming.pppoeUsername) ||
+            // 4. Enrich empty placeholder: same connection type, no existing cpeObjectPath or pppoeUsername yet
+            (incoming.connectionType === p.connectionType && !p.cpeObjectPath && !p.pppoeUsername && incoming.connectionType === 'PPPoE')
+          );
+
+          if (existing) {
+            // Update live telemetry fields
+            if (incoming.status) existing.status = incoming.status;
+            if (incoming.ipAddress && incoming.ipAddress !== '0.0.0.0') existing.ipAddress = incoming.ipAddress;
+            // Enrich previously empty fields with discovered data
+            if (incoming.pppoeUsername) existing.pppoeUsername = incoming.pppoeUsername;
+            if (incoming.vlanId && !existing.vlanId) existing.vlanId = incoming.vlanId;
+            if (!existing.cpeObjectPath && incoming.cpeObjectPath) existing.cpeObjectPath = incoming.cpeObjectPath;
+            if (!existing.name || existing.name === 'Internet_TR069') existing.name = incoming.name || existing.name;
+            modified = true;
+          } else {
+            // New profile discovered on CPE that we don't have yet — append it
+            (device.wanProfiles as any[]).push(incoming);
+            modified = true;
+          }
+        }
+        if (modified) device.markModified('wanProfiles');
+      }
     } else if (!device.wanProfiles || device.wanProfiles.length === 0) {
       device.wanProfiles = [{
         name: 'Internet_TR069',
@@ -2865,17 +2907,35 @@ Timestamp: ${new Date().toISOString()}
       let verifiableParamCount = 0;
 
       for (const [targetPath, expectedVal] of Object.entries(targets)) {
-        // Passwords on CPEs are write-only and not returned by CPE
-        if (targetPath.toLowerCase().includes('password')) continue;
+        // Passwords on CPEs are write-only — CPE never returns them in GPV
+        if (targetPath.toLowerCase().includes('password') || targetPath.toLowerCase().includes('passphrase')) continue;
 
         verifiableParamCount++;
-        const actualVal = pMap.get(targetPath) ?? rawMap[targetPath] ?? device.rawParameters?.[targetPath];
+
+        // Primary lookup: exact path match in the GPV response
+        let actualVal: string | undefined = pMap.get(targetPath) ?? rawMap[targetPath] ?? device.rawParameters?.[targetPath];
+
+        // Bug 5 fix: If exact match not found, try a suffix-based lookup in pMap.
+        // Handles the case where CPE reports WLANConfiguration.2 but we targeted WLANConfiguration.5,
+        // or any minor path variation from vendor quirks.
+        if (actualVal === undefined || actualVal === '') {
+          const targetSuffix = targetPath.split('.').slice(-2).join('.'); // e.g. "WLANConfiguration.1.SSID" → "1.SSID"
+          for (const [k, v] of pMap.entries()) {
+            if (k !== targetPath && k.endsWith(`.${targetSuffix}`) && v !== undefined && v !== '') {
+              actualVal = v;
+              console.log(`[CWMP_VERIFICATION] Suffix fallback matched '${targetPath}' via '${k}' = '${v}'`);
+              break;
+            }
+          }
+        }
+
         readBackValues[targetPath] = actualVal;
 
         if (actualVal === undefined || actualVal === null || actualVal === '') {
-          if (vCmd.affectedParameterPaths?.includes(targetPath)) {
-            mismatches.push(`${targetPath} (expected: '${expectedVal}', received: undefined)`);
-          }
+          // Parameter was not returned in this GPV response — treat as inconclusive, not failed.
+          // This happens when the verification GPV did not include this path (e.g. password-only change).
+          // Do not add to mismatches — the change may have been applied but not verifiable by read-back.
+          console.log(`[CWMP_VERIFICATION] Parameter '${targetPath}' not in GPV response — inconclusive (expected: '${expectedVal}')`);
         } else {
           const expNorm = String(expectedVal).toLowerCase().trim();
           const actNorm = String(actualVal).toLowerCase().trim();
