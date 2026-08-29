@@ -691,7 +691,7 @@ export class CwmpVendorProfiles {
         !/^client[-_]?\d+$/i.test(clean) &&
         !/^host[-_]?\d+$/i.test(clean) &&
         !/^unknown$/i.test(clean) &&
-        !/^device[-_]?\([a-f0-9]+\)$/i.test(clean) &&
+        !/^(device|host|wireless client|wired client|lan client)\s*\([a-f0-9:]+\)$/i.test(clean) &&
         clean !== '0.0.0.0'
       ) {
         return clean;
@@ -707,6 +707,9 @@ export class CwmpVendorProfiles {
 
         const brandMap: Record<string, string> = {
           // Apple (iPhone, iPad, MacBook)
+          'CCF735': 'Apple iPhone / iPad',
+          '3C64CF': 'Apple MacBook / Device',
+          '74563C': 'Apple iPhone / Device',
           'F01898': 'Apple iPhone',
           'BCD074': 'Apple iPad',
           'AC6784': 'Apple MacBook',
@@ -728,6 +731,8 @@ export class CwmpVendorProfiles {
           'ACBC32': 'Apple MacBook',
           '2CF0EE': 'Apple Device',
           // Samsung Galaxy & Smart Things
+          '085BD6': 'Samsung Galaxy Phone',
+          '5CE931': 'Samsung Galaxy Device',
           '5CE91E': 'Samsung Galaxy',
           '88665A': 'Samsung Smart Device',
           '34145F': 'Samsung Galaxy Phone',
@@ -746,6 +751,7 @@ export class CwmpVendorProfiles {
           '00166C': 'Samsung Mobile',
           '001A8A': 'Samsung Mobile',
           // Xiaomi / Redmi / POCO
+          'D84489': 'Xiaomi Redmi Smartphone',
           '94652D': 'Xiaomi / Redmi Phone',
           '68DFDD': 'Xiaomi Redmi Smartphone',
           '7C49EB': 'Xiaomi POCO Phone',
@@ -758,6 +764,7 @@ export class CwmpVendorProfiles {
           '7811DC': 'Xiaomi Smartphone',
           '8035C1': 'Xiaomi Device',
           // OnePlus / Oppo / Realme
+          'A842A1': 'OPPO / Realme Smartphone',
           '6490C1': 'OnePlus Smartphone',
           '74D21D': 'OnePlus Phone',
           '9C2EA1': 'Oppo Smartphone',
@@ -773,6 +780,8 @@ export class CwmpVendorProfiles {
           'C07E40': 'Vivo Phone',
           'DC729B': 'Vivo Smartphone',
           'E4AAEA': 'Vivo Phone',
+          // Shenzhen Bilian / MediaTek / Smart IoT
+          '40AE30': 'Smart Home IoT Device',
           // Intel / Laptops / PCs
           '001B77': 'Intel Laptop / PC',
           '001E64': 'Intel Wireless NIC',

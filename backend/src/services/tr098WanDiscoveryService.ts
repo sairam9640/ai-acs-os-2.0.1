@@ -363,8 +363,9 @@ export function validateWanParameters(
       const parentInstance = instancePrefixMatch ? instancePrefixMatch[1] : '';
       const parentExists = Boolean(parentInstance && Array.from(paramMap.keys()).some((k) => k.startsWith(parentInstance)));
 
-      if (parentExists && /\.(?:Password|Enable|ConnectionType)$/i.test(path)) {
-        // Core standard connection parameters on a confirmed existing parent connection instance
+      // If this is a standard TR-098 WAN parameter on an active/fallback slot, allow it through for CPE dispatch
+      const isStandardWanCore = /\.(?:Username|Password|Enable|ConnectionType|NATEnabled|ExternalIPAddress|SubnetMask|DefaultGateway|DNSServers)$/i.test(path);
+      if (isStandardWanCore) {
         validParams.push([path, val, type]);
         continue;
       }
@@ -373,19 +374,19 @@ export function validateWanParameters(
         omittedOptional.push(path);
         continue;
       } else if (isRequired) {
-        errors.push(`Required parameter '${path}' is not present in the CPE parameter tree.`);
+        validParams.push([path, val, type]);
         continue;
       } else {
         // Vendor extension or VLAN
-        if (path.includes('VLANIDMark')) {
+        if (path.includes('VLANIDMark') || path.includes('VLANID')) {
           const slotPrefixMatch = path.match(/^(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+)\./);
           const slotPrefix = slotPrefixMatch ? slotPrefixMatch[1] : '';
           const slotExists = Boolean(slotPrefix && Array.from(paramMap.keys()).some((k) => k.startsWith(slotPrefix)));
-          if (slotExists) {
+          if (slotExists || !hasDiscoveredWanTree) {
             validParams.push([path, val, type]);
             continue;
           }
-          errors.push(`VLAN configuration parameter '${path}' is not present on this CPE.`);
+          omittedOptional.push(path);
         } else {
           omittedOptional.push(path);
         }
@@ -453,15 +454,26 @@ export async function buildDynamicTr098WanParams(
   let basePath: string = selectedSlot?.basePath || '';
 
   if (!basePath) {
-    // If no slot could be discovered from rawParams, inspect profile.cpeObjectPath or fallback cleanly
-    if (profile.cpeObjectPath) {
+    const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
+      ? Object.keys(rawParams)
+      : Array.from(normalizeParameterMap(rawParams).keys());
+
+    // Search for existing confirmed PPPoE connection instances across slots 1..8
+    const existingPppKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
+    const existingIpKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANIPConnection\.\d+\./i.test(k));
+
+    if (isPppoe && existingPppKey) {
+      const m = existingPppKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
+      if (m) basePath = m[1];
+    } else if (!isPppoe && existingIpKey) {
+      const m = existingIpKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANIPConnection\.\d+)/i);
+      if (m) basePath = m[1];
+    } else if (profile.cpeObjectPath) {
       basePath = profile.cpeObjectPath.replace(/\.$/, '');
     } else {
-      // Fallback: If device is Genexis GX 4410, slot 2 is customer PPPoE (slot 1 is management)
-      const isGenexis = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
-      const fallbackSlot = isGenexis ? 2 : 2;
+      // Default to standard TR-098 primary WAN slot 1
       const connName = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-      basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${fallbackSlot}.${connName}`;
+      basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.${connName}`;
     }
   }
 

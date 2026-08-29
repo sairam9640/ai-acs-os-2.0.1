@@ -1816,8 +1816,16 @@ ${stringElements}
       /(LANDevice\.\d+\.Hosts\.Host\.\d+\.(IPAddress|MACAddress|HostName|UserHostName|ClientID|Active|InterfaceType|LeaseTimeRemaining)|LANDevice\.\d+\.WLANConfiguration\.\d+\.AssociatedDevice\.\d+\.(AssociatedDeviceMACAddress|AssociatedDeviceIPAddress|AssociatedDeviceHostName|AssociatedDeviceAuthenticationState)|Device\.Hosts\.Host\.\d+\.(IPAddress|PhysAddress|HostName|Active|InterfaceType))/i.test(n) &&
       !n.endsWith('.')
     );
-    for (const hp of hostParams) {
-      if (confirmedParams.length < 96 && !confirmedParams.includes(hp)) confirmedParams.push(hp);
+    if (hostParams.length > 0) {
+      for (const hp of hostParams) {
+        if (confirmedParams.length < 96 && !confirmedParams.includes(hp)) confirmedParams.push(hp);
+      }
+    } else if (lanHosts || names.some(n => /LANDevice\.1\.Hosts\./i.test(n))) {
+      for (let h = 1; h <= 16; h++) {
+        confirmedParams.push(`InternetGatewayDevice.LANDevice.1.Hosts.Host.${h}.HostName`);
+        confirmedParams.push(`InternetGatewayDevice.LANDevice.1.Hosts.Host.${h}.IPAddress`);
+        confirmedParams.push(`InternetGatewayDevice.LANDevice.1.Hosts.Host.${h}.MACAddress`);
+      }
     }
 
     if (session && confirmedParams.length > 0) {
