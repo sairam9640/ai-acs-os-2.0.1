@@ -420,11 +420,11 @@ export const Customer360: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider">WAN & IP Session</span>
                 <p className="text-xs font-mono font-bold text-slate-200 truncate">
-                  {customer?.wanConfig?.pppoeUsername || `${customer?.accountNumber?.toLowerCase()}@isp`}
+                  {device?.wanProfiles?.[0]?.pppoeUsername || device?.wanProfiles?.[0]?.username || device?.pppoeUsername || customer?.wanConfig?.pppoeUsername || `${customer?.accountNumber?.toLowerCase()}@isp`}
                 </p>
                 <div className="text-[11px] text-slate-300 font-mono space-y-0.5">
-                  <p>PPPoE Pass: {isUnmasked ? (customer?.wanConfig?.pppoePassword || 'giga@pass2026') : '••••••••'}</p>
-                  <p>VLAN: {customer?.wanConfig?.vlanId || 100} • IP: {device?.ipAddress || '10.20.44.112'}</p>
+                  <p>PPPoE Pass: {isUnmasked ? (customer?.wanConfig?.pppoePassword || device?.wanProfiles?.[0]?.password || '••••••••') : '••••••••'}</p>
+                  <p>VLAN: {device?.wanProfiles?.[0]?.vlanId || device?.wanVlan || customer?.wanConfig?.vlanId || 100} • IP: {device?.wanProfiles?.[0]?.ipAddress || device?.externalIpAddress || device?.ipAddress || '10.20.44.112'}</p>
                 </div>
               </div>
             </div>
@@ -527,20 +527,38 @@ export const Customer360: React.FC = () => {
                     <span className="text-slate-500 font-sans">Firmware Version:</span>
                     <span className="font-bold text-slate-900">{device?.softwareVersion || 'V2.1.04-P1'}</span>
                   </div>
-                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                    <span className="text-slate-500 font-sans">Wi-Fi 2.4 GHz:</span>
-                    <span className="font-bold text-slate-900">
-                      {device?.wifi24?.ssid || 'N/A'} {device?.wifi24?.channel ? `(Ch ${device.wifi24.channel})` : ''} {device?.wifi24?.enabled !== false ? '• Active' : '• Disabled'}
-                    </span>
-                  </div>
-                  {device?.wifi5g && (
-                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                      <span className="text-slate-500 font-sans">Wi-Fi 5 GHz:</span>
+                  <div className="p-2.5 bg-slate-50 rounded-lg space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-sans">Wi-Fi 2.4 GHz:</span>
                       <span className="font-bold text-slate-900">
-                        {device?.wifi5g?.ssid || 'N/A'} {device?.wifi5g?.channel ? `(Ch ${device.wifi5g.channel})` : ''} {device?.wifi5g?.enabled !== false ? '• Active' : '• Disabled'}
+                        {device?.wifi24?.ssid || 'N/A'} {device?.wifi24?.channel ? `(Ch ${device.wifi24.channel})` : ''} {device?.wifi24?.enabled !== false ? '• Active' : '• Disabled'}
                       </span>
                     </div>
+                    <div className="flex justify-between items-center text-[11px] text-slate-600">
+                      <span className="text-slate-400 font-sans">2.4G Key:</span>
+                      <span className="font-mono font-bold text-slate-800">
+                        {isUnmasked ? (device?.wifi24?.password || '••••••••') : '••••••••'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {(device?.wifi5g || device?.wifi5g?.ssid) && (
+                    <div className="p-2.5 bg-slate-50 rounded-lg space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 font-sans">Wi-Fi 5 GHz:</span>
+                        <span className="font-bold text-slate-900">
+                          {device?.wifi5g?.ssid || 'N/A'} {device?.wifi5g?.channel ? `(Ch ${device.wifi5g.channel})` : ''} {device?.wifi5g?.enabled !== false ? '• Active' : '• Disabled'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px] text-slate-600">
+                        <span className="text-slate-400 font-sans">5G Key:</span>
+                        <span className="font-mono font-bold text-slate-800">
+                          {isUnmasked ? (device?.wifi5g?.password || '••••••••') : '••••••••'}
+                        </span>
+                      </div>
+                    </div>
                   )}
+
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Connected Clients:</span>
                     <span className="font-bold text-slate-900">{device?.connectedClients?.length || device?.lanHostCount || 0} Devices Active</span>
@@ -586,7 +604,7 @@ export const Customer360: React.FC = () => {
             <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-slate-900 text-sm">Topological Optical Fiber Path</h3>
+                  <h3 className="font-bold text-slate-900 text-sm">Passive Optical Network (PON) Fiber Path</h3>
                   <p className="text-xs text-slate-500 mt-0.5">Carrier-grade optical signal path from Central OLT to Customer ONT</p>
                 </div>
                 <Badge variant="info" className="font-mono text-xs">
@@ -658,7 +676,7 @@ export const Customer360: React.FC = () => {
                 <div className="space-y-2 text-xs font-mono">
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Username:</span>
-                    <span className="font-bold text-slate-900">{customer?.wanConfig?.pppoeUsername || device?.wanProfiles?.[0]?.pppoeUsername || 'N/A'}</span>
+                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.pppoeUsername || device?.wanProfiles?.[0]?.username || device?.pppoeUsername || customer?.wanConfig?.pppoeUsername || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Connection Status:</span>
@@ -666,11 +684,11 @@ export const Customer360: React.FC = () => {
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Assigned IP:</span>
-                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.ipAddress || device?.ipAddress || customer?.wanConfig?.staticIp || 'N/A'}</span>
+                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.ipAddress || device?.externalIpAddress || device?.ipAddress || customer?.wanConfig?.staticIp || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">VLAN Tag:</span>
-                    <span className="font-bold text-slate-900">{customer?.wanConfig?.vlanId || device?.wanProfiles?.[0]?.vlanId || 100}</span>
+                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.vlanId || device?.wanVlan || customer?.wanConfig?.vlanId || 100}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Primary DNS:</span>

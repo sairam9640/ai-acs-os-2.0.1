@@ -85,8 +85,8 @@ export class CwmpVendorProfiles {
 
     // Explicit warning when OUI/heuristic guess disagrees with <Manufacturer> from Inform
     if (manufacturer && manufacturer !== 'Unknown' && manufacturer !== 'Generic' && manufacturer !== 'HGU') {
-      const cleanMan = manufacturer.toLowerCase();
-      const detectedLow = detected.toLowerCase();
+      const cleanMan = manufacturer.toLowerCase().replace(/[-_ \t]/g, '');
+      const detectedLow = detected.toLowerCase().replace(/[-_ \t]/g, '');
       if (!cleanMan.includes(detectedLow) && !detectedLow.includes(cleanMan) && detected !== 'CHINA_TELECOM' && detected !== 'TR181_STANDARD') {
         console.warn(`[CWMP ACS] [VENDOR_MISMATCH_WARN] Inform <Manufacturer> '${manufacturer}' differs from detected vendor profile '${detected}' for OUI: '${oui}', Model: '${modelName}'`);
       }
@@ -203,14 +203,20 @@ export class CwmpVendorProfiles {
     ];
 
     if (isDual) {
-      baseline.push(
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
-        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel'
-      );
+      if (vendor === 'TPLINK' || vendor === 'REALTEK' || vendor === 'VSOL' || vendor === 'RICHERLINK' || /archer|xc220|tplink/i.test(modelName || '')) {
+        baseline.push(
+          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
+          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
+          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel'
+        );
+      } else {
+        // Genexis, Huawei, ZTE, Syrotech dual-band 5G is on WLANConfiguration.5.
+        baseline.push(
+          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel'
+        );
+      }
     }
 
     return baseline;
