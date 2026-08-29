@@ -377,7 +377,7 @@ const DeviceSchema = new Schema<IDevice>(
     cwmpPassword: { type: String },
     acsUrl: { type: String },
     pendingConfig: {
-      status: { type: String, enum: ['PENDING_PUSH', 'APPLIED', 'FAILED'] },
+      status: { type: String, enum: ['PENDING_PUSH', 'APPLIED', 'FAILED', 'PENDING', 'APPLYING'] },
       queuedAt: { type: Date },
       appliedAt: { type: Date },
       wifi24: { type: Schema.Types.Mixed },
