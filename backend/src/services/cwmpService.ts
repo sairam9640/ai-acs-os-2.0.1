@@ -1392,12 +1392,15 @@ ${stringElements}
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
 
-            const parentSlotExists = Object.keys(dev.rawParameters || {}).some(k =>
+            const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(dev.modelName || session.modelName || ''));
+            const isPreAllocatedSlot = isGenexis4410 || targetSlot === 1 || targetSlot === 3;
+
+            const parentSlotExists = isPreAllocatedSlot || Object.keys(dev.rawParameters || {}).some(k =>
               k.includes(`WANConnectionDevice.${targetSlot}.`)
             );
 
-            if (targetSlot > 1 && !parentSlotExists && session.stage !== 'WAN_SLOT_GPN_SENT') {
-              // Discover real topology first instead of guessing
+            if (!isPreAllocatedSlot && targetSlot > 1 && !parentSlotExists && session.stage !== 'WAN_SLOT_GPN_SENT') {
+              // Discover real topology first instead of guessing for non-preallocated dynamic slots
               session.stage = 'WAN_SLOT_GPN_SENT';
               const gpnXml = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
@@ -1414,7 +1417,7 @@ ${stringElements}
               return gpnXml;
             }
 
-            if (targetSlot > 1 && !parentSlotExists && session.stage === 'WAN_SLOT_GPN_SENT') {
+            if (!isPreAllocatedSlot && targetSlot > 1 && !parentSlotExists && session.stage === 'WAN_SLOT_GPN_SENT') {
               // Confirmed absent after discovery -> fail clearly, don't retry blindly
               pendingCmd.status = 'failed';
               pendingCmd.errorMessage = 'TOPOLOGY_MISMATCH: WANConnectionDevice.' + targetSlot + ' not present on device';
@@ -1422,9 +1425,6 @@ ${stringElements}
               await pendingCmd.save();
               return null;
             }
-
-            const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(dev.modelName || session.modelName || ''));
-            const isPreAllocatedSlot = isGenexis4410 || targetSlot === 1 || targetSlot === 3;
 
             const isPppoeConn = targetParamName.includes('WANPPPConnection');
             const targetConnObj = isPppoeConn ? 'WANPPPConnection.' : 'WANIPConnection.';

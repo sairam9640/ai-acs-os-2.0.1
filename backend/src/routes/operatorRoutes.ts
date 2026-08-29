@@ -1359,11 +1359,13 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
     }
 
     if (isPppoe) {
-      if (profile.pppoeUsername) {
-        params.push([`${basePath}.Username`, String(profile.pppoeUsername), 'xsd:string']);
+      const pUsername = profile.pppoeUsername || profile.username;
+      if (pUsername) {
+        params.push([`${basePath}.Username`, String(pUsername), 'xsd:string']);
       }
-      if (profile.pppoePasswordEncrypted || profile.pppoePassword) {
-        params.push([`${basePath}.Password`, String(profile.pppoePasswordEncrypted || profile.pppoePassword), 'xsd:string']);
+      const pPassword = profile.pppoePasswordEncrypted || profile.pppoePassword || profile.password;
+      if (pPassword) {
+        params.push([`${basePath}.Password`, String(pPassword), 'xsd:string']);
       }
       if (profile.natEnabled !== undefined) {
         params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
@@ -1407,10 +1409,10 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
       }
     }
 
-    // Dedicated Multicast/IPTV VLAN (Only if explicitly enabled and distinct from Internet WAN)
-    if (profile.serviceUsage?.iptvBridge || profile.serviceUsage?.iptvDhcp || profile.multicastVlanId) {
-      const mcastVlan = profile.multicastVlanId || profile.multicastVlan;
-      if (mcastVlan && Number(mcastVlan) > 0) {
+    // Dedicated Multicast/IPTV VLAN (Only if explicitly enabled IPTV profile and not Internet WAN)
+    if (!isGenexis4410 && (profile.serviceUsage?.iptvBridge || profile.serviceUsage?.iptvDhcp) && profile.multicastVlanId) {
+      const mcastVlan = profile.multicastVlanId;
+      if (mcastVlan && Number(mcastVlan) > 1) {
         const cachedMcastParam = await SupportedParameterCache.findOne({
           vendor: 'GENEXIS',
           parameterPath: { $regex: /MulticastVlan/i },
