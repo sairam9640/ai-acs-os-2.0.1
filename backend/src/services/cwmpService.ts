@@ -1480,6 +1480,12 @@ ${stringElements}
                 continue;
               }
 
+              // Suppress ConnectionType if targeted on WANPPPConnection (as it causes Fault 9003 on Genexis/Broadcom/CTC ONTs)
+              if (/WANPPPConnection\.\d+\.ConnectionType$/i.test(targetName)) {
+                console.warn(`[CWMP ACS] 🛡️ Suppressed read-only parameter '${targetName}' before SetParameterValues dispatch.`);
+                continue;
+              }
+
               const isCoreParam = /Username|Password|NATEnabled$/i.test(targetName);
               if (!isCoreParam) {
                 const cached = await SupportedParameterCache.findOne({

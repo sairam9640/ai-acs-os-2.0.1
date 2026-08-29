@@ -498,10 +498,7 @@ export async function buildDynamicTr098WanParams(
     if (pPassword) {
       rawCandidateParams.push([`${basePath}.Password`, String(pPassword), 'xsd:string']);
     }
-    if (profile.natEnabled !== undefined) {
-      rawCandidateParams.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
-    }
-    rawCandidateParams.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
+    // ConnectionType is read-only on most TR-098 ONTs (e.g. Genexis) and defaults to IP_Routed on WANPPPConnection. Omit to prevent Fault 9003.
   } else {
     if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069') {
       rawCandidateParams.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
