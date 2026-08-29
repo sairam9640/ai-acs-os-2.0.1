@@ -27,8 +27,11 @@ export type CommandStatus =
   | 'sending'
   | 'sent'
   | 'acknowledged'
+  | 'applied'
+  | 'applied_pending_verification'
   | 'verifying'
   | 'verified'
+  | 'verification_failed'
   | 'success'
   | 'failed'
   | 'expired'
@@ -55,6 +58,14 @@ export interface IDeviceCommand extends Document {
   sentAt?: Date;
   verifiedAt?: Date;
   completedAt?: Date;
+  cwmpRequestId?: string;
+  cwmpResponseStatus?: number;
+  cwmpResponseTimestamp?: Date;
+  affectedParameterPaths?: string[];
+  dataModel?: 'TR-181' | 'TR-098';
+  retryCount?: number;
+  originalCommandId?: Types.ObjectId;
+  verificationTargetValues?: Record<string, any>;
   verificationResult?: {
     verified: boolean;
     readBackValues: Record<string, any>;
@@ -109,8 +120,11 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
         'sending',
         'sent',
         'acknowledged',
+        'applied',
+        'applied_pending_verification',
         'verifying',
         'verified',
+        'verification_failed',
         'success',
         'failed',
         'expired',
@@ -131,6 +145,14 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
     sentAt: { type: Date },
     verifiedAt: { type: Date },
     completedAt: { type: Date },
+    cwmpRequestId: { type: String },
+    cwmpResponseStatus: { type: Number },
+    cwmpResponseTimestamp: { type: Date },
+    affectedParameterPaths: [{ type: String }],
+    dataModel: { type: String, enum: ['TR-181', 'TR-098'] },
+    retryCount: { type: Number, default: 0 },
+    originalCommandId: { type: Schema.Types.ObjectId, ref: 'DeviceCommand' },
+    verificationTargetValues: { type: Schema.Types.Mixed },
     verificationResult: {
       verified: { type: Boolean },
       readBackValues: { type: Schema.Types.Mixed },

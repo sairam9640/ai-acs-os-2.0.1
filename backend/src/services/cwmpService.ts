@@ -70,7 +70,7 @@ export interface ActiveSessionContext {
   clientIp: string;
   tenantId: string;
   tenantSlug: string;
-  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'WAN_SLOT_GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'ADD_OBJECT_SENT' | 'SPV_SENT' | 'CUSTOM_RPC_SENT' | 'COMPLETED';
+  stage: 'INFORM_ACKED' | 'MISMATCH_BLOCKED' | 'GPN_SENT' | 'WAN_SLOT_GPN_SENT' | 'BASELINE_SENT' | 'OPTICAL_SENT' | 'ADD_OBJECT_SENT' | 'SPV_SENT' | 'CUSTOM_RPC_SENT' | 'VERIFICATION_GPV_SENT' | 'COMPLETED';
   activeOpticalCandidate?: string;
   supportedOpticalPath?: string;
   timestamp: number;
@@ -1162,6 +1162,50 @@ export class CwmpService {
       const serialAliases = session.serialAliases || CwmpXmlParser.getSerialNumberAliases(session.serialNumber);
       const dev = await Device.findOne({ serialNumber: { $in: serialAliases } });
       if (dev) {
+        // Priority 0: Post-reconnection verification GPV for applied commands awaiting verification
+        const verifyingCmd = await DeviceCommand.findOne({
+          deviceId: dev._id,
+          status: { $in: ['applied_pending_verification', 'verifying', 'applied'] },
+          affectedParameterPaths: { $exists: true, $not: { $size: 0 } },
+        }).sort({ queuedAt: -1, createdAt: -1 });
+
+        if (verifyingCmd && verifyingCmd.affectedParameterPaths && verifyingCmd.affectedParameterPaths.length > 0) {
+          const verifyPaths = verifyingCmd.affectedParameterPaths.filter((p: string) => !p.toLowerCase().includes('password'));
+          if (verifyPaths.length > 0) {
+            verifyingCmd.status = 'verifying';
+            await verifyingCmd.save();
+            session.stage = 'VERIFICATION_GPV_SENT';
+
+            console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
+              event: 'CWMP_DISPATCH_RECONNECT_VERIFICATION_GPV',
+              taskId: verifyingCmd._id.toString(),
+              deviceId: dev._id.toString(),
+              serialNumber: session.serialNumber,
+              dataModel: verifyingCmd.dataModel,
+              parameterPaths: verifyPaths,
+              rpcMethod: 'GetParameterValues',
+              cwmpRequestId: '4',
+              retryNumber: verifyingCmd.retryCount || 0,
+              taskStatus: 'verifying',
+            })}`);
+
+            const stringElements = verifyPaths.map((p: string) => `        <string>${p}</string>`).join('\n');
+            const verifyGpvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">4</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soapenv:arrayType="xsd:string[${verifyPaths.length}]">
+${stringElements}
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+            console.log(`[Native CWMP OUT] Dispatched Reconnect Verification GPV for ${session.serialNumber} (Cmd: ${verifyingCmd._id}, Params: [${verifyPaths.length}])`);
+            return verifyGpvXml;
+          }
+        }
+
         // Priority 1: High-priority configuration & diagnostic commands (SET_WIFI_CONFIG, SET_WAN_CONFIG, REBOOT_DEVICE, etc.)
         let pendingCmd = await DeviceCommand.findOne({
           deviceId: dev._id,
@@ -1462,7 +1506,30 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
   </soapenv:Body>
 </soapenv:Envelope>`;
             session.stage = 'SPV_SENT';
-            console.log(`[Native CWMP OUT] Dispatched SetParameterValues RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id}) | Params: [${validParams.length}]`);
+            const selectedDataModel = validParams.some((p: any) => p.name.startsWith('Device.')) ? 'TR-181' : 'TR-098';
+            pendingCmd.cwmpRequestId = '3';
+            pendingCmd.dataModel = selectedDataModel;
+            pendingCmd.affectedParameterPaths = validParams.map((p: any) => p.name);
+            pendingCmd.verificationTargetValues = validParams.reduce((acc: any, p: any) => {
+              acc[p.name] = p.value;
+              return acc;
+            }, {});
+            await pendingCmd.save();
+
+            console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
+              event: 'CWMP_DISPATCH_SPV',
+              taskId: pendingCmd._id.toString(),
+              deviceId: dev._id.toString(),
+              serialNumber: session.serialNumber,
+              dataModel: selectedDataModel,
+              parameterPaths: pendingCmd.affectedParameterPaths,
+              rpcMethod: 'SetParameterValues',
+              cwmpRequestId: '3',
+              retryNumber: pendingCmd.retryCount || 0,
+              taskStatus: pendingCmd.status,
+            })}`);
+
+            console.log(`[Native CWMP OUT] Dispatched SetParameterValues RPC for ${session.serialNumber} (Cmd: ${pendingCmd._id}) | Model: ${selectedDataModel} | Params: [${validParams.length}]`);
             return spvXml;
           }
         }
@@ -1848,16 +1915,84 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
 
     // Handle SetParameterValuesResponse from CPE
     if (xml.includes('SetParameterValuesResponse')) {
-      console.log(`[Native CWMP IN] CPE successfully acknowledged SetParameterValues for ${device.serialNumber}`);
-      await DeviceCommand.updateMany(
-        { deviceId: device._id, status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
-        { $set: { status: 'success', completedAt: new Date() } }
-      );
+      const statusMatch = xml.match(/<Status>(\d+)<\/Status>/i);
+      const spvStatus = statusMatch ? parseInt(statusMatch[1], 10) : 0;
+      const idMatch = xml.match(/<(?:cwmp:)?ID[^>]*>([^<]+)<\/(?:cwmp:)?ID>/i);
+      const cwmpId = idMatch ? idMatch[1].trim() : '3';
+
+      console.log(`[Native CWMP IN] CPE successfully acknowledged SetParameterValues for ${device.serialNumber} (Status: ${spvStatus}, CWMP ID: ${cwmpId})`);
+
+      const inFlightCommands = await DeviceCommand.find({
+        deviceId: device._id,
+        status: { $in: ['sent', 'sending', 'queued', 'pending'] },
+      });
+
+      for (const cmd of inFlightCommands) {
+        cmd.status = 'applied';
+        cmd.cwmpRequestId = cwmpId;
+        cmd.cwmpResponseStatus = spvStatus;
+        cmd.cwmpResponseTimestamp = new Date();
+        cmd.completedAt = new Date();
+        await cmd.save();
+
+        console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
+          event: 'CWMP_SPV_RESPONSE_SUCCESS',
+          taskId: cmd._id.toString(),
+          deviceId: device._id.toString(),
+          serialNumber: device.serialNumber,
+          dataModel: cmd.dataModel,
+          parameterPaths: cmd.affectedParameterPaths,
+          rpcMethod: 'SetParameterValuesResponse',
+          cwmpRequestId: cwmpId,
+          spvResponseStatus: spvStatus,
+          retryNumber: cmd.retryCount || 0,
+          taskStatus: 'applied',
+        })}`);
+      }
+
       if (device.pendingConfig) {
         device.pendingConfig.status = 'APPLIED';
         device.pendingConfig.appliedAt = new Date();
       }
       await device.save();
+
+      // Check if we can immediately dispatch verification GPV within current session
+      const pathsToVerify: string[] = [];
+      for (const cmd of inFlightCommands) {
+        if (Array.isArray(cmd.affectedParameterPaths)) {
+          for (const p of cmd.affectedParameterPaths) {
+            if (!p.toLowerCase().includes('password') && !pathsToVerify.includes(p)) {
+              pathsToVerify.push(p);
+            }
+          }
+        }
+      }
+
+      if (pathsToVerify.length > 0 && session) {
+        session.stage = 'VERIFICATION_GPV_SENT';
+        for (const cmd of inFlightCommands) {
+          cmd.status = 'verifying';
+          await cmd.save();
+        }
+
+        const stringElements = pathsToVerify.map((p) => `        <string>${p}</string>`).join('\n');
+        const verifyGpvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header>
+    <cwmp:ID soapenv:mustUnderstand="1">4</cwmp:ID>
+  </soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soapenv:arrayType="xsd:string[${pathsToVerify.length}]">
+${stringElements}
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+        console.log(`[Native CWMP OUT] Dispatched Immediate Verification GPV for ${device.serialNumber} (${pathsToVerify.length} params)`);
+        return verifyGpvXml;
+      }
+
       return null;
     }
 
@@ -1971,6 +2106,19 @@ Timestamp: ${new Date().toISOString()}
       // Only mark configuration commands as failed if the fault occurred during SetParameterValues (SPV) or AddObject
       if (session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT' || session?.stage === 'ADD_OBJECT_SENT') {
         const stageDesc = session?.stage === 'ADD_OBJECT_SENT' ? ' [AddObject Failed]' : '';
+
+        console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
+          event: 'CWMP_FAULT',
+          deviceId: device._id.toString(),
+          serialNumber: device.serialNumber,
+          rpcMethod: fault.isFault ? 'Fault' : 'Unknown',
+          faultCode: fault.faultCode,
+          faultString: fault.faultString,
+          detailedErrorMsg,
+          stage: session?.stage,
+          taskStatus: 'failed',
+        })}`);
+
         await DeviceCommand.updateMany(
           { deviceId: device._id, status: { $in: ['sent', 'sending'] } },
           { $set: { status: 'failed', errorMessage: `${detailedErrorMsg}${stageDesc}`, completedAt: new Date() } }
@@ -2357,6 +2505,93 @@ Timestamp: ${new Date().toISOString()}
     device.lastParameterSyncAt = new Date();
     device.status = 'online';
     await device.save();
+
+    // Post-Change Verification Evaluation
+    const pendingVerificationCommands = await DeviceCommand.find({
+      deviceId: device._id,
+      status: { $in: ['verifying', 'applied', 'applied_pending_verification'] },
+      verificationTargetValues: { $exists: true },
+    });
+
+    for (const vCmd of pendingVerificationCommands) {
+      const targets = vCmd.verificationTargetValues || {};
+      const mismatches: string[] = [];
+      const readBackValues: Record<string, any> = {};
+      let verifiableParamCount = 0;
+
+      for (const [targetPath, expectedVal] of Object.entries(targets)) {
+        // Passwords on CPEs are write-only and not returned by CPE
+        if (targetPath.toLowerCase().includes('password')) continue;
+
+        verifiableParamCount++;
+        const actualVal = pMap.get(targetPath) ?? rawMap[targetPath] ?? device.rawParameters?.[targetPath];
+        readBackValues[targetPath] = actualVal;
+
+        if (actualVal === undefined || actualVal === null || actualVal === '') {
+          if (vCmd.affectedParameterPaths?.includes(targetPath)) {
+            mismatches.push(`${targetPath} (expected: '${expectedVal}', received: undefined)`);
+          }
+        } else {
+          const expNorm = String(expectedVal).toLowerCase().trim();
+          const actNorm = String(actualVal).toLowerCase().trim();
+          const isBoolMatch = (expNorm === 'true' && (actNorm === '1' || actNorm === 'true')) ||
+                              (expNorm === 'false' && (actNorm === '0' || actNorm === 'false'));
+          if (expNorm !== actNorm && !isBoolMatch) {
+            mismatches.push(`${targetPath} (expected: '${expectedVal}', received: '${actualVal}')`);
+          }
+        }
+      }
+
+      if (verifiableParamCount > 0) {
+        if (mismatches.length === 0 && Object.keys(readBackValues).length > 0) {
+          vCmd.status = 'verified';
+          vCmd.verifiedAt = new Date();
+          vCmd.completedAt = new Date();
+          vCmd.verificationResult = {
+            verified: true,
+            readBackValues,
+            mismatches: [],
+          };
+          await vCmd.save();
+
+          console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
+            event: 'CWMP_VERIFICATION_SUCCESS',
+            taskId: vCmd._id.toString(),
+            deviceId: device._id.toString(),
+            serialNumber: device.serialNumber,
+            dataModel: vCmd.dataModel,
+            verificationResult: 'VERIFIED',
+            readBackValues,
+            retryNumber: vCmd.retryCount || 0,
+            taskStatus: 'verified',
+          })}`);
+        } else if (mismatches.length > 0) {
+          vCmd.status = 'verification_failed';
+          vCmd.verifiedAt = new Date();
+          vCmd.completedAt = new Date();
+          vCmd.verificationResult = {
+            verified: false,
+            readBackValues,
+            mismatches,
+          };
+          vCmd.errorMessage = `Verification failed: expected [${mismatches.join(', ')}] not matching CPE reported values.`;
+          await vCmd.save();
+
+          console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
+            event: 'CWMP_VERIFICATION_FAILED',
+            taskId: vCmd._id.toString(),
+            deviceId: device._id.toString(),
+            serialNumber: device.serialNumber,
+            dataModel: vCmd.dataModel,
+            verificationResult: 'VERIFICATION_FAILED',
+            mismatches,
+            readBackValues,
+            retryNumber: vCmd.retryCount || 0,
+            taskStatus: 'verification_failed',
+          })}`);
+        }
+      }
+    }
 
     // Mark SUMMON_LIVE_POLL and any telemetry polling commands as success
     await DeviceCommand.updateMany(

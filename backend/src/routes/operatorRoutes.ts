@@ -899,7 +899,6 @@ operatorRouter.get('/devices/:id/commands', async (req: AuthenticatedRequest, re
     const commands = rawCommands.map((cmd) => {
       let normalizedStatus: string = cmd.status;
       if (cmd.status === 'sent' || cmd.status === 'dispatching') normalizedStatus = 'sending';
-      else if (cmd.status === 'timed_out') normalizedStatus = 'expired';
       else if (cmd.status === 'cancelled') normalizedStatus = 'canceled';
       else if (cmd.status === 'queued') normalizedStatus = 'pending';
 
@@ -911,7 +910,16 @@ operatorRouter.get('/devices/:id/commands', async (req: AuthenticatedRequest, re
         parameters: cmd.parameters,
         queuedAt: cmd.queuedAt || (cmd as any).createdAt,
         sentAt: cmd.sentAt,
+        verifiedAt: cmd.verifiedAt,
         completedAt: cmd.completedAt,
+        cwmpRequestId: cmd.cwmpRequestId,
+        cwmpResponseStatus: cmd.cwmpResponseStatus,
+        cwmpResponseTimestamp: cmd.cwmpResponseTimestamp,
+        affectedParameterPaths: cmd.affectedParameterPaths,
+        dataModel: cmd.dataModel,
+        retryCount: cmd.retryCount,
+        originalCommandId: cmd.originalCommandId,
+        verificationResult: cmd.verificationResult,
         errorMessage: cmd.errorMessage,
         requestedBy: cmd.requestedBy,
         correlationId: cmd.correlationId,
@@ -943,7 +951,6 @@ operatorRouter.get('/devices/:id/commands/:commandId', async (req: Authenticated
 
     let normalizedStatus: string = cmd.status;
     if (cmd.status === 'sent' || cmd.status === 'dispatching') normalizedStatus = 'sending';
-    else if (cmd.status === 'timed_out') normalizedStatus = 'expired';
     else if (cmd.status === 'cancelled') normalizedStatus = 'canceled';
     else if (cmd.status === 'queued') normalizedStatus = 'pending';
 
@@ -957,7 +964,16 @@ operatorRouter.get('/devices/:id/commands/:commandId', async (req: Authenticated
         parameters: cmd.parameters,
         queuedAt: cmd.queuedAt || (cmd as any).createdAt,
         sentAt: cmd.sentAt,
+        verifiedAt: cmd.verifiedAt,
         completedAt: cmd.completedAt,
+        cwmpRequestId: cmd.cwmpRequestId,
+        cwmpResponseStatus: cmd.cwmpResponseStatus,
+        cwmpResponseTimestamp: cmd.cwmpResponseTimestamp,
+        affectedParameterPaths: cmd.affectedParameterPaths,
+        dataModel: cmd.dataModel,
+        retryCount: cmd.retryCount,
+        originalCommandId: cmd.originalCommandId,
+        verificationResult: cmd.verificationResult,
         errorMessage: cmd.errorMessage,
         requestedBy: cmd.requestedBy,
         correlationId: cmd.correlationId,
@@ -1033,6 +1049,8 @@ operatorRouter.post('/devices/:id/commands/:commandId/retry', async (req: Authen
         email: req.user!.email,
       },
       queuedAt: new Date(),
+      retryCount: (oldCmd.retryCount || 0) + 1,
+      originalCommandId: oldCmd.originalCommandId || oldCmd._id,
       correlationId: `retry_${Date.now()}`,
     });
 
@@ -3746,19 +3764,43 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
           { name: 'Reboot', protocol: 'TR-069/USP', description: 'Dispatch graceful CPE device reboot RPC', permission: 'DEVICE_ADMIN' },
           { name: 'FactoryReset', protocol: 'TR-069', description: 'Restore ONT firmware parameters to factory defaults', permission: 'DEVICE_SUPERADMIN' },
         ],
-        // Reconcile any stale commands older than 3 minutes so they don't stay stuck in 'pending' / 'Waiting for ONT'
+        // Reconcile any stale commands older than configured timeout (default 180s)
         queue: (await (async () => {
-          const staleThreshold = new Date(Date.now() - 3 * 60 * 1000);
+          const timeoutSeconds = parseInt(process.env.CWMP_TASK_TIMEOUT_SECONDS || '180', 10);
+          const staleThreshold = new Date(Date.now() - timeoutSeconds * 1000);
+
+          // Handle sending commands that timed out
+          const sendingStale = await DeviceCommand.find({
+            deviceId: device._id,
+            status: { $in: ['sending', 'sent'] },
+            sentAt: { $lt: staleThreshold },
+          });
+
+          for (const sCmd of sendingStale) {
+            // If WAN session dropped after SPV was sent, mark applied_pending_verification to await next Inform
+            if (sCmd.action === 'SET_WAN_CONFIG' && sCmd.cwmpRequestId) {
+              sCmd.status = 'applied_pending_verification';
+              sCmd.errorMessage = 'ONT connection dropped after configuration dispatch; awaiting reconnection verification.';
+              await sCmd.save();
+            } else {
+              sCmd.status = 'timed_out';
+              sCmd.errorMessage = 'ACS task timeout: no CWMP response or verification result received within the configured timeout.';
+              sCmd.completedAt = new Date();
+              await sCmd.save();
+            }
+          }
+
+          // Handle queued/pending commands that timed out
           await DeviceCommand.updateMany(
             {
               deviceId: device._id,
-              status: { $in: ['pending', 'queued', 'sending', 'sent'] },
+              status: { $in: ['pending', 'queued'] },
               queuedAt: { $lt: staleThreshold },
             },
             {
               $set: {
                 status: 'timed_out',
-                errorMessage: 'Timeout: ONT session elapsed without acknowledging command.',
+                errorMessage: 'ACS task timeout: no CWMP response or verification result received within the configured timeout.',
                 completedAt: new Date(),
               },
             }
@@ -3767,7 +3809,6 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
         })()).map((cmd) => {
           let normalizedStatus: string = cmd.status;
           if (cmd.status === 'sent' || cmd.status === 'dispatching') normalizedStatus = 'sending';
-          else if (cmd.status === 'timed_out') normalizedStatus = 'expired';
           else if (cmd.status === 'cancelled') normalizedStatus = 'canceled';
           else if (cmd.status === 'queued') normalizedStatus = 'pending';
 
@@ -3779,7 +3820,16 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
             parameters: cmd.parameters,
             queuedAt: cmd.queuedAt || (cmd as any).createdAt,
             sentAt: cmd.sentAt,
+            verifiedAt: cmd.verifiedAt,
             completedAt: cmd.completedAt,
+            cwmpRequestId: cmd.cwmpRequestId,
+            cwmpResponseStatus: cmd.cwmpResponseStatus,
+            cwmpResponseTimestamp: cmd.cwmpResponseTimestamp,
+            affectedParameterPaths: cmd.affectedParameterPaths,
+            dataModel: cmd.dataModel,
+            retryCount: cmd.retryCount,
+            originalCommandId: cmd.originalCommandId,
+            verificationResult: cmd.verificationResult,
             errorMessage: cmd.errorMessage,
             requestedBy: cmd.requestedBy,
             correlationId: cmd.correlationId,
