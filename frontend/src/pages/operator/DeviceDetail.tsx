@@ -652,6 +652,7 @@ export const DeviceDetail: React.FC = () => {
   const [overlayTitle, setOverlayTitle] = useState('Updating device... please wait (up to 30 seconds)');
   const [pendingToast, setPendingToast] = useState<{ message: string; type: 'info' | 'success' | 'warning' } | null>(null);
   const [retryingCmdId, setRetryingCmdId] = useState<string | null>(null);
+  const [refreshingRegenCmdId, setRefreshingRegenCmdId] = useState<string | null>(null);
   const [cancelingCmdId, setCancelingCmdId] = useState<string | null>(null);
 
   const start30sCommandTracking = (cmdId: string, initialTitle = 'Updating device... please wait (up to 30 seconds)') => {
@@ -767,6 +768,24 @@ export const DeviceDetail: React.FC = () => {
       setPendingToast({ type: 'warning', message: `Cancel failed: ${err.message}` });
     } finally {
       setCancelingCmdId(null);
+    }
+  };
+
+  const handleRefreshAndRegenerate = async (cmdId: string) => {
+    if (!id) return;
+    setRefreshingRegenCmdId(cmdId);
+    try {
+      const res = await api.post(`/operator/devices/${id}/commands/${cmdId}/refresh-and-regenerate`);
+      if (res.success) {
+        setPendingToast({ type: 'info', message: 'Parameter tree discovery initiated. Refreshing device view...' });
+        await fetchWorkspace(id);
+      } else {
+        setPendingToast({ type: 'warning', message: res.error || 'Failed to refresh parameter tree.' });
+      }
+    } catch (err: any) {
+      setPendingToast({ type: 'warning', message: `Refresh failed: ${err.message}` });
+    } finally {
+      setRefreshingRegenCmdId(null);
     }
   };
 
@@ -3321,21 +3340,43 @@ export const DeviceDetail: React.FC = () => {
                             </div>
 
                             <div className="flex items-center space-x-2">
-                              {/* Retry button for failed/expired/timed_out/verification_failed/canceled */}
-                              {(isFailed || isVerificationFailed || isTimedOut || isCanceled) && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={!isOnline || retryingCmdId === (cmd._id || cmd.id)}
-                                  isLoading={retryingCmdId === (cmd._id || cmd.id)}
-                                  title={!isOnline ? 'Device Offline - configuration changes unavailable' : 'Re-queue this command'}
-                                  onClick={() => handleRetryCommand(cmd._id || cmd.id)}
-                                  className="text-xs font-semibold text-slate-700"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                                  <span>Retry</span>
-                                </Button>
-                              )}
+                              {/* Check if Fault 9005 or parameter rejected */}
+                              {(() => {
+                                const isFault9005 = cmd.faultCode === 9005 || cmd.retryable === false || (cmd.errorMessage && /Fault 9005/i.test(cmd.errorMessage));
+                                if (isFault9005) {
+                                  return (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={!isOnline || refreshingRegenCmdId === (cmd._id || cmd.id)}
+                                      isLoading={refreshingRegenCmdId === (cmd._id || cmd.id)}
+                                      title={!isOnline ? 'Device Offline' : 'Refresh parameter tree and regenerate configuration'}
+                                      onClick={() => handleRefreshAndRegenerate(cmd._id || cmd.id)}
+                                      className="text-xs font-semibold text-amber-900 border-amber-300 bg-amber-50 hover:bg-amber-100"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5 mr-1 text-amber-700" />
+                                      <span>Refresh parameter tree and regenerate configuration</span>
+                                    </Button>
+                                  );
+                                }
+                                if (isFailed || isVerificationFailed || isTimedOut || isCanceled) {
+                                  return (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={!isOnline || retryingCmdId === (cmd._id || cmd.id)}
+                                      isLoading={retryingCmdId === (cmd._id || cmd.id)}
+                                      title={!isOnline ? 'Device Offline - configuration changes unavailable' : 'Re-queue this command'}
+                                      onClick={() => handleRetryCommand(cmd._id || cmd.id)}
+                                      className="text-xs font-semibold text-slate-700"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                                      <span>Retry</span>
+                                    </Button>
+                                  );
+                                }
+                                return null;
+                              })()}
 
                               {/* Cancel button for pending/sending */}
                               {(isPending || isSending) && (
@@ -3354,16 +3395,45 @@ export const DeviceDetail: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* Error Callout */}
-                          {cmd.errorMessage && (
-                            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-900 font-medium flex items-start space-x-2">
-                              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                              <div>
-                                <span className="font-bold">Error Reason: </span>
-                                <span>{cmd.errorMessage}</span>
-                              </div>
-                            </div>
-                          )}
+                          {/* Error / Rejection Callout */}
+                          {(() => {
+                            const isFault9005 = cmd.faultCode === 9005 || cmd.retryable === false || (cmd.errorMessage && /Fault 9005/i.test(cmd.errorMessage));
+                            const rejectedParam = cmd.faultParameter || (cmd.errorMessage && cmd.errorMessage.match(/Parameter:\s*([^)]+)/i)?.[1]?.trim());
+
+                            if (isFault9005) {
+                              return (
+                                <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl text-xs space-y-2">
+                                  <div className="flex items-center space-x-2 text-rose-800 font-bold">
+                                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                                    <span>Fault 9005: Invalid parameter name</span>
+                                  </div>
+                                  <div className="pl-6 space-y-1.5">
+                                    <p className="text-slate-600 font-semibold">Parameter:</p>
+                                    <code className="px-2.5 py-1 bg-white border border-rose-200 rounded-md font-mono text-[11px] text-rose-950 font-bold break-all block shadow-xs">
+                                      {rejectedParam || 'Parameter not accepted by CPE'}
+                                    </code>
+                                    <p className="text-rose-700 font-medium text-[11px] pt-0.5">
+                                      CPE rejected parameter path {rejectedParam || 'specified'}. Refresh the device parameter tree before retrying.
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            if (cmd.errorMessage) {
+                              return (
+                                <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-900 font-medium flex items-start space-x-2">
+                                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="font-bold">Error Reason: </span>
+                                    <span>{cmd.errorMessage}</span>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            return null;
+                          })()}
 
                           {/* Verification Parameter Mismatches Callout */}
                           {cmd.verificationResult && !cmd.verificationResult.verified && cmd.verificationResult.mismatches && cmd.verificationResult.mismatches.length > 0 && (

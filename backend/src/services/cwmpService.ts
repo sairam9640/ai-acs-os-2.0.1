@@ -43,6 +43,7 @@ import { Alert } from '../models/Incident.js';
 import { User } from '../models/User.js';
 import { buildTr069WanParams } from '../routes/operatorRoutes.js';
 import { triggerGenieAcsConnectionRequest } from './connectionRequestService.js';
+import { validateWanParameters } from './tr098WanDiscoveryService.js';
 
 export interface CwmpHitLog {
   timestamp: Date;
@@ -1370,21 +1371,33 @@ ${stringElements}
               return { name: p.name || p.path, value: p.value, type: p.type || 'xsd:string' };
             });
 
+            // Validate requested parameters against dev.rawParameters and SupportedParameterCache
+            const rawParamTuples: Array<[string, any, string]> = normalizedParams.map((p: any) => [p.name, p.value, p.type]);
+            const validation = validateWanParameters(rawParamTuples, dev.rawParameters || {});
+            if (validation.errors.length > 0) {
+              console.error(`[CWMP ACS] ❌ Pre-dispatch validation failed for ${session.serialNumber}:`, validation.errors);
+              pendingCmd.status = 'failed';
+              pendingCmd.errorMessage = `PRE_DISPATCH_VALIDATION_FAILED: ${validation.errors.join('; ')}`;
+              pendingCmd.completedAt = new Date();
+              await pendingCmd.save();
+              return null;
+            }
+
             // Validate against SupportedParameterCache (reject known unsupported vendor parameters, never core params)
             const validParams: Array<{ name: string; value: any; type: string }> = [];
-            for (const p of normalizedParams) {
-              const isCoreParam = /Username|Password|NATEnabled$/i.test(p.name);
+            for (const [vName, vVal, vType] of validation.validParams) {
+              const isCoreParam = /Username|Password|NATEnabled$/i.test(vName);
               if (!isCoreParam) {
                 const cached = await SupportedParameterCache.findOne({
-                  parameterPath: p.name,
+                  parameterPath: vName,
                   status: 'UNSUPPORTED'
                 });
                 if (cached) {
-                  console.warn(`[CWMP ACS] 🛡️ Suppressed unsupported parameter '${p.name}' before SetParameterValues dispatch.`);
+                  console.warn(`[CWMP ACS] 🛡️ Suppressed unsupported parameter '${vName}' before SetParameterValues dispatch.`);
                   continue;
                 }
               }
-              validParams.push(p);
+              validParams.push({ name: vName, value: vVal, type: vType });
             }
 
             // Check if parent slot exists before issuing AddObject (Issue 2)
@@ -1928,7 +1941,7 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
       });
 
       for (const cmd of inFlightCommands) {
-        cmd.status = 'applied';
+        cmd.status = spvStatus === 1 ? 'applied_pending_verification' : 'applied';
         cmd.cwmpRequestId = cwmpId;
         cmd.cwmpResponseStatus = spvStatus;
         cmd.cwmpResponseTimestamp = new Date();
@@ -1946,7 +1959,7 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
           cwmpRequestId: cwmpId,
           spvResponseStatus: spvStatus,
           retryNumber: cmd.retryCount || 0,
-          taskStatus: 'applied',
+          taskStatus: cmd.status,
         })}`);
       }
 
@@ -2078,20 +2091,17 @@ ${stringElements}
             { upsert: true }
           ).catch(() => {});
         }
-      } else {
-        const failedParamMatch = xml.match(/<ParameterName>([^<]+)<\/ParameterName>/i);
-        if (failedParamMatch && failedParamMatch[1]) {
-          const failedParam = failedParamMatch[1].trim();
-          detailedErrorMsg = `Fault ${fault.faultCode}: ${fault.faultString} (Parameter: ${failedParam})`;
-          const isCoreParam = /Username|Password|NATEnabled$/i.test(failedParam);
-          if (!isCoreParam) {
-            SupportedParameterCache.findOneAndUpdate(
-              { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: failedParam },
-              { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
-              { upsert: true }
-            ).catch(() => {});
-          }
-        }
+      }
+      let extractedFaultParam = '';
+      const failedParamMatch = xml.match(/<ParameterName>([^<]+)<\/ParameterName>/i);
+      if (failedParamMatch && failedParamMatch[1]) {
+        extractedFaultParam = failedParamMatch[1].trim();
+        detailedErrorMsg = `Fault ${fault.faultCode}: ${fault.faultString} (Parameter: ${extractedFaultParam})`;
+        SupportedParameterCache.findOneAndUpdate(
+          { vendor: session?.vendor || 'GENEXIS', modelName: session?.modelName || 'Platinum-4410', parameterPath: extractedFaultParam },
+          { $set: { status: 'UNSUPPORTED', writable: false, lastSeenAt: new Date() } },
+          { upsert: true }
+        ).catch(() => {});
       }
 
       console.log(`
@@ -2114,14 +2124,31 @@ Timestamp: ${new Date().toISOString()}
           rpcMethod: fault.isFault ? 'Fault' : 'Unknown',
           faultCode: fault.faultCode,
           faultString: fault.faultString,
+          faultParameter: extractedFaultParam,
           detailedErrorMsg,
           stage: session?.stage,
           taskStatus: 'failed',
         })}`);
 
+        const isFault9005 = String(fault.faultCode) === '9005' || /9005/i.test(xml);
+        const resolvedFaultCode = isFault9005 ? 9005 : Number(fault.faultCode || 9002);
+        const cmdUpdatePayload: any = {
+          status: 'failed',
+          errorMessage: `${detailedErrorMsg}${stageDesc}`,
+          completedAt: new Date(),
+          faultCode: resolvedFaultCode,
+          faultString: fault.faultString,
+        };
+        if (extractedFaultParam) {
+          cmdUpdatePayload.faultParameter = extractedFaultParam;
+        }
+        if (isFault9005) {
+          cmdUpdatePayload.retryable = false;
+        }
+
         await DeviceCommand.updateMany(
           { deviceId: device._id, status: { $in: ['sent', 'sending'] } },
-          { $set: { status: 'failed', errorMessage: `${detailedErrorMsg}${stageDesc}`, completedAt: new Date() } }
+          { $set: cmdUpdatePayload }
         );
         if (device.pendingConfig && device.pendingConfig.status === 'APPLYING') {
           device.pendingConfig.status = 'FAILED';

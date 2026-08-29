@@ -34,6 +34,7 @@ export type CommandStatus =
   | 'verification_failed'
   | 'success'
   | 'failed'
+  | 'rejected'
   | 'expired'
   | 'timed_out'
   | 'canceled'
@@ -72,6 +73,11 @@ export interface IDeviceCommand extends Document {
     mismatches: string[];
   };
   errorMessage?: string;
+  faultCode?: number;
+  faultParameter?: string;
+  faultString?: string;
+  retryable?: boolean;
+  payloadHash?: string;
   correlationId: string;
   rollbackOnFailure: boolean;
   createdAt: Date;
@@ -127,6 +133,7 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
         'verification_failed',
         'success',
         'failed',
+        'rejected',
         'expired',
         'timed_out',
         'canceled',
@@ -159,6 +166,11 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
       mismatches: [{ type: String }],
     },
     errorMessage: { type: String },
+    faultCode: { type: Number },
+    faultParameter: { type: String },
+    faultString: { type: String },
+    retryable: { type: Boolean, default: true },
+    payloadHash: { type: String },
     correlationId: { type: String, default: () => `corr_${Date.now()}`, index: true },
     rollbackOnFailure: { type: Boolean, default: true },
   },

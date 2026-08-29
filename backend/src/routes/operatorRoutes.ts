@@ -48,6 +48,7 @@ import { OperationsCenterService } from '../services/operationsCenterService.js'
 import { BillingEngineService } from '../services/billingEngineService.js';
 import { WorkOrderService } from '../services/workOrderService.js';
 import { WhatsAppService } from '../services/whatsAppService.js';
+import { buildDynamicTr098WanParams, computePayloadHash } from '../services/tr098WanDiscoveryService.js';
 import { CustomerPlan } from '../models/CustomerPlan.js';
 import { PlanNotificationTemplate, DEFAULT_PLAN_TEMPLATES, PlanNotificationEventType } from '../models/PlanNotificationTemplate.js';
 import { CustomerPlanService } from '../services/customerPlanService.js';
@@ -975,6 +976,11 @@ operatorRouter.get('/devices/:id/commands/:commandId', async (req: Authenticated
         originalCommandId: cmd.originalCommandId,
         verificationResult: cmd.verificationResult,
         errorMessage: cmd.errorMessage,
+        faultCode: cmd.faultCode,
+        faultParameter: cmd.faultParameter,
+        faultString: cmd.faultString,
+        retryable: cmd.retryable,
+        payloadHash: cmd.payloadHash,
         requestedBy: cmd.requestedBy,
         correlationId: cmd.correlationId,
       },
@@ -1027,9 +1033,24 @@ operatorRouter.post('/devices/:id/commands/:commandId/retry', async (req: Authen
     );
 
     let retryParams = { ...oldCmd.parameters };
+    let newPayloadHash = oldCmd.payloadHash;
+
     if (oldCmd.action === 'SET_WAN_CONFIG') {
       const profileData = oldCmd.parameters?.profile || oldCmd.parameters || {};
       const cleanWanParams = await buildTr069WanParams(profileData, device);
+      newPayloadHash = computePayloadHash(cleanWanParams);
+
+      // Fault 9005 identical payload protection
+      if ((oldCmd.faultCode === 9005 || oldCmd.retryable === false) && oldCmd.payloadHash && newPayloadHash === oldCmd.payloadHash) {
+        return res.status(400).json({
+          success: false,
+          error: `CPE rejected parameter path ${oldCmd.faultParameter || 'specified'}. Refresh the device parameter tree before retrying.`,
+          code: 'IDENTICAL_PAYLOAD_REJECTED',
+          faultCode: 9005,
+          faultParameter: oldCmd.faultParameter,
+        });
+      }
+
       retryParams = {
         ...oldCmd.parameters,
         tr069ParamValues: cleanWanParams,
@@ -1051,6 +1072,7 @@ operatorRouter.post('/devices/:id/commands/:commandId/retry', async (req: Authen
       queuedAt: new Date(),
       retryCount: (oldCmd.retryCount || 0) + 1,
       originalCommandId: oldCmd.originalCommandId || oldCmd._id,
+      payloadHash: newPayloadHash,
       correlationId: `retry_${Date.now()}`,
     });
 
@@ -1074,6 +1096,61 @@ operatorRouter.post('/devices/:id/commands/:commandId/retry', async (req: Authen
       message: `Command [${oldCmd.action}] re-queued for CPE execution.`,
       commandId: newCmd._id,
       command: newCmd,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 8.0.2.5.1 Refresh Parameter Tree & Regenerate Configuration (Fault 9005 Remediation)
+ */
+operatorRouter.post('/devices/:id/commands/:commandId/refresh-and-regenerate', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = new Types.ObjectId(req.tenantId);
+    const { id, commandId } = req.params;
+    const device = await Device.findOne(getSafeDeviceQuery(id, tenantId));
+    if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
+
+    const oldCmd = await DeviceCommand.findOne({
+      _id: commandId,
+      deviceId: device._id,
+      tenantId,
+    });
+    if (!oldCmd) return res.status(404).json({ success: false, error: 'Command not found' });
+
+    // Cancel old command
+    oldCmd.status = 'canceled';
+    oldCmd.errorMessage = 'SUPERSEDED: Discarded for live parameter tree discovery and configuration regeneration.';
+    oldCmd.completedAt = new Date();
+    await oldCmd.save();
+
+    // Queue fresh live WAN tree discovery
+    const gpnCmd = await DeviceCommand.create({
+      tenantId,
+      deviceId: device._id,
+      customerId: device.customerId,
+      action: 'GET_PARAMETER_NAMES',
+      parameters: {
+        parameterPath: 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.',
+        nextLevel: 0,
+      },
+      status: 'pending',
+      requestedBy: {
+        userId: req.user!.id,
+        role: req.user!.role,
+        email: req.user!.email,
+      },
+      queuedAt: new Date(),
+      correlationId: `gpn_refresh_${Date.now()}`,
+    });
+
+    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: 'Parameter tree discovery queued. Configuration will be regenerated from the live CPE tree.',
+      discoveryCommandId: gpnCmd._id,
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -1286,10 +1363,11 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
       params.push(['Device.PPP.Interface.1.Enable', Boolean(profile.enableWan), 'xsd:boolean']);
     }
     if (profile.connectionType === 'PPPoE' || profile.linkMode === 'PPP') {
-      if (profile.pppoeUsername) {
-        params.push(['Device.PPP.Interface.1.Username', String(profile.pppoeUsername), 'xsd:string']);
+      const uName = profile.pppoeUsername || profile.username;
+      if (uName) {
+        params.push(['Device.PPP.Interface.1.Username', String(uName), 'xsd:string']);
       }
-      const pass = profile.pppoePasswordEncrypted || profile.pppoePassword;
+      const pass = profile.pppoePasswordEncrypted || profile.pppoePassword || profile.password;
       if (pass) {
         params.push(['Device.PPP.Interface.1.Password', String(pass), 'xsd:string']);
       }
@@ -1320,118 +1398,9 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
       params.push(['Device.NAT.InterfaceSetting.1.Enable', Boolean(profile.natEnabled), 'xsd:boolean']);
     }
   } else {
-    // 100% Safe Broadband Forum TR-098 Standard Data Model (Zero Fault 9005 / Fault 9003 risk)
-    const isPppoe = profile.connectionType === 'PPPoE' || profile.linkMode === 'PPP';
-    
-    // Detect TR-069 Management WAN vs Customer Internet/External WAN
-    const isTr069Mgmt = profile.serviceType === 'TR069' || profile.name?.includes('TR069') || profile.serviceUsage?.tr069;
-    
-    // PROTECT WAN1: Existing WAN1 is reserved for TR-069 management.
-    // Dynamically match existing slot from rawParameters or cpeObjectPath; fallback to slot 2 for new customer WANs
-    const raw = device?.rawParameters || {};
-    let basePath = profile.cpeObjectPath ? profile.cpeObjectPath.replace(/\.$/, '') : '';
-
-    if (!basePath) {
-      // Search live rawParameters for an existing matching instance
-      for (let slot = 1; slot <= 8; slot++) {
-        const pppName = raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.Name`];
-        const ipName = raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.Name`];
-        if (isPppoe && pppName && (pppName === profile.name || (profile.vlanId && pppName.includes(String(profile.vlanId))))) {
-          basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1`;
-          break;
-        } else if (!isPppoe && ipName && (ipName === profile.name || (profile.vlanId && ipName.includes(String(profile.vlanId))))) {
-          basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1`;
-          break;
-        }
-      }
-    }
-
-    const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
-
-    if (!basePath) {
-      // Find existing slot on device or fallback to 1 as specified in TR-098 and Genexis PDF
-      let wanIndex = 1;
-      for (let s = 1; s <= 8; s++) {
-        if (raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.`] ||
-            raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.1.Enable`]) {
-          wanIndex = s;
-          break;
-        }
-      }
-      const baseConn = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-      basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${wanIndex}.${baseConn}`;
-    }
-
-    if (profile.enableWan !== undefined) {
-      params.push([`${basePath}.Enable`, Boolean(profile.enableWan), 'xsd:boolean']);
-    }
-
-    if (isPppoe) {
-      const pUsername = profile.pppoeUsername || profile.username;
-      if (pUsername) {
-        params.push([`${basePath}.Username`, String(pUsername), 'xsd:string']);
-      }
-      const pPassword = profile.pppoePasswordEncrypted || profile.pppoePassword || profile.password;
-      if (pPassword) {
-        params.push([`${basePath}.Password`, String(pPassword), 'xsd:string']);
-      }
-      if (profile.natEnabled !== undefined) {
-        params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
-      }
-      params.push([`${basePath}.ConnectionType`, 'IP_Routed', 'xsd:string']);
-    } else {
-      // IP Connection Mode (DHCP / Static IP / TR-069 Management)
-      if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069') {
-        params.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
-      }
-
-      if (profile.connectionType === 'Static' || profile.ipAssignment === 'Static') {
-        if (profile.ipAddress) params.push([`${basePath}.ExternalIPAddress`, String(profile.ipAddress), 'xsd:string']);
-        if (profile.subnetMask) params.push([`${basePath}.SubnetMask`, String(profile.subnetMask), 'xsd:string']);
-        if (profile.gateway) params.push([`${basePath}.DefaultGateway`, String(profile.gateway), 'xsd:string']);
-      }
-
-      if (profile.primaryDns) {
-        const dnsStr = `${profile.primaryDns}${profile.secondaryDns ? `,${profile.secondaryDns}` : ''}`;
-        params.push([`${basePath}.DNSServers`, dnsStr, 'xsd:string']);
-      }
-    }
-
-    // VLAN Tagging Configuration
-    const hasVlan = (profile.vlanEnabled !== false && profile.vlanId && Number(profile.vlanId) > 0) || profile.vlanMode === 'TAG';
-    if (hasVlan && profile.vlanId) {
-      const slotMatch = basePath.match(/WANConnectionDevice\.(\d+)\./);
-      const slotNum = slotMatch ? slotMatch[1] : (isGenexis4410 ? '3' : '2');
-      if (isGenexis4410) {
-        params.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`, Number(profile.vlanId), 'xsd:int']);
-      } else {
-        const cachedVlanParam = await SupportedParameterCache.findOne({
-          vendor: 'GENEXIS',
-          parameterPath: { $regex: /(?:^|\.)(?:VLANID|VlanID|VlanId)$/i },
-          status: 'SUPPORTED',
-          writable: true
-        });
-        if (cachedVlanParam) {
-          params.push([cachedVlanParam.parameterPath, Number(profile.vlanId), 'xsd:unsignedInt']);
-        }
-      }
-    }
-
-    // Dedicated Multicast/IPTV VLAN (Only if explicitly enabled IPTV profile and not Internet WAN)
-    if (!isGenexis4410 && (profile.serviceUsage?.iptvBridge || profile.serviceUsage?.iptvDhcp) && profile.multicastVlanId) {
-      const mcastVlan = profile.multicastVlanId;
-      if (mcastVlan && Number(mcastVlan) > 1) {
-        const cachedMcastParam = await SupportedParameterCache.findOne({
-          vendor: 'GENEXIS',
-          parameterPath: { $regex: /MulticastVlan/i },
-          status: 'SUPPORTED',
-          writable: true
-        });
-        if (cachedMcastParam) {
-          params.push([cachedMcastParam.parameterPath, Number(mcastVlan), 'xsd:int']);
-        }
-      }
-    }
+    // Dynamic TR-098 WAN Provisioning with live tree discovery and validation
+    const dynamicResult = await buildDynamicTr098WanParams(profile, device, device?.rawParameters);
+    params.push(...dynamicResult.params);
   }
 
   return params;
@@ -3841,6 +3810,11 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
             originalCommandId: cmd.originalCommandId,
             verificationResult: cmd.verificationResult,
             errorMessage: cmd.errorMessage,
+            faultCode: cmd.faultCode,
+            faultParameter: cmd.faultParameter,
+            faultString: cmd.faultString,
+            retryable: cmd.retryable,
+            payloadHash: cmd.payloadHash,
             requestedBy: cmd.requestedBy,
             correlationId: cmd.correlationId,
           };
