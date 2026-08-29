@@ -324,47 +324,91 @@ export class CwmpService {
     }
 
     for (const prefix of pppKeys) {
-      const name = pMap.get(`${prefix}.Name`) || `WAN_PPP_${wanProfiles.length + 1}`;
+      const rawName = pMap.get(`${prefix}.Name`) || '';
       const user = pMap.get(`${prefix}.Username`) || '';
       const extIp = pMap.get(`${prefix}.ExternalIPAddress`) || '';
-      const vlan = parseInt(pMap.get(`${prefix}.VLANID`) || pMap.get(`${prefix}.X_CT_COM_VlanID`) || pMap.get(`${prefix}.X_HW_VLAN`) || '100', 10);
-      const status = pMap.get(`${prefix}.ConnectionStatus`) || 'Connected';
-      const service = pMap.get(`${prefix}.X_CT_COM_ServiceList`) || pMap.get(`${prefix}.X_FH_ServiceList`) || 'INTERNET';
-      const gateway = pMap.get(`${prefix}.DefaultGateway`) || '100.64.10.1';
-      const mask = pMap.get(`${prefix}.SubnetMask`) || '255.255.255.0';
+      const vlanRaw = pMap.get(`${prefix}.X_CT-COM_VlanID`) || pMap.get(`${prefix}.X_CT_COM_VlanID`) || pMap.get(`${prefix}.X_HW_VLAN`) || pMap.get(`${prefix}.X_ZTE-COM_VLAN`) || pMap.get(`${prefix}.VLANID`);
+      const vlan = vlanRaw ? parseInt(vlanRaw, 10) : undefined;
+      const status = pMap.get(`${prefix}.ConnectionStatus`) || (extIp && extIp !== '0.0.0.0' ? 'Connected' : 'Connecting');
+      const serviceRaw = pMap.get(`${prefix}.X_CT-COM_ServiceList`) || pMap.get(`${prefix}.X_CT_COM_ServiceList`) || pMap.get(`${prefix}.X_HW_SERVICELIST`) || pMap.get(`${prefix}.ServiceList`) || '';
+
+      const isTr069 = /TR069/i.test(rawName) || (serviceRaw && /TR069/i.test(serviceRaw) && !/INTERNET|VOIP/i.test(serviceRaw));
+      const isVoip = /VOIP|VOICE/i.test(rawName) || /VOIP|VOICE/i.test(serviceRaw);
+      const isInternet = /INTERNET/i.test(rawName) || /INTERNET/i.test(serviceRaw) || (!isTr069 && !isVoip);
+      const resolvedService = isTr069 ? 'TR069' : (isVoip ? 'VOIP' : 'INTERNET');
+
+      const slotMatch = prefix.match(/WANConnectionDevice\.(\d+)\./i);
+      const slotNum = slotMatch ? slotMatch[1] : '1';
+      const fallbackName = `${slotNum}_${resolvedService}_R${vlan ? `_VID_${vlan}` : ''}`;
+      const gateway = pMap.get(`${prefix}.DefaultGateway`) || '';
+      const mask = pMap.get(`${prefix}.SubnetMask`) || '';
 
       wanProfiles.push({
-        name,
+        name: rawName || fallbackName,
         connectionType: 'PPPoE',
         type: 'PPPoE',
+        linkMode: 'PPP',
+        cpeObjectPath: `${prefix}.`,
         pppoeUsername: user,
-        ipAddress: extIp,
-        vlanId: isNaN(vlan) ? 100 : vlan,
+        ipAddress: extIp || null,
+        vlanId: vlan || (isTr069 ? 100 : 100),
+        vlanEnabled: vlan !== undefined,
         status,
-        serviceType: service,
-        gateway,
-        subnetMask: mask,
-        enabled: pMap.get(`${prefix}.Enable`) !== '0'
+        serviceType: resolvedService,
+        serviceUsage: {
+          internet: Boolean(isInternet),
+          voip: Boolean(isVoip),
+          tr069: Boolean(isTr069),
+          iptvDhcp: false,
+          iptvBridge: false,
+          other: false,
+        },
+        gateway: gateway || null,
+        subnetMask: mask || null,
+        enabled: pMap.get(`${prefix}.Enable`) !== '0',
+        isProtected: Boolean(isTr069),
       });
     }
 
     for (const prefix of ipKeys) {
-      const name = pMap.get(`${prefix}.Name`) || `WAN_IP_${wanProfiles.length + 1}`;
+      const rawName = pMap.get(`${prefix}.Name`) || '';
       const addrType = pMap.get(`${prefix}.AddressingType`) || 'DHCP';
       const extIp = pMap.get(`${prefix}.ExternalIPAddress`) || '';
-      const vlan = parseInt(pMap.get(`${prefix}.VLANID`) || pMap.get(`${prefix}.X_CT_COM_VlanID`) || '100', 10);
-      const status = pMap.get(`${prefix}.ConnectionStatus`) || 'Connected';
-      const service = pMap.get(`${prefix}.X_CT_COM_ServiceList`) || 'VOIP/TR069';
+      const vlanRaw = pMap.get(`${prefix}.X_CT-COM_VlanID`) || pMap.get(`${prefix}.X_CT_COM_VlanID`) || pMap.get(`${prefix}.X_HW_VLAN`) || pMap.get(`${prefix}.X_ZTE-COM_VLAN`) || pMap.get(`${prefix}.VLANID`);
+      const vlan = vlanRaw ? parseInt(vlanRaw, 10) : undefined;
+      const status = pMap.get(`${prefix}.ConnectionStatus`) || (extIp && extIp !== '0.0.0.0' ? 'Connected' : 'Connecting');
+      const serviceRaw = pMap.get(`${prefix}.X_CT-COM_ServiceList`) || pMap.get(`${prefix}.X_CT_COM_ServiceList`) || pMap.get(`${prefix}.X_HW_SERVICELIST`) || pMap.get(`${prefix}.ServiceList`) || '';
+
+      const isTr069 = /TR069/i.test(rawName) || (serviceRaw && /TR069/i.test(serviceRaw) && !/INTERNET|VOIP/i.test(serviceRaw));
+      const isVoip = /VOIP|VOICE/i.test(rawName) || /VOIP|VOICE/i.test(serviceRaw);
+      const isInternet = /INTERNET/i.test(rawName) || /INTERNET/i.test(serviceRaw);
+      const resolvedService = isTr069 ? 'TR069' : (isVoip ? 'VOIP' : (isInternet ? 'INTERNET' : 'OTHER'));
+
+      const slotMatch = prefix.match(/WANConnectionDevice\.(\d+)\./i);
+      const slotNum = slotMatch ? slotMatch[1] : '1';
+      const fallbackName = `${slotNum}_${resolvedService}_IP${vlan ? `_VID_${vlan}` : ''}`;
 
       wanProfiles.push({
-        name,
+        name: rawName || fallbackName,
         connectionType: addrType === 'Static' ? 'Static' : 'IP_Routed',
         type: addrType,
-        ipAddress: extIp,
-        vlanId: isNaN(vlan) ? 100 : vlan,
+        linkMode: 'IP',
+        cpeObjectPath: `${prefix}.`,
+        ipAddress: extIp || null,
+        vlanId: vlan || 100,
+        vlanEnabled: vlan !== undefined,
         status,
-        serviceType: service,
-        enabled: pMap.get(`${prefix}.Enable`) !== '0'
+        serviceType: resolvedService,
+        serviceUsage: {
+          internet: Boolean(isInternet),
+          voip: Boolean(isVoip),
+          tr069: Boolean(isTr069),
+          iptvDhcp: false,
+          iptvBridge: false,
+          other: false,
+        },
+        enabled: pMap.get(`${prefix}.Enable`) !== '0',
+        isProtected: Boolean(isTr069),
       });
     }
 
@@ -935,22 +979,20 @@ export class CwmpService {
             device.wanProfiles = incoming;
           } else {
             for (const inc of incoming) {
-              const isIncMgmt = inc.serviceType === 'TR069' || inc.serviceType === 'VOIP/TR069' || inc.name?.includes('TR069') || inc.name?.includes('WAN_IP');
-              const isIncPppoe = inc.connectionType === 'PPPoE' || Boolean(inc.pppoeUsername) || inc.name?.includes('WAN_PPP');
               const existing = device.wanProfiles.find((p: any) =>
-                (inc.cpeObjectPath && p.cpeObjectPath === inc.cpeObjectPath) ||
-                (inc.name && p.name === inc.name) ||
-                (isIncMgmt && (p.serviceType === 'TR069' || p.serviceType === 'VOIP/TR069' || p.isProtected || p.name?.includes('TR069') || p.name?.includes('WAN_IP'))) ||
-                (isIncPppoe && (p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || (inc.pppoeUsername && p.pppoeUsername === inc.pppoeUsername)))
+                (inc.cpeObjectPath && p.cpeObjectPath && p.cpeObjectPath === inc.cpeObjectPath) ||
+                (inc.name && p.name && p.name === inc.name) ||
+                (inc.pppoeUsername && p.pppoeUsername && p.pppoeUsername === inc.pppoeUsername) ||
+                (!p.cpeObjectPath && !p.pppoeUsername && p.connectionType === inc.connectionType)
               );
               if (existing) {
                 if (inc.status) existing.status = inc.status;
                 if (inc.ipAddress) existing.ipAddress = inc.ipAddress;
                 if (inc.vlanId) existing.vlanId = inc.vlanId;
                 if (inc.pppoeUsername) existing.pppoeUsername = inc.pppoeUsername;
-                if (isIncPppoe && !(existing as any).cpeObjectPath) {
-                  (existing as any).cpeObjectPath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.';
-                }
+                if (inc.serviceType) existing.serviceType = inc.serviceType;
+                if (inc.cpeObjectPath) existing.cpeObjectPath = inc.cpeObjectPath;
+                if (inc.name) existing.name = inc.name;
               } else {
                 device.wanProfiles.push(inc);
               }
@@ -983,14 +1025,16 @@ export class CwmpService {
         resolvedCustomerId = device.customerId?.toString();
       } else {
         hitStatus = 'PROVISIONED';
-        const wanProfile: any = {
-          name: 'Internet_TR069',
-          connectionType: 'PPPoE',
-          serviceType: 'INTERNET',
-          status: 'Connected',
-        };
-        if (informData.vlanId !== undefined) wanProfile.vlanId = informData.vlanId;
-        if (informData.pppoeUsername) wanProfile.pppoeUsername = informData.pppoeUsername;
+        const initialWanProfiles: any[] = ((informData as any).wanProfiles && (informData as any).wanProfiles.length > 0)
+          ? (informData as any).wanProfiles
+          : [{
+              name: 'WAN_PPPoE',
+              connectionType: 'PPPoE',
+              serviceType: 'INTERNET',
+              status: 'Connected',
+              vlanId: informData.vlanId || 100,
+              pppoeUsername: informData.pppoeUsername || '',
+            }];
 
         const deviceData: any = {
           tenantId: tenant._id,
@@ -1012,7 +1056,7 @@ export class CwmpService {
           cwmpSessionId: sessionId,
           lastRawInformXml: xml,
           rawParameters: {},
-          wanProfiles: [wanProfile],
+          wanProfiles: initialWanProfiles,
           wifi24: {
             ssid: informData.wifiSsid24 || '',
             password: informData.wifiPass24 || '',
@@ -1667,7 +1711,7 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
         return gpnXml;
       }
 
-      // Periodic Inform Telemetry Sync: Query safe baseline (Wi-Fi, WAN) + confirmed optical telemetry path
+      // Periodic Inform Telemetry Sync: Query safe baseline (Wi-Fi, WAN) + confirmed optical telemetry path + discovered parameters
       session.stage = 'BASELINE_SENT';
       const baselineParams = CwmpVendorProfiles.getSafeBaselineParameters(session.vendor, session.modelName);
       
@@ -1680,6 +1724,26 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
         const companions = CwmpVendorProfiles.getOpticalCompanionPaths(verifiedOpticalPath);
         for (const comp of companions) {
           if (!queryParams.includes(comp)) queryParams.push(comp);
+        }
+      } else {
+        const cand = CwmpVendorProfiles.getOpticalCandidates(session.vendor);
+        for (const cp of cand) {
+          if (!queryParams.includes(cp)) queryParams.push(cp);
+        }
+      }
+
+      // Dynamically include all confirmed Wi-Fi & WAN parameter paths from dev.rawParameters
+      if (dev?.rawParameters) {
+        for (const rk of Object.keys(dev.rawParameters)) {
+          if (
+            /(?:WLANConfiguration\.\d+\.(?:SSID|Channel|Enable|BeaconType)|Device\.WiFi\.(?:SSID|Radio)\.\d+\.(?:SSID|Channel|Enable)|WAN(?:PPP|IP)Connection\.\d+\.(?:Name|Username|ExternalIPAddress|ConnectionStatus|Enable|VLANID|X_CT-COM_ServiceList|X_CT-COM_VlanID|X_HW_VLAN)|Device\.(?:PPP|IP)\.Interface\.\d+\.(?:Name|Username|Status|.*IPAddress))/i.test(rk) &&
+            !rk.toLowerCase().includes('password') &&
+            !rk.toLowerCase().includes('presharedkey') &&
+            !rk.toLowerCase().includes('secret') &&
+            !rk.endsWith('.')
+          ) {
+            if (!queryParams.includes(rk)) queryParams.push(rk);
+          }
         }
       }
 
@@ -2528,9 +2592,10 @@ Timestamp: ${new Date().toISOString()}
       }
 
       // Resolve service type
-      const serviceList = pMap.get(`${prefix}.X_CT-COM_ServiceList`) || '';
-      const isTr069 = /TR069/i.test(connName) || /TR069/i.test(serviceList) || (!isPpp && prefix.endsWith('.1') && slotNum === '1');
+      const serviceList = pMap.get(`${prefix}.X_CT-COM_ServiceList`) || pMap.get(`${prefix}.X_CT_COM_ServiceList`) || pMap.get(`${prefix}.X_HW_SERVICELIST`) || pMap.get(`${prefix}.ServiceList`) || '';
+      const isTr069 = (/TR069/i.test(connName) || /TR069/i.test(serviceList)) && !/INTERNET|VOIP|VOICE/i.test(connName + serviceList);
       const isVoip = /VOIP|VOICE/i.test(connName) || /VOIP|VOICE/i.test(serviceList);
+      const isInternet = /INTERNET/i.test(connName) || /INTERNET/i.test(serviceList) || isPpp || (!isTr069 && !isVoip);
       const resolvedService = isTr069 ? 'TR069' : (isVoip ? 'VOIP' : 'INTERNET');
 
       const fallbackName = `${slotNum}_${resolvedService}_${isPpp ? 'R' : 'IP'}${connVlan ? `_VID_${connVlan}` : ''}`;
@@ -2540,6 +2605,14 @@ Timestamp: ${new Date().toISOString()}
         enableWan: connEnable,
         connectionType: isPpp ? 'PPPoE' : 'IP_Routed',
         serviceType: resolvedService,
+        serviceUsage: {
+          internet: isInternet,
+          voip: isVoip,
+          tr069: /TR069/i.test(connName + serviceList),
+          iptvDhcp: /IPTV/i.test(connName + serviceList),
+          iptvBridge: /BRIDGE/i.test(connName + serviceList),
+          other: false,
+        },
         bearerService: resolvedService,
         transMode: 'PON',
         mode: 'Route',
@@ -2547,13 +2620,13 @@ Timestamp: ${new Date().toISOString()}
         ipAssignment: isPpp ? 'DHCP' : 'DHCP',
         vlanMode: connVlan ? 'TAG' : 'UNTAG',
         vlanEnabled: Boolean(connVlan),
-        vlanId: connVlan || (isTr069 ? 100 : 488),
+        vlanId: connVlan || (isTr069 ? 100 : 100),
         isProtected: isTr069,
         cpeObjectPath: `${prefix}.`,
         pppoeUsername: connUser,
         ipAddress: connIp || null,
         status: connStatus === 'Connected' ? 'Connected' : 'Connecting',
-        isDefault: !isTr069,
+        isDefault: isInternet,
       });
     }
 
@@ -2571,7 +2644,7 @@ Timestamp: ${new Date().toISOString()}
             // 1. Exact CPE path match (most reliable)
             (incoming.cpeObjectPath && p.cpeObjectPath && p.cpeObjectPath === incoming.cpeObjectPath) ||
             // 2. Profile name match (skip generic fallback names)
-            (incoming.name && incoming.name !== 'Internet_TR069' && p.name === incoming.name) ||
+            (incoming.name && incoming.name !== 'Internet_TR069' && incoming.name !== 'WAN_PPPoE' && p.name === incoming.name) ||
             // 3. PPPoE username match
             (incoming.pppoeUsername && p.pppoeUsername && p.pppoeUsername === incoming.pppoeUsername) ||
             // 4. Enrich empty placeholder: same connection type, no existing cpeObjectPath or pppoeUsername yet
@@ -2586,7 +2659,9 @@ Timestamp: ${new Date().toISOString()}
             if (incoming.pppoeUsername) existing.pppoeUsername = incoming.pppoeUsername;
             if (incoming.vlanId && !existing.vlanId) existing.vlanId = incoming.vlanId;
             if (!existing.cpeObjectPath && incoming.cpeObjectPath) existing.cpeObjectPath = incoming.cpeObjectPath;
-            if (!existing.name || existing.name === 'Internet_TR069') existing.name = incoming.name || existing.name;
+            if (incoming.serviceType) existing.serviceType = incoming.serviceType;
+            if (incoming.serviceUsage) existing.serviceUsage = incoming.serviceUsage;
+            if (!existing.name || existing.name === 'Internet_TR069' || existing.name === 'WAN_PPPoE') existing.name = incoming.name || existing.name;
             modified = true;
           } else {
             // New profile discovered on CPE that we don't have yet — append it
@@ -2598,7 +2673,7 @@ Timestamp: ${new Date().toISOString()}
       }
     } else if (!device.wanProfiles || device.wanProfiles.length === 0) {
       device.wanProfiles = [{
-        name: 'Internet_TR069',
+        name: 'WAN_PPPoE',
         connectionType: 'PPPoE',
         serviceType: 'INTERNET',
         status: pppStatus === 'Connected' ? 'Connected' : 'Connecting',

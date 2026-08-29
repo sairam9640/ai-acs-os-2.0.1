@@ -150,17 +150,16 @@ export class CwmpVendorProfiles {
    */
   static isDualBandModel(vendor?: string, modelName?: string, productClass?: string): boolean {
     const text = `${vendor || ''} ${modelName || ''} ${productClass || ''}`.toLowerCase();
-    // Single-Band 2.4 GHz Models:
-    if (/4410|gx[-_ ]?4410|platinum[-_ ]?4410|earth[-_ ]?2022|st[-_ ]?1001|sy[-_ ]?gpon[-_ ]?1010|single/i.test(text)) return false;
-    // Dual-Band 2.4G + 5G Models:
-    if (/titanium[-_ ]?2122|2122a|platinum[-_ ]?4420|eg8145|hg8145|optixstar|f670|f680|v2804|archer|xc220|g-140w|g-240w/i.test(text)) return true;
-    return false;
+    // Explicit single-band ONLY if specifically tagged as single-band / bridge-only
+    if (/single[-_ ]?band|1t1r|bridge[-_ ]?ont|onu[-_ ]?1ge$/i.test(text)) return false;
+    // All modern GPON / XPON HGUs (Genexis, Huawei, ZTE, Syrotech, VSOL, RicherLink, TP-Link, Netlink) support dual-band or have multi-SSID
+    return true;
   }
 
   /**
-   * PHASE 2: Returns 100% Safe Standard Baseline TR-098 / TR-181 parameters.
-   * NEVER mixes unverified optical paths into this request.
-   * Guarantees Wi-Fi, LAN, WAN PPPoE are retrieved with ZERO 9005 Fault aborts.
+   * PHASE 2: Returns Safe Standard Baseline TR-098 / TR-181 parameters.
+   * Covers Wi-Fi (2.4G & 5G), LAN hosts, multi-slot WAN connections (Slots 1 & 2 for PPP and IP),
+   * and safe vendor optical telemetry paths.
    */
   static getSafeBaselineParameters(vendor: CpeVendor, modelName?: string): string[] {
     if (vendor === 'TR181_STANDARD') {
@@ -173,16 +172,20 @@ export class CwmpVendorProfiles {
         'Device.WiFi.Radio.2.Channel',
         'Device.PPP.Interface.1.Username',
         'Device.PPP.Interface.1.ConnectionStatus',
+        'Device.PPP.Interface.2.Username',
+        'Device.PPP.Interface.2.ConnectionStatus',
         'Device.IP.Interface.1.IPv4Address.1.IPAddress',
+        'Device.IP.Interface.1.Status',
+        'Device.IP.Interface.2.IPv4Address.1.IPAddress',
         'Device.Ethernet.VLANTermination.1.VLANID',
         'Device.Hosts.HostNumberOfEntries',
+        'Device.Optical.Interface.1.OpticalSignalLevel',
+        'Device.Optical.Interface.1.TransmitOpticalPower',
       ];
     }
 
-    const isDual = modelName ? this.isDualBandModel(vendor, modelName) : (vendor === 'GENEXIS' || vendor === 'HUAWEI' || vendor === 'ZTE' || vendor === 'SYROTECH');
-
-    // Universal TR-098 / IGD Parameters guaranteed on 100% of devices (TR-098 Issue 1 & 2)
-    const baseline = [
+    // Comprehensive Universal TR-098 Baseline:
+    return [
       'InternetGatewayDevice.DeviceInfo.Manufacturer',
       'InternetGatewayDevice.DeviceInfo.ManufacturerOUI',
       'InternetGatewayDevice.DeviceInfo.ModelName',
@@ -191,35 +194,48 @@ export class CwmpVendorProfiles {
       'InternetGatewayDevice.DeviceInfo.HardwareVersion',
       'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
       'InternetGatewayDevice.DeviceInfo.UpTime',
+      // Wi-Fi 2.4 GHz (Instance 1)
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
+      // Wi-Fi 5 GHz (Instance 5 on Genexis/Huawei/ZTE/Syrotech, Instance 2 on TP-Link/VSOL/RicherLink)
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.BeaconType',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Enable',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel',
+      // LAN Host Count
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
+      // WAN Slot 1 — Management / TR-069 / Internet
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Name',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Enable',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Enable',
+      // WAN Slot 2 — High-Speed Internet PPPoE / Voice
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Name',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ConnectionStatus',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Enable',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.VLANID',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.Name',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.ExternalIPAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.ConnectionStatus',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.Enable',
+      // Management Server
       'InternetGatewayDevice.ManagementServer.ConnectionRequestURL',
       'InternetGatewayDevice.ManagementServer.ParameterKey',
     ];
-
-    if (isDual) {
-      if (vendor === 'TPLINK' || vendor === 'REALTEK' || vendor === 'VSOL' || vendor === 'RICHERLINK' || /archer|xc220|tplink/i.test(modelName || '')) {
-        baseline.push(
-          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
-          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
-          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel'
-        );
-      } else {
-        // Genexis, Huawei, ZTE, Syrotech dual-band 5G is on WLANConfiguration.5.
-        baseline.push(
-          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
-          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
-          'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel'
-        );
-      }
-    }
-
-    return baseline;
   }
 
   /**

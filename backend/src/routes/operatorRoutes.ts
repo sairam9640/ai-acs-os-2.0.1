@@ -3480,9 +3480,9 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
         const enableKey = rawKeys.find((k) => new RegExp(`(WLANConfiguration\\.${idx}\\.Enable$|Device\\.WiFi\\.SSID\\.${idx}\\.Enable$)`, 'i').test(k));
 
         // Prioritize updated MongoDB SSID configuration over raw unrefreshed CWMP cache
-        const ssidVal = idx === 1 && d.wifi24?.ssid ? d.wifi24.ssid :
-                        (idx === 2 || idx === 5) && d.wifi5g?.ssid ? d.wifi5g.ssid :
-                        (ssidKey ? rawParams[ssidKey] : (idx === 1 ? d.wifi24?.ssid : idx === 2 ? d.wifi5g?.ssid : null));
+        const ssidVal = (idx === 1 && d.wifi24?.ssid) ? d.wifi24.ssid :
+                        ((idx === 2 || idx === 5) && d.wifi5g?.ssid) ? d.wifi5g.ssid :
+                        (ssidKey ? rawParams[ssidKey] : (idx === 1 ? d.wifi24?.ssid : (idx === 2 || idx === 5) ? d.wifi5g?.ssid : null));
 
         const chanVal = chanKey ? parseInt(String(rawParams[chanKey]), 10) : (idx === 1 ? d.wifi24?.channel : idx === 2 ? d.wifi5g?.channel : undefined);
         
@@ -3495,9 +3495,11 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
 
         const detectedBand = idx === 1 ? '2.4GHz' : (idx === 2 || idx === 5) ? '5GHz' : CwmpVendorProfiles.determineWifiBand(rawParams, idx, String(ssidVal || ''));
 
+        const resolvedSsid = ssidVal ? decodeXmlEntities(ssidVal) : (idx === 1 ? d.wifi24?.ssid : (idx === 2 || idx === 5) ? d.wifi5g?.ssid : `WLAN-${idx}`);
+
         return {
           instance: idx,
-          ssid: String(ssidVal ? decodeXmlEntities(ssidVal) : (idx === 1 ? d.wifi24?.ssid || 'Not Configured' : `WLAN-${idx}`)),
+          ssid: resolvedSsid ? String(resolvedSsid) : (idx === 1 ? 'Wi-Fi 2.4GHz' : `Wi-Fi 5GHz`),
           band: detectedBand,
           channel: !isNaN(chanVal as number) ? (chanVal as number) : null,
           security: beaconVal || 'WPA2-PSK',
