@@ -80,7 +80,7 @@ describe('CWMP Task Status, Verification Pipeline & Timeout Suite', () => {
     expect(paramMap['Device.PPP.Interface.1.LowerLayers']).toBe('Device.Ethernet.VLANTermination.1');
   });
 
-  it('2. TR-098: Routes customer Internet PPPoE to WANConnectionDevice.3 and preserves Slot 1', async () => {
+  it('2. TR-098: Routes customer Internet PPPoE to WANConnectionDevice.1 as per Genexis PDF specification', async () => {
     const profile = {
       connectionType: 'PPPoE',
       pppoeUsername: 'vaishnavi_tr098@tpartmgmt.in',
@@ -93,12 +93,10 @@ describe('CWMP Task Status, Verification Pipeline & Timeout Suite', () => {
     const params = await buildTr069WanParams(profile, tr098Device);
     const paramMap = Object.fromEntries(params.map(([k, v]) => [k, v]));
 
-    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Username']).toBe('vaishnavi_tr098@tpartmgmt.in');
-    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Password']).toBe('SecretPassword123');
-    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Enable']).toBe(true);
-    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.X_CT-COM_WANEponLinkConfig.VLANIDMark']).toBe(488);
-    // Preserves Slot 1 management (no collision on WANConnectionDevice.1)
-    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username']).toBeUndefined();
+    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username']).toBe('vaishnavi_tr098@tpartmgmt.in');
+    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Password']).toBe('SecretPassword123');
+    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Enable']).toBe(true);
+    expect(paramMap['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_CT-COM_WANEponLinkConfig.VLANIDMark']).toBe(488);
   });
 
   it('3. Lifecycle: queued -> sending -> applied (stores CWMP response metadata)', async () => {

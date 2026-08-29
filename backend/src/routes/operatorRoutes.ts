@@ -1349,7 +1349,15 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
     const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
 
     if (!basePath) {
-      const wanIndex = isTr069Mgmt ? 1 : (isGenexis4410 ? 3 : 2);
+      // Find existing slot on device or fallback to 1 as specified in TR-098 and Genexis PDF
+      let wanIndex = 1;
+      for (let s = 1; s <= 8; s++) {
+        if (raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.`] ||
+            raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.WANPPPConnection.1.Enable`]) {
+          wanIndex = s;
+          break;
+        }
+      }
       const baseConn = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
       basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${wanIndex}.${baseConn}`;
     }
