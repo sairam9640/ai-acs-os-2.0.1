@@ -1573,10 +1573,23 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
         hasModifications = true;
       }
 
-      const isGx = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
+      const rawKeys = Object.keys(device?.rawParameters || {});
+      const confirmedPppKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
+      let dynamicCustomerPath = '';
+      if (confirmedPppKey) {
+        const m = confirmedPppKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
+        if (m) dynamicCustomerPath = `${m[1]}.`;
+      }
+      if (!dynamicCustomerPath) {
+        const isGx = /4410|Platinum|GX[-_ ]?4410/i.test(String(device?.modelName || ''));
+        dynamicCustomerPath = isGx 
+          ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.'
+          : 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.';
+      }
+
       const cpePath = isManagement 
         ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.'
-        : (isGx ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.' : 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.');
+        : dynamicCustomerPath;
 
       return {
         _id: p._id ? String(p._id) : String(idx),

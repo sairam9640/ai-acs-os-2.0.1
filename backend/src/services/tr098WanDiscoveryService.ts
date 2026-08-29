@@ -363,7 +363,7 @@ export function validateWanParameters(
       const parentInstance = instancePrefixMatch ? instancePrefixMatch[1] : '';
       const parentExists = Boolean(parentInstance && Array.from(paramMap.keys()).some((k) => k.startsWith(parentInstance)));
 
-      const isStandardWanCore = /\.(?:Username|Password|Enable|ConnectionType|NATEnabled|ExternalIPAddress|SubnetMask|DefaultGateway|DNSServers)$/i.test(path);
+      const isStandardWanCore = /\.(?:Username|Password|Enable|ConnectionType)$/i.test(path);
 
       if (parentExists && isStandardWanCore) {
         validParams.push([path, val, type]);

@@ -1449,19 +1449,49 @@ ${stringElements}
 
             // Validate against SupportedParameterCache (reject known unsupported vendor parameters, never core params)
             const validParams: Array<{ name: string; value: any; type: string }> = [];
+            const rawKeys = Object.keys(dev.rawParameters || {});
+
+            // Dynamically locate existing confirmed WAN PPP connection prefix on this device
+            const confirmedPppInstanceKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
+            let confirmedPppPrefix = '';
+            if (confirmedPppInstanceKey) {
+              const m = confirmedPppInstanceKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
+              if (m) confirmedPppPrefix = m[1];
+            }
+            if (!confirmedPppPrefix) {
+              confirmedPppPrefix = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1';
+            }
+
             for (const [vName, vVal, vType] of validation.validParams) {
-              const isCoreParam = /Username|Password|NATEnabled$/i.test(vName);
+              let targetName = vName;
+
+              // If parameter is targeting WANPPPConnection.X (e.g. WANPPPConnection.2) but that instance doesn't exist on device:
+              if (/WANPPPConnection\.\d+\./i.test(targetName)) {
+                const targetInstanceMatch = targetName.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
+                if (targetInstanceMatch && targetInstanceMatch[1] !== confirmedPppPrefix && !rawKeys.some(k => k.startsWith(targetInstanceMatch[1]))) {
+                  console.log(`[CWMP ACS] 🔄 Rewriting parameter '${targetName}' to confirmed instance '${confirmedPppPrefix}'`);
+                  targetName = targetName.replace(targetInstanceMatch[1], confirmedPppPrefix);
+                }
+              }
+
+              // Suppress unsupported vendor VLAN parameters if not present in CPE rawParameters
+              if (targetName.includes('X_CT-COM_WANEponLinkConfig') && !rawKeys.some(k => k.includes('X_CT-COM_WANEponLinkConfig'))) {
+                console.warn(`[CWMP ACS] 🛡️ Suppressed unsupported parameter '${targetName}' before SetParameterValues dispatch.`);
+                continue;
+              }
+
+              const isCoreParam = /Username|Password|NATEnabled$/i.test(targetName);
               if (!isCoreParam) {
                 const cached = await SupportedParameterCache.findOne({
-                  parameterPath: vName,
+                  parameterPath: targetName,
                   status: 'UNSUPPORTED'
                 });
                 if (cached) {
-                  console.warn(`[CWMP ACS] 🛡️ Suppressed unsupported parameter '${vName}' before SetParameterValues dispatch.`);
+                  console.warn(`[CWMP ACS] 🛡️ Suppressed unsupported parameter '${targetName}' before SetParameterValues dispatch.`);
                   continue;
                 }
               }
-              validParams.push({ name: vName, value: vVal, type: vType });
+              validParams.push({ name: targetName, value: vVal, type: vType });
             }
 
             // Check if parent slot exists before issuing AddObject (Issue 2)
