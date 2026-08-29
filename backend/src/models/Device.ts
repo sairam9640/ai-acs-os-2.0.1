@@ -59,6 +59,7 @@ export interface IDeviceWanProfile {
   enableWan?: boolean;
   connectionType: 'PPPoE' | 'IPoE_DHCP' | 'Static' | 'Bridge';
   serviceType?: string;
+  cpeObjectPath?: string;
   serviceUsage?: {
     internet?: boolean;
     voip?: boolean;

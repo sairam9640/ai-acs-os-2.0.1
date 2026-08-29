@@ -1496,19 +1496,35 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
 
     if (!device.wanProfiles || device.wanProfiles.length === 0) {
       const raw = device.rawParameters || {};
-      const discoveredConns = extractWANConnections(raw);
-      if (discoveredConns.length > 0) {
-        device.wanProfiles = discoveredConns.map((conn, idx) => ({
-          name: conn.serviceType ? `${conn.serviceType}_${conn.type === 'WANPPPConnection' ? 'PPPoE' : 'IP'}` : `WAN_${idx + 1}`,
-          connectionType: conn.type === 'WANPPPConnection' ? 'PPPoE' : 'IP_Routed',
-          serviceType: conn.serviceType || 'INTERNET',
-          status: conn.status || (device.status === 'online' ? 'Connected' : 'Connecting'),
-          pppoeUsername: conn.username || '',
-          ipAddress: conn.externalIP || device.ipAddress || null,
-          vlanId: conn.vlanId || 100,
-          vlanEnabled: Boolean(conn.vlanId),
-          isDefault: idx === 0,
-        })) as any;
+      const connPrefixes = Array.from(new Set(
+        Object.keys(raw).map(k => {
+          const m = k.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.(?:WANPPPConnection|WANIPConnection)\.\d+)\./i);
+          return m ? m[1] : null;
+        }).filter((v): v is string => v !== null)
+      ));
+      if (connPrefixes.length > 0) {
+        device.wanProfiles = connPrefixes.map((prefix, idx) => {
+          const isPpp = prefix.includes('WANPPPConnection');
+          const name = raw[`${prefix}.Name`] || `WAN_${idx + 1}`;
+          const serviceList = raw[`${prefix}.X_CT-COM_ServiceList`] || raw[`${prefix}.X_CT_COM_ServiceList`] || raw[`${prefix}.ServiceList`] || '';
+          const isTr069 = (/TR069/i.test(name) || /TR069/i.test(serviceList)) && !/INTERNET|VOIP/i.test(name + serviceList);
+          const isVoip = /VOIP|VOICE/i.test(name) || /VOIP|VOICE/i.test(serviceList);
+          const serviceType = isTr069 ? 'TR069' : (isVoip ? 'VOIP' : 'INTERNET');
+          const vlanRaw = raw[`${prefix}.X_CT-COM_VlanID`] || raw[`${prefix}.X_CT_COM_VlanID`] || raw[`${prefix}.X_HW_VLAN`] || raw[`${prefix}.VLANID`];
+          const vlan = vlanRaw ? parseInt(String(vlanRaw), 10) : 100;
+          return {
+            name,
+            connectionType: isPpp ? 'PPPoE' : 'IP_Routed',
+            serviceType,
+            cpeObjectPath: `${prefix}.`,
+            status: raw[`${prefix}.ConnectionStatus`] || (device.status === 'online' ? 'Connected' : 'Connecting'),
+            pppoeUsername: raw[`${prefix}.Username`] || '',
+            ipAddress: raw[`${prefix}.ExternalIPAddress`] || device.ipAddress || null,
+            vlanId: vlan,
+            vlanEnabled: Boolean(vlanRaw),
+            isDefault: idx === 0,
+          };
+        }) as any;
         await device.save();
       }
     }
