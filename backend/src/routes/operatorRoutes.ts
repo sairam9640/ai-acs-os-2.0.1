@@ -1257,32 +1257,40 @@ operatorRouter.delete('/devices/:id/wifi/ssid/:instance', async (req: Authentica
 export async function buildTr069WanParams(profile: any, device: any): Promise<Array<[string, any, string]>> {
   const params: Array<[string, any, string]> = [];
   const modelUpper = String(device?.modelName || '').toUpperCase();
-  const isTr181 = modelUpper.includes('TR181') || modelUpper.includes('DEVICE2');
+  const raw = device?.rawParameters || {};
+  const rawKeys = Object.keys(raw);
+  const isTr181 = modelUpper.includes('TR181') || modelUpper.includes('DEVICE2') || rawKeys.some(k => k.startsWith('Device.PPP.') || k.startsWith('Device.Ethernet.VLANTermination.'));
 
   if (isTr181) {
-    // Standard Broadband Forum TR-181 Issue 2 Data Model
+    // Standard Broadband Forum TR-181 Issue 2 Data Model (Genexis Platinum GX 4410 reference)
     if (profile.enableWan !== undefined) {
       params.push(['Device.IP.Interface.1.Enable', Boolean(profile.enableWan), 'xsd:boolean']);
+      params.push(['Device.PPP.Interface.1.Enable', Boolean(profile.enableWan), 'xsd:boolean']);
     }
-    if (profile.connectionType === 'PPPoE') {
+    if (profile.connectionType === 'PPPoE' || profile.linkMode === 'PPP') {
       if (profile.pppoeUsername) {
-        params.push(['Device.PPP.Interface.1.Username', profile.pppoeUsername, 'xsd:string']);
+        params.push(['Device.PPP.Interface.1.Username', String(profile.pppoeUsername), 'xsd:string']);
       }
-      if (profile.pppoePasswordEncrypted) {
-        params.push(['Device.PPP.Interface.1.Password', profile.pppoePasswordEncrypted, 'xsd:string']);
+      const pass = profile.pppoePasswordEncrypted || profile.pppoePassword;
+      if (pass) {
+        params.push(['Device.PPP.Interface.1.Password', String(pass), 'xsd:string']);
       }
       if (profile.acName) {
-        params.push(['Device.PPP.Interface.1.PPPoE.ACName', profile.acName, 'xsd:string']);
+        params.push(['Device.PPP.Interface.1.PPPoE.ACName', String(profile.acName), 'xsd:string']);
       }
       if (profile.serviceName) {
-        params.push(['Device.PPP.Interface.1.PPPoE.ServiceName', profile.serviceName, 'xsd:string']);
+        params.push(['Device.PPP.Interface.1.PPPoE.ServiceName', String(profile.serviceName), 'xsd:string']);
       }
       if (profile.idleTimeSeconds !== undefined) {
         params.push(['Device.PPP.Interface.1.IdleDisconnectTime', Number(profile.idleTimeSeconds), 'xsd:unsignedInt']);
       }
     }
-    if (profile.vlanEnabled !== false && profile.vlanId) {
+    const hasVlan = (profile.vlanEnabled !== false && profile.vlanId && Number(profile.vlanId) > 0) || profile.vlanMode === 'TAG';
+    if (hasVlan && profile.vlanId) {
+      params.push(['Device.Ethernet.VLANTermination.1.Enable', true, 'xsd:boolean']);
       params.push(['Device.Ethernet.VLANTermination.1.VLANID', Number(profile.vlanId), 'xsd:unsignedInt']);
+      params.push(['Device.Ethernet.VLANTermination.1.LowerLayers', 'Device.Ethernet.Link.1', 'xsd:string']);
+      params.push(['Device.PPP.Interface.1.LowerLayers', 'Device.Ethernet.VLANTermination.1', 'xsd:string']);
       if (profile.vlanPriority8021p !== undefined) {
         params.push(['Device.Ethernet.VLANTermination.1.VLANPriority', Number(profile.vlanPriority8021p), 'xsd:unsignedInt']);
       }
