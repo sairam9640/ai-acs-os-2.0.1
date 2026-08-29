@@ -67,8 +67,21 @@ customerRouter.get('/home', async (req: AuthenticatedRequest, res: Response) => 
       },
       wifi: {
         ssid24: devAny?.wifi24?.ssid || 'Home-WiFi-2.4G',
+        password24: devAny?.wifi24?.password || '',
+        channel24: devAny?.wifi24?.channel ?? 6,
+        enabled24: devAny?.wifi24?.enabled ?? true,
         ssid5g: devAny?.wifi5g?.ssid || 'Home-WiFi-5G',
+        password5g: devAny?.wifi5g?.password || '',
+        channel5g: devAny?.wifi5g?.channel ?? 44,
+        enabled5g: devAny?.wifi5g?.enabled ?? true,
         enabled: devAny?.wifi24?.enabled ?? true,
+      },
+      wan: {
+        connectionType: devAny?.wanProfiles?.[0]?.connectionType || customer.wanConfig?.connectionType || 'PPPoE',
+        pppoeUsername: devAny?.wanProfiles?.[0]?.pppoeUsername || customer.wanConfig?.pppoeUsername || '',
+        ipAddress: devAny?.ipAddress || devAny?.wanProfiles?.[0]?.ipAddress || '',
+        vlanId: devAny?.wanProfiles?.[0]?.vlanId || customer.wanConfig?.vlanId || 100,
+        status: devAny?.wanProfiles?.[0]?.status || (devAny?.status === 'online' ? 'Connected' : 'Disconnected'),
       },
       connectedDevicesCount: devAny?.connectedClients?.length || (devAny?.lanHostCount || 0),
       maintenanceBanner: null,
@@ -83,8 +96,12 @@ customerRouter.get('/home', async (req: AuthenticatedRequest, res: Response) => 
  */
 customerRouter.post('/wifi', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const customer = await Customer.findOne({ tenantId: new Types.ObjectId(req.tenantId) });
-    if (!customer?.assignedDeviceId) return res.status(400).json({ success: false, error: 'No router assigned' });
+    const customer = await Customer.findOne({
+      tenantId: new Types.ObjectId(req.tenantId),
+      $or: [{ phone: req.user!.email }, { email: req.user!.email }, { _id: req.user!.id }],
+    }) || await Customer.findOne({ tenantId: new Types.ObjectId(req.tenantId) });
+
+    if (!customer?.assignedDeviceId) return res.status(400).json({ success: false, error: 'No router assigned to this customer profile' });
 
     const result = await DeviceManagementService.queueAndExecuteCommand({
       tenantId: req.tenantId!,

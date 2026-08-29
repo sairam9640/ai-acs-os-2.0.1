@@ -282,6 +282,24 @@ export class CwmpService {
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
       'Device.WiFi.SSID.2.SSID',
     ]);
+    data.wifiPass5g = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.KeyPassphrase',
+      'Device.WiFi.AccessPoint.2.Security.KeyPassphrase',
+    ]);
+
+    const rawHostCount = this.getFirstParam(pMap, [
+      'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
+      'Device.Hosts.HostNumberOfEntries',
+    ]);
+    if (rawHostCount !== undefined && rawHostCount !== null && rawHostCount !== '') {
+      const parsedHosts = parseInt(String(rawHostCount), 10);
+      if (!isNaN(parsedHosts)) {
+        data.lanHostCount = parsedHosts;
+      }
+    }
 
     // Manufacturer & Brand Normalization
     if (data.productClass && (!data.manufacturer || data.manufacturer === 'Unknown' || data.manufacturer === 'GPON')) {
@@ -448,7 +466,27 @@ export class CwmpService {
       let tenant = await Tenant.findOne({ slug: incomingSlug });
       if (tenant) return tenant;
 
-      tenant = await Tenant.findOne({ subdomain: new RegExp(`^${incomingSlug}$`, 'i') });
+      tenant = await Tenant.findOne({
+        $or: [
+          { slug: new RegExp(`^${incomingSlug}`, 'i') },
+          { subdomain: new RegExp(`^${incomingSlug}`, 'i') },
+          { name: new RegExp(`^${incomingSlug}`, 'i') },
+        ],
+      });
+      if (tenant) return tenant;
+    }
+
+    // If root domain (e.g. ciniplay.in:7547 without dedicated subdomain), check root / default tenant
+    if (hostHeader) {
+      const hostClean = hostHeader.split(':')[0].toLowerCase().trim();
+      const tenant = await Tenant.findOne({
+        $or: [
+          { subdomain: hostClean },
+          { slug: 'rudra_test' },
+          { slug: 'rudra' },
+          { status: 'active' },
+        ],
+      });
       if (tenant) return tenant;
     }
 
@@ -858,11 +896,37 @@ export class CwmpService {
         device.lastRawInformXml = xml;
         if (!device.rawParameters) device.rawParameters = {};
 
-        if (informData.wifiSsid24 && device.wifi24) {
-          device.wifi24.ssid = informData.wifiSsid24;
+        if (!device.wifi24) {
+          device.wifi24 = {
+            ssid: informData.wifiSsid24 || '',
+            password: informData.wifiPass24 || '',
+            enabled: true,
+            channel: 6,
+            channelAuto: true,
+            bandwidthMhz: 20,
+            securityMode: 'WPA2-PSK',
+            txPowerPercent: 100,
+          };
+        } else {
+          if (informData.wifiSsid24) device.wifi24.ssid = informData.wifiSsid24;
           if (informData.wifiPass24) device.wifi24.password = informData.wifiPass24;
         }
-        if (informData.wifiSsid5g && device.wifi5g) device.wifi5g.ssid = informData.wifiSsid5g;
+
+        if (!device.wifi5g) {
+          device.wifi5g = {
+            ssid: informData.wifiSsid5g || '',
+            password: informData.wifiPass5g || '',
+            enabled: true,
+            channel: 44,
+            channelAuto: true,
+            bandwidthMhz: 80,
+            securityMode: 'WPA2-PSK',
+            txPowerPercent: 100,
+          };
+        } else {
+          if (informData.wifiSsid5g) device.wifi5g.ssid = informData.wifiSsid5g;
+          if (informData.wifiPass5g) device.wifi5g.password = informData.wifiPass5g;
+        }
         if (informData.lanHostCount !== undefined) device.lanHostCount = informData.lanHostCount;
 
         if ((informData as any).wanProfiles && (informData as any).wanProfiles.length > 0) {
@@ -961,7 +1025,7 @@ export class CwmpService {
           },
           wifi5g: {
             ssid: informData.wifiSsid5g || '',
-            password: '',
+            password: informData.wifiPass5g || '',
             enabled: true,
             channel: 44,
             channelAuto: true,
@@ -1546,6 +1610,24 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
             return spvXml;
           }
         }
+      }
+
+      // If device has unverified optical path and has not performed root parameter discovery, dispatch GPN first
+      if (!dev?.opticalTelemetrySourcePath && (!dev?.rawParameters || Object.keys(dev.rawParameters).length === 0) && session.stage !== 'GPN_SENT') {
+        session.stage = 'GPN_SENT';
+        const rootPath = session.vendor === 'TR181_STANDARD' ? 'Device.' : 'InternetGatewayDevice.';
+        const gpnXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterNames>
+      <ParameterPath>${rootPath}</ParameterPath>
+      <NextLevel>0</NextLevel>
+    </cwmp:GetParameterNames>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+        console.log(`[CWMP ACS -> CPE] Dispatched GPN root discovery for ${session.serialNumber} (${rootPath})`);
+        return gpnXml;
       }
 
       // Periodic Inform Telemetry Sync: Query safe baseline (Wi-Fi, WAN) + confirmed optical telemetry path
@@ -2303,35 +2385,69 @@ Timestamp: ${new Date().toISOString()}
       'Device.Hosts.HostNumberOfEntries',
     ]);
 
-    if (device.wifi24) {
+    if (!device.wifi24) {
+      device.wifi24 = {
+        ssid: ssid24 || '',
+        password: pass24 || '',
+        enabled: true,
+        channel: chan24 ? parseInt(chan24, 10) || 6 : 6,
+        channelAuto: true,
+        bandwidthMhz: 20,
+        securityMode: (beacon24 as any) || 'WPA2-PSK',
+        txPowerPercent: 100,
+      };
+    } else {
       if (ssid24) device.wifi24.ssid = ssid24;
       if (pass24) device.wifi24.password = pass24;
       if (chan24) {
         const c = parseInt(chan24, 10);
         if (!isNaN(c)) device.wifi24.channel = c;
       }
-      if (beacon24) device.wifi24.securityMode = beacon24;
+      if (beacon24) device.wifi24.securityMode = beacon24 as any;
     }
 
-    if (device.wifi5g) {
+    if (!device.wifi5g) {
+      device.wifi5g = {
+        ssid: ssid5g || '',
+        password: pass5g || '',
+        enabled: true,
+        channel: chan5g ? parseInt(chan5g, 10) || 44 : 44,
+        channelAuto: true,
+        bandwidthMhz: 80,
+        securityMode: (beacon5g as any) || 'WPA2-PSK',
+        txPowerPercent: 100,
+      };
+    } else {
       if (ssid5g) device.wifi5g.ssid = ssid5g;
       if (pass5g) device.wifi5g.password = pass5g;
       if (chan5g) {
         const c = parseInt(chan5g, 10);
         if (!isNaN(c)) device.wifi5g.channel = c;
       }
-      if (beacon5g) device.wifi5g.securityMode = beacon5g;
+      if (beacon5g) device.wifi5g.securityMode = beacon5g as any;
     }
 
     // Target the customer Internet profile specifically, protecting Management WAN
-    const targetWanProf = (device.wanProfiles || []).find((p: any) => !p.isProtected && p.serviceType !== 'TR069') || device.wanProfiles?.[0];
-    if (targetWanProf) {
-      if (pppoeUser) targetWanProf.pppoeUsername = pppoeUser;
-      if (pppStatus) targetWanProf.status = (pppStatus === 'Connected' ? 'Connected' : 'Connecting');
-      if (pppIp) targetWanProf.ipAddress = pppIp;
-      if (rawVlan) {
-        const v = parseInt(rawVlan, 10);
-        if (!isNaN(v)) targetWanProf.vlanId = v;
+    if (!device.wanProfiles || device.wanProfiles.length === 0) {
+      device.wanProfiles = [{
+        name: 'Internet_TR069',
+        connectionType: 'PPPoE',
+        serviceType: 'INTERNET',
+        status: pppStatus === 'Connected' ? 'Connected' : 'Connecting',
+        pppoeUsername: pppoeUser || '',
+        ipAddress: pppIp || '',
+        vlanId: rawVlan ? parseInt(rawVlan, 10) || 100 : 100,
+      } as any];
+    } else {
+      const targetWanProf = (device.wanProfiles || []).find((p: any) => !p.isProtected && p.serviceType !== 'TR069') || device.wanProfiles[0];
+      if (targetWanProf) {
+        if (pppoeUser) targetWanProf.pppoeUsername = pppoeUser;
+        if (pppStatus) targetWanProf.status = (pppStatus === 'Connected' ? 'Connected' : 'Connecting');
+        if (pppIp) targetWanProf.ipAddress = pppIp;
+        if (rawVlan) {
+          const v = parseInt(rawVlan, 10);
+          if (!isNaN(v)) targetWanProf.vlanId = v;
+        }
       }
     }
     if (rawHosts) {

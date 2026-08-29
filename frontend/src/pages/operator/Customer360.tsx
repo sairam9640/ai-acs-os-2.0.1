@@ -528,12 +528,22 @@ export const Customer360: React.FC = () => {
                     <span className="font-bold text-slate-900">{device?.softwareVersion || 'V2.1.04-P1'}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                    <span className="text-slate-500 font-sans">Wi-Fi 2.4G / 5G SSID:</span>
-                    <span className="font-bold text-slate-900">{device?.wifi24g?.ssid || 'ApexFiber_5G'}</span>
+                    <span className="text-slate-500 font-sans">Wi-Fi 2.4 GHz:</span>
+                    <span className="font-bold text-slate-900">
+                      {device?.wifi24?.ssid || 'N/A'} {device?.wifi24?.channel ? `(Ch ${device.wifi24.channel})` : ''} {device?.wifi24?.enabled !== false ? '• Active' : '• Disabled'}
+                    </span>
                   </div>
+                  {device?.wifi5g && (
+                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                      <span className="text-slate-500 font-sans">Wi-Fi 5 GHz:</span>
+                      <span className="font-bold text-slate-900">
+                        {device?.wifi5g?.ssid || 'N/A'} {device?.wifi5g?.channel ? `(Ch ${device.wifi5g.channel})` : ''} {device?.wifi5g?.enabled !== false ? '• Active' : '• Disabled'}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Connected Clients:</span>
-                    <span className="font-bold text-slate-900">{device?.connectedClients?.length || 4} Devices Active</span>
+                    <span className="font-bold text-slate-900">{device?.connectedClients?.length || device?.lanHostCount || 0} Devices Active</span>
                   </div>
                 </div>
               </Card>
@@ -648,23 +658,27 @@ export const Customer360: React.FC = () => {
                 <div className="space-y-2 text-xs font-mono">
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Username:</span>
-                    <span className="font-bold text-slate-900">{customer?.wanConfig?.pppoeUsername}</span>
+                    <span className="font-bold text-slate-900">{customer?.wanConfig?.pppoeUsername || device?.wanProfiles?.[0]?.pppoeUsername || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-500 font-sans">Connection Status:</span>
+                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.status || (device?.status === 'online' ? 'Connected' : 'Disconnected')}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Assigned IP:</span>
-                    <span className="font-bold text-slate-900">{device?.ipAddress || '10.20.44.112'}</span>
+                    <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.ipAddress || device?.ipAddress || customer?.wanConfig?.staticIp || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">VLAN Tag:</span>
-                    <span className="font-bold text-slate-900">{customer?.wanConfig?.vlanId || 100}</span>
+                    <span className="font-bold text-slate-900">{customer?.wanConfig?.vlanId || device?.wanProfiles?.[0]?.vlanId || 100}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Primary DNS:</span>
-                    <span className="font-bold text-slate-900">{customer?.wanConfig?.dnsPrimary || '8.8.8.8'}</span>
+                    <span className="font-bold text-slate-900">{customer?.wanConfig?.dnsPrimary || device?.wanProfiles?.[0]?.primaryDns || '8.8.8.8'}</span>
                   </div>
                   <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-500 font-sans">Secondary DNS:</span>
-                    <span className="font-bold text-slate-900">{customer?.wanConfig?.dnsSecondary || '1.1.1.1'}</span>
+                    <span className="font-bold text-slate-900">{customer?.wanConfig?.dnsSecondary || device?.wanProfiles?.[0]?.secondaryDns || '1.1.1.1'}</span>
                   </div>
                 </div>
               </Card>

@@ -4,6 +4,7 @@ import { Customer } from '../models/Customer.js';
 import { DeviceCapability, IDeviceCapability } from '../models/DeviceCapability.js';
 import { DeviceCommand, CommandActionType, IDeviceCommand } from '../models/DeviceCommand.js';
 import { recordAuditLog } from '../middleware/audit.js';
+import { triggerGenieAcsConnectionRequest } from './connectionRequestService.js';
 
 export interface CommandDispatchResult {
   commandId: string;
@@ -213,6 +214,9 @@ export class DeviceManagementService {
       };
       await command.save();
 
+      // Trigger Connection Request so physical ONT synchronizes immediately
+      triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+
       // Record Audit Log
       await recordAuditLog({
         tenantId,
@@ -283,24 +287,53 @@ export class DeviceManagementService {
         if (parameters.wifi5g) {
           device.wifi5g = { ...device.wifi5g, ...parameters.wifi5g };
         }
+        await device.save();
         return {
           success: true,
           readBackValues: {
-            wifi24Ssid: device.wifi24.ssid,
-            wifi5gSsid: device.wifi5g.ssid,
+            wifi24Ssid: device.wifi24?.ssid,
+            wifi5gSsid: device.wifi5g?.ssid,
             verified: true,
           },
         };
       }
 
       if (action === 'SET_WAN_CONFIG') {
-        if (parameters.vlanId) {
-          device.wanProfiles[0].vlanId = parameters.vlanId;
-        }
-        if (parameters.pppoeUsername) {
-          device.wanProfiles[0].pppoeUsername = parameters.pppoeUsername;
+        if (!device.wanProfiles || device.wanProfiles.length === 0) {
+          device.wanProfiles = [{
+            name: 'Internet_PPPoE',
+            connectionType: 'PPPoE',
+            serviceType: 'INTERNET',
+            status: 'Connected',
+            vlanId: Number(parameters.vlanId) || 100,
+            pppoeUsername: parameters.pppoeUsername || '',
+            pppoePasswordEncrypted: parameters.pppoePassword || '',
+          } as any];
+        } else {
+          if (parameters.vlanId !== undefined) {
+            device.wanProfiles[0].vlanId = Number(parameters.vlanId);
+          }
+          if (parameters.pppoeUsername !== undefined) {
+            device.wanProfiles[0].pppoeUsername = parameters.pppoeUsername;
+          }
+          if (parameters.pppoePassword) {
+            device.wanProfiles[0].pppoePasswordEncrypted = parameters.pppoePassword;
+          }
         }
         await device.save();
+
+        if (device.customerId) {
+          await Customer.updateOne(
+            { _id: device.customerId },
+            {
+              $set: {
+                'wanConfig.pppoeUsername': device.wanProfiles[0].pppoeUsername,
+                'wanConfig.vlanId': device.wanProfiles[0].vlanId,
+                'wanConfig.pppoePasswordEncrypted': device.wanProfiles[0].pppoePasswordEncrypted,
+              },
+            }
+          ).catch(() => {});
+        }
 
         return {
           success: true,

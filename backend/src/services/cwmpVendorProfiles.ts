@@ -179,8 +179,10 @@ export class CwmpVendorProfiles {
       ];
     }
 
+    const isDual = modelName ? this.isDualBandModel(vendor, modelName) : (vendor === 'GENEXIS' || vendor === 'HUAWEI' || vendor === 'ZTE' || vendor === 'SYROTECH');
+
     // Universal TR-098 / IGD Parameters guaranteed on 100% of devices (TR-098 Issue 1 & 2)
-    return [
+    const baseline = [
       'InternetGatewayDevice.DeviceInfo.Manufacturer',
       'InternetGatewayDevice.DeviceInfo.ManufacturerOUI',
       'InternetGatewayDevice.DeviceInfo.ModelName',
@@ -190,10 +192,28 @@ export class CwmpVendorProfiles {
       'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
       'InternetGatewayDevice.DeviceInfo.UpTime',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
       'InternetGatewayDevice.ManagementServer.ConnectionRequestURL',
       'InternetGatewayDevice.ManagementServer.ParameterKey',
     ];
+
+    if (isDual) {
+      baseline.push(
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
+        'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel'
+      );
+    }
+
+    return baseline;
   }
 
   /**

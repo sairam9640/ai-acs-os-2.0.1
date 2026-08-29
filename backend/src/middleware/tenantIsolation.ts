@@ -70,8 +70,13 @@ export const requireTenant = (
   res: Response,
   next: NextFunction
 ) => {
-  // If user has a tenantId, align req.tenantId with user's tenantId if not super_admin
   if (req.user && req.user.role !== 'super_admin' && req.user.tenantId) {
+    if (req.tenantId && req.tenantId !== req.user.tenantId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Access denied to foreign tenant resource.',
+      });
+    }
     req.tenantId = req.user.tenantId;
   }
 

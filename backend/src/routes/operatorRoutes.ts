@@ -766,7 +766,7 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
       if (wifi5g.enabled !== undefined) {
         auditChanges['wifi5g.enabled'] = { old: device.wifi5g?.enabled, new: Boolean(wifi5g.enabled) };
         device.wifi5g.enabled = Boolean(wifi5g.enabled);
-        tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Enable', Boolean(wifi5g.enabled), 'xsd:boolean']);
+        tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.Enable`, Boolean(wifi5g.enabled), 'xsd:boolean']);
       }
     }
 
@@ -855,6 +855,12 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
     };
 
     await device.save();
+
+    if (wan && device.wanProfiles?.[0]) {
+      await syncCustomerWanConfig(device, device.wanProfiles[0]);
+    }
+
+    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
 
     await recordAuditLog({
       tenantId,
@@ -1410,8 +1416,40 @@ export async function buildTr069WanParams(profile: any, device: any): Promise<Ar
  * Helper to sync primary WAN profile to Customer.wanConfig
  */
 async function syncCustomerWanConfig(device: any, profile: any) {
-  // Preserves customer records from being modified automatically
-  return;
+  if (!device || !profile) return;
+  try {
+    let customerId = device.customerId;
+    if (!customerId && profile.pppoeUsername) {
+      const cust = await Customer.findOne({
+        $or: [
+          { 'wanConfig.pppoeUsername': profile.pppoeUsername },
+          { serviceId: profile.pppoeUsername },
+          { assignedDeviceId: device._id }
+        ]
+      });
+      if (cust) customerId = cust._id;
+    }
+    if (customerId) {
+      await Customer.updateOne(
+        { _id: customerId },
+        {
+          $set: {
+            assignedDeviceId: device._id,
+            'wanConfig.connectionType': profile.connectionType || 'PPPoE',
+            'wanConfig.pppoeUsername': profile.pppoeUsername || '',
+            'wanConfig.pppoePasswordEncrypted': profile.pppoePasswordEncrypted || profile.pppoePassword || '',
+            'wanConfig.vlanId': profile.vlanId || 100,
+            'wanConfig.staticIp': profile.ipAddress || '',
+            'wanConfig.gateway': profile.gateway || '',
+            'wanConfig.dnsPrimary': profile.primaryDns || '',
+            'wanConfig.dnsSecondary': profile.secondaryDns || '',
+          }
+        }
+      );
+    }
+  } catch (err) {
+    console.error('[CWMP syncCustomerWanConfig error]:', err);
+  }
 }
 
 /**
@@ -1770,7 +1808,6 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
 };
 
 operatorRouter.post('/devices/:id/wan/profiles', handleAddWanProfile);
-operatorRouter.post('/devices/:id/wan', handleAddWanProfile);
 
 /**
  * 8.0.3.2 Edit Existing WAN Profile
