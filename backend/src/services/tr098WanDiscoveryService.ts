@@ -347,8 +347,10 @@ export function validateWanParameters(
     const isOptional = optionalRegex.test(path);
     const isRequired = requiredRegex.test(path);
 
-    // If discovered tree is completely empty (initial bootstrap), pass through to prevent deadlock
-    if (paramMap.size === 0) {
+    // If discovered tree does not contain any WAN connection parameters yet (initial bootstrap or only DeviceInfo cached),
+    // allow candidate parameters through to avoid false-positive rejections.
+    const hasDiscoveredWanTree = Array.from(paramMap.keys()).some((k) => k.includes('WANConnectionDevice.') || k.includes('Device.PPP.'));
+    if (!hasDiscoveredWanTree) {
       validParams.push([path, val, type]);
       continue;
     }
