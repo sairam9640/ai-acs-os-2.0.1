@@ -2571,7 +2571,7 @@ Timestamp: ${new Date().toISOString()}
     if (parsedClients.length > 0) {
       device.connectedClients = parsedClients.map((c: any) => ({
         ...c,
-        hostname: c.hostname || (c.mac ? `Device (${c.mac.replace(/[:-]/g, '').slice(-4).toUpperCase()})` : `Client ${c.ip}`),
+        hostname: CwmpVendorProfiles.resolveFriendlyDeviceName(c.hostname, c.mac, c.interfaceType),
       }));
       device.lanHostCount = device.connectedClients.filter((c: any) => c.connected !== false).length || parsedClients.length;
     }

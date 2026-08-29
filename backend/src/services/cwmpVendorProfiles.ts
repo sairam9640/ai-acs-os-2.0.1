@@ -674,6 +674,209 @@ export class CwmpVendorProfiles {
     // If no conclusive proof exists from the CPE, do NOT guess
     return 'UNKNOWN';
   }
+
+  /**
+   * Universal Client Identification Engine:
+   * Maps DHCP HostNames, IEEE OUI prefixes, and randomized MAC flags to real brand models
+   */
+  static resolveFriendlyDeviceName(
+    rawName?: string | null,
+    mac?: string | null,
+    iface?: string | null
+  ): string {
+    if (rawName && typeof rawName === 'string') {
+      const clean = rawName.replace(/["']/g, '').trim();
+      if (
+        clean &&
+        !/^client[-_]?\d+$/i.test(clean) &&
+        !/^host[-_]?\d+$/i.test(clean) &&
+        !/^unknown$/i.test(clean) &&
+        !/^device[-_]?\([a-f0-9]+\)$/i.test(clean) &&
+        clean !== '0.0.0.0'
+      ) {
+        return clean;
+      }
+    }
+
+    if (mac) {
+      const cleanMac = mac.replace(/[: -]/g, '').toUpperCase();
+      if (cleanMac.length >= 6) {
+        const p3 = cleanMac.slice(0, 6);
+        const firstByte = parseInt(cleanMac.slice(0, 2), 16);
+        const isRandomized = !isNaN(firstByte) && (firstByte & 0x02) !== 0;
+
+        const brandMap: Record<string, string> = {
+          // Apple (iPhone, iPad, MacBook)
+          'F01898': 'Apple iPhone',
+          'BCD074': 'Apple iPad',
+          'AC6784': 'Apple MacBook',
+          '38F9D3': 'Apple Device',
+          '40A6D9': 'Apple iPhone',
+          'A483E7': 'Apple Device',
+          'DCA904': 'Apple MacBook',
+          'F8FFC2': 'Apple iPad',
+          'E8802E': 'Apple Device',
+          '70ECE4': 'Apple iPhone',
+          'A860B6': 'Apple Watch',
+          'FC183C': 'Apple Device',
+          'B8782E': 'Apple iPhone',
+          'D4619D': 'Apple MacBook',
+          '20EE28': 'Apple iPhone',
+          '689C70': 'Apple iPad',
+          'F0D1A9': 'Apple Device',
+          'B0BE76': 'Apple iPhone',
+          'ACBC32': 'Apple MacBook',
+          '2CF0EE': 'Apple Device',
+          // Samsung Galaxy & Smart Things
+          '5CE91E': 'Samsung Galaxy',
+          '88665A': 'Samsung Smart Device',
+          '34145F': 'Samsung Galaxy Phone',
+          '44783E': 'Samsung Galaxy Tab',
+          '8C7712': 'Samsung Smart TV',
+          'A0C589': 'Samsung Device',
+          'B47C9C': 'Samsung Galaxy Phone',
+          'C0BDD1': 'Samsung Device',
+          'D0B76E': 'Samsung Galaxy Phone',
+          'E8508B': 'Samsung Smart Device',
+          'F47B5E': 'Samsung Galaxy Phone',
+          'FCA13E': 'Samsung Galaxy',
+          '0007AB': 'Samsung Electronics',
+          '001247': 'Samsung Electronics',
+          '0015B9': 'Samsung Electronics',
+          '00166C': 'Samsung Mobile',
+          '001A8A': 'Samsung Mobile',
+          // Xiaomi / Redmi / POCO
+          '94652D': 'Xiaomi / Redmi Phone',
+          '68DFDD': 'Xiaomi Redmi Smartphone',
+          '7C49EB': 'Xiaomi POCO Phone',
+          'ACF7F3': 'Xiaomi Smart Device',
+          '34CE00': 'Xiaomi Smartphone',
+          '286C07': 'Xiaomi Redmi Phone',
+          '184F32': 'Xiaomi Device',
+          '584498': 'Xiaomi Smart TV',
+          '640980': 'Xiaomi Redmi Phone',
+          '7811DC': 'Xiaomi Smartphone',
+          '8035C1': 'Xiaomi Device',
+          // OnePlus / Oppo / Realme
+          '6490C1': 'OnePlus Smartphone',
+          '74D21D': 'OnePlus Phone',
+          '9C2EA1': 'Oppo Smartphone',
+          'A4C3F0': 'OnePlus / Oppo Phone',
+          'C8D083': 'Realme Smartphone',
+          'E0DCFF': 'Realme Smartphone',
+          'F460E2': 'Oppo Smartphone',
+          '2C5BB8': 'OnePlus Phone',
+          // Vivo
+          '5076AF': 'Vivo Smartphone',
+          '54A51B': 'Vivo Phone',
+          '842AFD': 'Vivo Smartphone',
+          'C07E40': 'Vivo Phone',
+          'DC729B': 'Vivo Smartphone',
+          'E4AAEA': 'Vivo Phone',
+          // Intel / Laptops / PCs
+          '001B77': 'Intel Laptop / PC',
+          '001E64': 'Intel Wireless NIC',
+          '3413E8': 'Intel Desktop / Laptop',
+          '4851B7': 'Intel Wi-Fi 6 Client',
+          '5C879C': 'Intel PC / Laptop',
+          '6805CA': 'Intel Laptop Client',
+          '7CB27D': 'Intel Desktop',
+          '8086F2': 'Intel Core Laptop',
+          'A44CC8': 'Intel Wi-Fi NIC',
+          'B46921': 'Intel Wireless Client',
+          'E8D8D1': 'Intel PC / Laptop',
+          // Realtek / NICs
+          'A8E207': 'Realtek Wireless NIC',
+          '00E04C': 'Realtek Gigabit Ethernet',
+          '000CE7': 'Realtek Wi-Fi Adapter',
+          '74DA38': 'Realtek Wi-Fi Client',
+          'B0D59D': 'Realtek NIC',
+          '001A73': 'Realtek Semiconductor',
+          // Espressif / Smart IoT / Home Automation
+          '240AC4': 'Espressif Smart IoT Device',
+          '2462AB': 'Smart Home Automation Plug',
+          '246F28': 'Smart Wi-Fi Switch / Bulb',
+          '30AEA4': 'Espressif Smart Plug',
+          '3C71BF': 'Smart IoT Controller',
+          '483FDA': 'Espressif IoT Sensor',
+          '4C11AE': 'Smart Home IoT Device',
+          '5CCF7F': 'Espressif Smart Switch',
+          '600194': 'Smart Plug / Bulb',
+          '68C63A': 'Espressif IoT Node',
+          '84F3EB': 'Smart Light Controller',
+          'A4CF12': 'Smart IoT Appliance',
+          'B4E62D': 'Espressif Smart Home',
+          'C44F33': 'Smart Home Switch',
+          'CC50E3': 'Espressif Smart Device',
+          'D8A01D': 'Smart Automation Node',
+          'DC4F22': 'Espressif IoT Device',
+          // Amazon (Echo, Fire TV, Kindle)
+          '6045BD': 'Amazon Echo / FireTV',
+          '747548': 'Amazon FireTV Stick',
+          'AC63BE': 'Amazon Echo Dot',
+          'B47C9E': 'Amazon Fire Tablet',
+          'F0F002': 'Amazon Smart Device',
+          '00FC8B': 'Amazon Echo Show',
+          '44650D': 'Amazon FireTV 4K',
+          '6854FD': 'Amazon Echo Device',
+          // Google (Pixel, Nest, Chromecast)
+          '3C8CF8': 'Google Chromecast / Nest',
+          'F4F5D8': 'Google Pixel Phone',
+          '94EBCD': 'Google Nest Mini',
+          '546009': 'Google Pixel Smartphone',
+          '48D6D5': 'Google Nest Hub',
+          '001A11': 'Google Home Device',
+          // TP-Link
+          'B0A732': 'TP-Link Wireless Client',
+          '30DE4B': 'TP-Link Router / Extender',
+          '50C7BF': 'TP-Link Tapo Smart Camera',
+          '6032B1': 'TP-Link Archer Client',
+          '704F57': 'TP-Link Smart Plug',
+          '98DAC4': 'TP-Link Kasa Smart Device',
+          'C006C3': 'TP-Link Tapo Wi-Fi Cam',
+          'EC086B': 'TP-Link Wireless Extender',
+          // Sony (PlayStation, Bravia)
+          'D80D17': 'Sony PlayStation 5 / TV',
+          '00041F': 'Sony Interactive PS4/PS5',
+          '001315': 'Sony Bravia 4K TV',
+          '001A80': 'Sony Smart Device',
+          '00248D': 'Sony Electronics Device',
+          'F8461C': 'Sony PlayStation Console',
+          // LG Electronics (webOS TV)
+          'F44EFD': 'LG WebOS Smart 4K TV',
+          '001E75': 'LG Smart Electronics',
+          '10F96F': 'LG ThinQ Smart Appliance',
+          '203D66': 'LG Smart TV',
+          '58A2B5': 'LG WebOS TV',
+          'A823FE': 'LG Smart Device',
+          // Dell / HP / Lenovo
+          'D4BED9': 'Dell XPS / Inspiron Laptop',
+          '14FEB5': 'Dell Computer PC',
+          '001422': 'Dell Precision Desktop',
+          'F0921C': 'HP Pavilion / Envy Laptop',
+          '9C8E99': 'HP EliteBook PC',
+          '001E0B': 'HP Computer Client',
+          '00215D': 'Lenovo ThinkPad Laptop',
+          '54EE75': 'Lenovo Legion / IdeaPad',
+          '8CDCD4': 'Lenovo Laptop PC',
+        };
+
+        if (brandMap[p3]) {
+          return `${brandMap[p3]} (${mac.slice(-5).toUpperCase()})`;
+        }
+
+        if (isRandomized) {
+          return `Smartphone / Tablet (Private Wi-Fi ${mac.slice(-5).toUpperCase()})`;
+        }
+
+        return `Wireless Client (${mac.slice(-5).toUpperCase()})`;
+      }
+    }
+
+    if (iface && iface.includes('5G')) return '5GHz High-Speed Client';
+    if (iface && (iface.includes('eth') || iface.includes('lan'))) return 'Ethernet Wired Client';
+    return '2.4GHz Wireless Client';
+  }
 }
 
 export interface DiscoveredWifiInterface {

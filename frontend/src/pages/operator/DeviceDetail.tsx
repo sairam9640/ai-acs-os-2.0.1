@@ -53,6 +53,9 @@ import {
   BarChart2,
   Settings,
   ChevronDown,
+  Smartphone,
+  Laptop,
+  Tv,
 } from 'lucide-react';
 import { Shell } from '../../components/layout/Shell.js';
 import { StateWrapper } from '../../components/ui/StateWrapper.js';
@@ -2670,11 +2673,21 @@ export const DeviceDetail: React.FC = () => {
                                 ? 'text-[#0D9488]'
                                 : 'text-[#D97706]';
 
+                              const DeviceIcon = String(client.name + ' ' + (client.hostname || '')).match(/iphone|android|phone|galaxy|redmi|poco|pixel|mobile|vivo|oppo|realme|watch/i)
+                                ? Smartphone
+                                : String(client.name + ' ' + (client.hostname || '')).match(/desktop|pc|laptop|macbook|dell|lenovo|hp|thinkpad|intel/i)
+                                ? Laptop
+                                : String(client.name + ' ' + (client.hostname || '')).match(/tv|smart|roku|firestick|cast|bravia|webos/i)
+                                ? Tv
+                                : String(client.name + ' ' + (client.hostname || '')).match(/iot|plug|bulb|sensor|switch|espressif|tapo|kasa|camera/i)
+                                ? HardDrive
+                                : Monitor;
+
                               return (
                                 <tr key={client.mac || idx} className="hover:bg-[#F8FAFC] transition">
                                   <td className="py-3 px-3 font-sans">
                                     <div className="font-bold text-[#0F172A] flex items-center space-x-1.5">
-                                      <Monitor className="w-3.5 h-3.5 text-[#64748B]" />
+                                      <DeviceIcon className="w-3.5 h-3.5 text-[#1677FF]" />
                                       <span>{client.name}</span>
                                     </div>
                                     <div className="text-[10px] text-[#94A3B8] font-mono pl-5">{client.hostname || 'dhcp-client.lan'}</div>

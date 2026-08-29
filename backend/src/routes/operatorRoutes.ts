@@ -3215,8 +3215,9 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
       for (const c of d.connectedClients) {
         const key = (c.mac || c.ip || '').toUpperCase();
         if (key && !clientMap.has(key)) {
+          const resolvedName = CwmpVendorProfiles.resolveFriendlyDeviceName(c.hostname || c.name, c.mac, c.interfaceType || c.connectionType);
           clientMap.set(key, {
-            name: c.name || c.hostname || (c.mac ? `Device (${c.mac.slice(-5)})` : 'Connected Client'),
+            name: resolvedName,
             hostname: c.hostname || (c.mac ? `host-${c.mac.replace(/[: -]/g, '').slice(-4).toLowerCase()}.lan` : 'client.lan'),
             ip: c.ip || null,
             mac: (c.mac || '00:00:00:00:00:00').toUpperCase(),
@@ -3240,34 +3241,7 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
     )).sort((a, b) => a - b);
 
     const resolveFriendlyDeviceName = (name: string | null, mac: string | null, iface: string | null): string => {
-      if (name && name.trim() && !/^client[-_]?\d+/i.test(name) && !/^host[-_]?\d+/i.test(name)) {
-        return decodeXmlEntities(name.trim());
-      }
-      if (mac) {
-        const clean = mac.replace(/[: -]/g, '').toUpperCase();
-        const p3 = clean.slice(0, 6);
-        const brandMap: Record<string, string> = {
-          'F01898': 'Apple iPhone',
-          'BCD074': 'Apple iPad',
-          'AC6784': 'Apple MacBook',
-          '38F9D3': 'Apple Device',
-          '5CE91E': 'Samsung Galaxy',
-          '88665A': 'Samsung Smart Device',
-          '94652D': 'Xiaomi / Redmi Phone',
-          '6490C1': 'OnePlus Smartphone',
-          '5076AF': 'Vivo Smartphone',
-          'A8E207': 'Realtek Client',
-          '00E04C': 'Realtek Gigabit NIC',
-          'B0A732': 'TP-Link Device',
-          '6045BD': 'Amazon Echo / FireTV',
-          '3C8CF8': 'Google Chromecast / Nest',
-          'D80D17': 'Sony Smart TV / PS5',
-          'F44EFD': 'LG WebOS Smart TV'
-        };
-        if (brandMap[p3]) return `${brandMap[p3]} (${mac.slice(-5).toUpperCase()})`;
-        return `Host (${mac.slice(-5).toUpperCase()})`;
-      }
-      return iface && iface.includes('5G') ? '5GHz High-Speed Client' : '2.4GHz Wireless Client';
+      return CwmpVendorProfiles.resolveFriendlyDeviceName(name, mac, iface);
     };
 
     for (const idx of hostIndices) {
