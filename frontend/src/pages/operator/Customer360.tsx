@@ -439,16 +439,24 @@ export const Customer360: React.FC = () => {
               </div>
 
               {/* WAN & PPPoE */}
-              <div className="space-y-1">
-                <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider">WAN & IP Session</span>
-                <p className="text-xs font-mono font-bold text-slate-200 truncate">
-                  {device?.wanProfiles?.[0]?.pppoeUsername || device?.wanProfiles?.[0]?.username || device?.pppoeUsername || customer?.wanConfig?.pppoeUsername || `${customer?.accountNumber?.toLowerCase()}@isp`}
-                </p>
-                <div className="text-[11px] text-slate-300 font-mono space-y-0.5">
-                  <p>PPPoE Pass: {isUnmasked ? (customer?.wanConfig?.pppoePassword || device?.wanProfiles?.[0]?.password || '••••••••') : '••••••••'}</p>
-                  <p>VLAN: {device?.wanProfiles?.[0]?.vlanId || device?.wanVlan || customer?.wanConfig?.vlanId || 100} • IP: {device?.wanProfiles?.[0]?.ipAddress || device?.externalIpAddress || device?.ipAddress || '10.20.44.112'}</p>
-                </div>
-              </div>
+              {(() => {
+                const customerInternetWan = (device?.wanProfiles || []).find((p: any) =>
+                  p.bearerService === 'INTERNET' || p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || /INTERNET|PPP/i.test(p.name || '')
+                ) || (device?.wanProfiles || []).find((p: any) => !p.isProtected && p.serviceType !== 'TR069') || device?.wanProfiles?.[0];
+
+                return (
+                  <div className="space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-purple-400 tracking-wider">WAN & IP Session</span>
+                    <p className="text-xs font-mono font-bold text-slate-200 truncate">
+                      {customerInternetWan?.pppoeUsername || customerInternetWan?.username || device?.pppoeUsername || customer?.wanConfig?.pppoeUsername || `${customer?.accountNumber?.toLowerCase()}@isp`}
+                    </p>
+                    <div className="text-[11px] text-slate-300 font-mono space-y-0.5">
+                      <p>PPPoE Pass: {isUnmasked ? (customer?.wanConfig?.pppoePassword || customerInternetWan?.password || '••••••••') : '••••••••'}</p>
+                      <p>VLAN: {customerInternetWan?.vlanId || device?.wanVlan || customer?.wanConfig?.vlanId || 100} • IP: {customerInternetWan?.ipAddress || device?.externalIpAddress || 'No IP Assigned'}</p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </Card>
 
@@ -700,39 +708,47 @@ export const Customer360: React.FC = () => {
                 </Card>
 
                 {/* PPPoE WAN Interface */}
-                <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
-                      <Server className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
-                      PPPoE & WAN Network Interface
-                    </h3>
-                    <Badge variant={device?.wanProfiles?.[0]?.status === 'Connected' || device?.status === 'online' ? 'success' : 'warning'}>
-                      {device?.wanProfiles?.[0]?.status || (device?.status === 'online' ? 'Connected' : 'Disconnected')}
-                    </Badge>
-                  </div>
-                  <div className="space-y-2 text-xs font-mono">
-                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                      <span className="text-slate-500 font-sans">PPPoE Username:</span>
-                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.pppoeUsername || device?.pppoeUsername || customer?.wanConfig?.pppoeUsername || 'Not Configured'}</span>
-                    </div>
-                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                      <span className="text-slate-500 font-sans">Assigned External IP:</span>
-                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.ipAddress || device?.externalIpAddress || device?.ipAddress || 'Not Assigned'}</span>
-                    </div>
-                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                      <span className="text-slate-500 font-sans">VLAN Tag:</span>
-                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.vlanId || device?.wanVlan || customer?.wanConfig?.vlanId || 'Untagged'}</span>
-                    </div>
-                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                      <span className="text-slate-500 font-sans">Primary DNS:</span>
-                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.primaryDns || customer?.wanConfig?.dnsPrimary || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
-                      <span className="text-slate-500 font-sans">Secondary DNS:</span>
-                      <span className="font-bold text-slate-900">{device?.wanProfiles?.[0]?.secondaryDns || customer?.wanConfig?.dnsSecondary || 'N/A'}</span>
-                    </div>
-                  </div>
-                </Card>
+                {(() => {
+                  const customerInternetWan = (device?.wanProfiles || []).find((p: any) =>
+                    p.bearerService === 'INTERNET' || p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || /INTERNET|PPP/i.test(p.name || '')
+                  ) || (device?.wanProfiles || []).find((p: any) => !p.isProtected && p.serviceType !== 'TR069') || device?.wanProfiles?.[0];
+
+                  return (
+                    <Card className="p-5 border border-slate-200 bg-white rounded-2xl shadow-xs space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-bold uppercase text-slate-800 tracking-wider flex items-center">
+                          <Server className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+                          PPPoE & WAN Network Interface
+                        </h3>
+                        <Badge variant={customerInternetWan?.status === 'Connected' || device?.status === 'online' ? 'success' : 'warning'}>
+                          {customerInternetWan?.status || (device?.status === 'online' ? 'Connected' : 'Disconnected')}
+                        </Badge>
+                      </div>
+                      <div className="space-y-2 text-xs font-mono">
+                        <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                          <span className="text-slate-500 font-sans">PPPoE Username:</span>
+                          <span className="font-bold text-slate-900">{customerInternetWan?.pppoeUsername || device?.pppoeUsername || customer?.wanConfig?.pppoeUsername || 'Not Configured'}</span>
+                        </div>
+                        <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                          <span className="text-slate-500 font-sans">Assigned External IP:</span>
+                          <span className="font-bold text-slate-900">{customerInternetWan?.ipAddress || device?.externalIpAddress || 'No IP Assigned'}</span>
+                        </div>
+                        <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                          <span className="text-slate-500 font-sans">VLAN Tag:</span>
+                          <span className="font-bold text-slate-900">{customerInternetWan?.vlanId || device?.wanVlan || customer?.wanConfig?.vlanId || 'Untagged'}</span>
+                        </div>
+                        <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                          <span className="text-slate-500 font-sans">Primary DNS:</span>
+                          <span className="font-bold text-slate-900">{customerInternetWan?.primaryDns || customer?.wanConfig?.dnsPrimary || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between p-2 bg-slate-50 rounded-lg">
+                          <span className="text-slate-500 font-sans">Secondary DNS:</span>
+                          <span className="font-bold text-slate-900">{customerInternetWan?.secondaryDns || customer?.wanConfig?.dnsSecondary || 'N/A'}</span>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })()}
               </div>
 
               {/* LIVE CONNECTED WI-FI & LAN CLIENTS TABLE */}
