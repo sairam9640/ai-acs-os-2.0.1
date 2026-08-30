@@ -194,7 +194,7 @@ export class CwmpVendorProfiles {
       `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.Enable`,
     ] : [];
 
-    // Comprehensive Universal TR-098 Baseline:
+    // Comprehensive Universal TR-098 Baseline (Using standard TR-069 subtrees to prevent Fault 9005):
     return [
       'InternetGatewayDevice.DeviceInfo.Manufacturer',
       'InternetGatewayDevice.DeviceInfo.ManufacturerOUI',
@@ -204,36 +204,19 @@ export class CwmpVendorProfiles {
       'InternetGatewayDevice.DeviceInfo.HardwareVersion',
       'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
       'InternetGatewayDevice.DeviceInfo.UpTime',
-      // Wi-Fi 2.4 GHz (Instance 1)
+      // Wi-Fi 2.4 GHz & Multi-Band Subtrees (CPE returns all active instances without 9005 faults)
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
-      // Wi-Fi 5 GHz (Included when dual-band model is detected)
       ...wlan5gParams,
-      // LAN Host Count
+      // LAN Host Count & Subtree
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
-      // WAN Slot 1 — Management / TR-069 / Internet
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Enable',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Enable',
-      // WAN Slot 2 — High-Speed Internet PPPoE / Voice
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ConnectionStatus',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Enable',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.VLANID',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.ExternalIPAddress',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.ConnectionStatus',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.Enable',
+      // Universal WAN Connection Subtree (Discovers all active PPP and IP connection slots without leaf path mismatches)
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.',
       // Management Server
       'InternetGatewayDevice.ManagementServer.ConnectionRequestURL',
-      'InternetGatewayDevice.ManagementServer.ParameterKey',
     ];
   }
 
