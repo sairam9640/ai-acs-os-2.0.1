@@ -184,6 +184,17 @@ export class CwmpVendorProfiles {
       ];
     }
 
+    // Wi-Fi 5 GHz instance tailored to vendor architecture:
+    // Instance 2 on TP-Link, VSOL, RicherLink; Instance 5 on Genexis, Huawei, ZTE, Syrotech, China Telecom
+    const wlan5gInstance = (vendor === 'TPLINK' || vendor === 'VSOL' || vendor === 'RICHERLINK') ? 2 : 5;
+    const wlan5gParams = [
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.SSID`,
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.PreSharedKey.1.KeyPassphrase`,
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.Channel`,
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.BeaconType`,
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.Enable`,
+    ];
+
     // Comprehensive Universal TR-098 Baseline:
     return [
       'InternetGatewayDevice.DeviceInfo.Manufacturer',
@@ -200,15 +211,8 @@ export class CwmpVendorProfiles {
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
-      // Wi-Fi 5 GHz (Instance 5 on Genexis/Huawei/ZTE/Syrotech, Instance 2 on TP-Link/VSOL/RicherLink)
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Channel',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.BeaconType',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.Enable',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.SSID',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.PreSharedKey.1.KeyPassphrase',
-      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.2.Channel',
+      // Wi-Fi 5 GHz (Tailored to vendor to prevent Fault 9005)
+      ...wlan5gParams,
       // LAN Host Count
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
       // WAN Slot 1 — Management / TR-069 / Internet

@@ -674,7 +674,7 @@ export const DeviceDetail: React.FC = () => {
         setIsOverlayActive(false);
         setPendingToast({
           type: 'info',
-          message: 'Request moved to "Pending Updates". UI is unlocked — ONT will apply configuration upon next contact.',
+          message: 'ONT is communicating in the background. Your request is queued in "Pending Updates" and will automatically refresh as soon as the ONT confirms.',
         });
         fetchWorkspace(id);
       }
@@ -1540,31 +1540,31 @@ export const DeviceDetail: React.FC = () => {
                   variant="primary"
                   onClick={handleSummonDevice}
                   isLoading={isSummoning}
-                  disabled={!isOnline || workspace.activeCommand?.exists}
-                  title={!isOnline ? "Device Offline - configuration changes unavailable" : workspace.activeCommand?.exists ? "Command already in progress" : undefined}
+                  disabled={!isOnline || workspace.activeCommand?.exists || isSummoning || isFetchingParams || isRefreshing || isOverlayActive}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : (workspace.activeCommand?.exists || isSummoning) ? "Summon / command already in progress" : undefined}
                   className="bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50"
                 >
                   <Zap className="w-4 h-4 mr-1.5" />
-                  <span>Summon / Live Poll</span>
+                  <span>{isSummoning ? 'Summoning...' : 'Summon / Live Poll'}</span>
                 </Button>
                 <Button
                   size="sm"
                   variant="primary"
                   onClick={handleFetchParameters}
                   isLoading={isFetchingParams}
-                  disabled={!isOnline || workspace.activeCommand?.exists}
-                  title={!isOnline ? "Device Offline - configuration changes unavailable" : workspace.activeCommand?.exists ? "Command already in progress" : "Fetch all live parameters and optical power from router via TR-069"}
+                  disabled={!isOnline || workspace.activeCommand?.exists || isSummoning || isFetchingParams || isRefreshing || isOverlayActive}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : (workspace.activeCommand?.exists || isFetchingParams) ? "Parameter fetch already in progress" : "Fetch all live parameters and optical power from router via TR-069"}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold disabled:opacity-50"
                 >
                   <Cpu className="w-4 h-4 mr-1.5" />
-                  <span>Fetch Parameters</span>
+                  <span>{isFetchingParams ? 'Fetching...' : 'Fetch Parameters'}</span>
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={handleRefreshTelemetry}
                   isLoading={isRefreshing}
-                  disabled={!isOnline || workspace.activeCommand?.exists}
+                  disabled={!isOnline || workspace.activeCommand?.exists || isSummoning || isFetchingParams || isRefreshing || isOverlayActive}
                   title={!isOnline ? "Device Offline - configuration changes unavailable" : workspace.activeCommand?.exists ? "Command already in progress" : undefined}
                 >
                   <RefreshCw className="w-4 h-4 mr-1.5" />
@@ -1574,7 +1574,7 @@ export const DeviceDetail: React.FC = () => {
                   size="sm"
                   variant="secondary"
                   onClick={handleOpenEditConfig}
-                  disabled={!isOnline || workspace.activeCommand?.exists}
+                  disabled={!isOnline || workspace.activeCommand?.exists || isSummoning || isFetchingParams || isRefreshing || isOverlayActive}
                   title={!isOnline ? "Device Offline - configuration changes unavailable" : workspace.activeCommand?.exists ? "Command already in progress" : undefined}
                 >
                   <Edit3 className="w-4 h-4 mr-1.5" />

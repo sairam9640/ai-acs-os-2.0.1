@@ -148,6 +148,7 @@ export const ONTList: React.FC = () => {
   };
 
   const [isSyncingFleet, setIsSyncingFleet] = useState(false);
+  const [summoningDeviceId, setSummoningDeviceId] = useState<string | null>(null);
 
   const handleSyncFleet = async () => {
     setIsSyncingFleet(true);
@@ -166,18 +167,23 @@ export const ONTList: React.FC = () => {
   };
 
   const handleRowSummon = async (d: any) => {
+    setSummoningDeviceId(d._id);
     const start = performance.now();
     try {
       const res = await api.summonDevice(d._id);
       const elapsedMs = Math.round(performance.now() - start);
       const elapsedSec = (elapsedMs / 1000).toFixed(2);
       if (res.success) {
-        setSummonSuccessToast(`Summoned & Polled ${d.serialNumber} in ${elapsedSec}s (${elapsedMs} ms)`);
+        setSummonSuccessToast(`✅ Summoned & Polled ${d.serialNumber} in ${elapsedSec}s (${elapsedMs} ms)`);
         fetchDevices();
         setTimeout(() => setSummonSuccessToast(null), 4000);
+      } else {
+        setSummonSuccessToast(`❌ Summon failed: ${res.error || res.message || 'Device unresponsive'}`);
       }
     } catch (err: any) {
-      setSummonSuccessToast(`Summon Error: ${err.message}`);
+      setSummonSuccessToast(`❌ Summon Error: ${err.message}`);
+    } finally {
+      setSummoningDeviceId(null);
     }
   };
 
@@ -323,6 +329,10 @@ export const ONTList: React.FC = () => {
 
   useEffect(() => {
     fetchDevices();
+    const fleetInterval = setInterval(() => {
+      fetchDevices();
+    }, 5 * 60 * 1000);
+    return () => clearInterval(fleetInterval);
   }, [statusFilter]);
 
   const handleOpenAssignModal = (d: any) => {
@@ -565,6 +575,8 @@ export const ONTList: React.FC = () => {
           <Button
             size="sm"
             variant="outline"
+            disabled={summoningDeviceId === d._id}
+            isLoading={summoningDeviceId === d._id}
             onClick={(e) => {
               e.stopPropagation();
               handleRowSummon(d);
@@ -572,7 +584,7 @@ export const ONTList: React.FC = () => {
             title="Summon & Poll Live Device"
           >
             <Zap className="w-3.5 h-3.5 mr-1 text-amber-500" />
-            <span>Summon</span>
+            <span>{summoningDeviceId === d._id ? 'Summoning...' : 'Summon'}</span>
           </Button>
 
           <Button
