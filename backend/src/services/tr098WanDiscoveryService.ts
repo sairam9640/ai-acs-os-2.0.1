@@ -344,67 +344,18 @@ export function validateWanParameters(
   const requiredRegex = /Username$|Password$|Enable$|ConnectionType$/i;
 
   for (const [path, val, type] of requestedParams) {
-    const isOptional = optionalRegex.test(path);
-    const isRequired = requiredRegex.test(path);
-
-    // If discovered tree does not contain any WAN connection parameters yet (initial bootstrap or only DeviceInfo cached),
-    // allow candidate parameters through to avoid false-positive rejections.
-    const hasDiscoveredWanTree = Array.from(paramMap.keys()).some((k) => k.includes('WANConnectionDevice.') || k.includes('Device.PPP.'));
-    if (!hasDiscoveredWanTree) {
-      validParams.push([path, val, type]);
+    if (val === undefined || val === null) {
       continue;
     }
 
     const discovered = paramMap.get(path);
 
-    if (!discovered) {
-      // Check if parent connection instance exists in paramMap (e.g. WANPPPConnection.1)
-      const instancePrefixMatch = path.match(/^(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.(?:WANPPPConnection|WANIPConnection)\.\d+)\./);
-      const parentInstance = instancePrefixMatch ? instancePrefixMatch[1] : '';
-      const parentExists = Boolean(parentInstance && Array.from(paramMap.keys()).some((k) => k.startsWith(parentInstance)));
-
-      const isStandardWanCore = /\.(?:Username|Password|Enable|ConnectionType)$/i.test(path);
-
-      if (parentExists && isStandardWanCore) {
-        validParams.push([path, val, type]);
-        continue;
-      }
-
-      // If parent instance doesn't exist on device (e.g. requested WANPPPConnection.2 on a device that only has WANPPPConnection.1)
-      if (!parentExists && isStandardWanCore) {
-        const confirmedPppInstanceKey = Array.from(paramMap.keys()).find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
-        if (confirmedPppInstanceKey) {
-          const m = confirmedPppInstanceKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
-          if (m) {
-            const redirectedPath = path.replace(parentInstance, m[1]);
-            validParams.push([redirectedPath, val, type]);
-            continue;
-          }
-        }
-      }
-
-      if (isOptional) {
-        omittedOptional.push(path);
-        continue;
-      } else if (isRequired && !hasDiscoveredWanTree) {
-        validParams.push([path, val, type]);
-        continue;
-      } else {
-        omittedOptional.push(path);
-        continue;
-      }
+    if (discovered && discovered.writable === false) {
+      omittedOptional.push(`${path} (read-only)`);
+      continue;
     }
 
-    if (discovered.writable === false) {
-      if (isOptional) {
-        omittedOptional.push(`${path} (read-only)`);
-        continue;
-      } else {
-        errors.push(`Parameter '${path}' exists but is declared read-only by the CPE.`);
-        continue;
-      }
-    }
-
+    // Keep candidate parameter for the target slot
     validParams.push([path, val, type]);
   }
 
