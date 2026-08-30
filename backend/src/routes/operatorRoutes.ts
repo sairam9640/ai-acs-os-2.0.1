@@ -492,11 +492,11 @@ const handleDeviceInspection = async (req: AuthenticatedRequest, res: Response) 
         lastInform: device.lastInform ?? null,
       },
       wan: {
-        wanIp: internetWan?.ipAddress ?? device.ipAddress ?? null,
-        externalIp: internetWan?.ipAddress ?? device.externalIpAddress ?? null,
-        pppoeUsername: internetWan?.pppoeUsername ?? device.pppoeUsername ?? null,
-        passwordConfigured: Boolean(internetWan?.pppoePasswordEncrypted || internetWan?.pppoeUsername || device.pppoeUsername),
-        vlanId: internetWan?.vlanId ?? device.wanVlan ?? null,
+        wanIp: internetWan?.ipAddress ?? (device as any).ipAddress ?? null,
+        externalIp: internetWan?.ipAddress ?? (device as any).externalIpAddress ?? null,
+        pppoeUsername: internetWan?.pppoeUsername ?? (device as any).pppoeUsername ?? null,
+        passwordConfigured: Boolean(internetWan?.pppoePasswordEncrypted || internetWan?.pppoeUsername || (device as any).pppoeUsername),
+        vlanId: internetWan?.vlanId ?? (device as any).wanVlan ?? null,
         connectionType: internetWan?.connectionType ?? 'PPPoE',
         connectionStatus: internetWan?.status ?? (device.status === 'online' ? 'Connected' : 'Disconnected'),
         serviceType: internetWan?.serviceType ?? 'INTERNET',
@@ -668,6 +668,10 @@ operatorRouter.get('/devices/:id/configuration', async (req: AuthenticatedReques
     const device = await Device.findOne({ _id: req.params.id, tenantId });
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
+    const internetWan = ((device.wanProfiles || []) as any[]).find((p: any) =>
+      p.bearerService === 'INTERNET' || p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || /INTERNET|PPP/i.test(p.name || '')
+    ) || ((device.wanProfiles || []) as any[]).find((p: any) => !p.isProtected && p.serviceType !== 'TR069') || (device.wanProfiles?.[0] as any);
+
     return res.json({
       success: true,
       configuration: {
@@ -690,10 +694,10 @@ operatorRouter.get('/devices/:id/configuration', async (req: AuthenticatedReques
           passwordConfigured: true,
         },
         wan: {
-          pppoeUsername: internetWan?.pppoeUsername || device.pppoeUsername || '',
-          vlanId: internetWan?.vlanId ?? device.wanVlan ?? 480,
+          pppoeUsername: internetWan?.pppoeUsername || (device as any).pppoeUsername || '',
+          vlanId: internetWan?.vlanId ?? (device as any).wanVlan ?? 480,
           connectionType: internetWan?.connectionType || 'PPPoE',
-          passwordConfigured: Boolean(internetWan?.pppoePasswordEncrypted || internetWan?.pppoeUsername || device.pppoeUsername),
+          passwordConfigured: Boolean(internetWan?.pppoePasswordEncrypted || internetWan?.pppoeUsername || (device as any).pppoeUsername),
         },
       },
     });
@@ -876,7 +880,7 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
       if (wan.pppoeUsername !== undefined && wan.pppoeUsername.trim()) {
         auditChanges['wan.pppoeUsername'] = { old: targetWan.pppoeUsername, new: wan.pppoeUsername.trim() };
         targetWan.pppoeUsername = wan.pppoeUsername.trim();
-        device.pppoeUsername = wan.pppoeUsername.trim();
+        (device as any).pppoeUsername = wan.pppoeUsername.trim();
         tr069ParamValues.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.WANPPPConnection.1.Username`, wan.pppoeUsername.trim(), 'xsd:string']);
       }
       if (wan.pppoePassword && wan.pppoePassword.length >= 1) {
@@ -889,7 +893,7 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
         if (!isNaN(v) && v >= 1 && v <= 4094) {
           auditChanges['wan.vlanId'] = { old: targetWan.vlanId, new: v };
           targetWan.vlanId = v;
-          device.wanVlan = v;
+          (device as any).wanVlan = v;
           tr069ParamValues.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.X_CT-COM_WANEponLinkConfig.Mode`, 2, 'xsd:int']);
           tr069ParamValues.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.X_CT-COM_WANEponLinkConfig.VLANIDMark`, v, 'xsd:int']);
         }
@@ -2400,7 +2404,7 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     // Queue TR-069 command to disable customer WAN connection on the physical ONT
     const slotMatch = targetProfile.cpeObjectPath?.match(/WANConnectionDevice\.(\d+)\./i);
     const targetSlot = slotMatch ? slotMatch[1] : '2';
-    const isPpp = targetProfile.connectionType === 'PPPoE' || targetProfile.linkMode === 'PPP';
+    const isPpp = (targetProfile as any).connectionType === 'PPPoE' || (targetProfile as any).linkMode === 'PPP';
     const connType = isPpp ? 'WANPPPConnection.1' : 'WANIPConnection.1';
     const disablePayload = await buildTr069WanParams({ ...targetProfile, enableWan: false, pppoeUsername: '' }, device);
     const deleteCmd = await DeviceCommand.create({
