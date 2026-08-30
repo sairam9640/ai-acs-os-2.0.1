@@ -1572,7 +1572,8 @@ ${stringElements}
               validParams.push({ name: targetName, value: vVal, type: vType });
             }
 
-            const targetParamName = validParams[0]?.name || '';
+            const isWanConfigCommand = pendingCmd.action === 'SET_WAN_CONFIG' || validParams.some(p => p.name.includes('WANConnectionDevice.'));
+            const targetParamName = validParams.find(p => p.name.includes('WANConnectionDevice.'))?.name || '';
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
 
@@ -1580,14 +1581,11 @@ ${stringElements}
             const targetConnObj = isPppoeConn ? 'WANPPPConnection.' : 'WANIPConnection.';
             const targetObjectName = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${targetConnObj}`;
 
-            const slotExistsInRaw = Object.keys(dev.rawParameters || {}).some(k =>
+            const slotExistsInRaw = targetSlot === 1 || Object.keys(dev.rawParameters || {}).some(k =>
               k.includes(`WANConnectionDevice.${targetSlot}.${targetConnObj}`)
             );
 
-            const isGenexis = /4410|Platinum|GX[-_ ]?4410/i.test(String(dev.modelName || session.modelName || ''));
-            const isPreAllocatedSlot = targetSlot === 1 || (isGenexis && targetSlot <= 4) || (targetSlot >= 1 && targetSlot <= 8);
-
-            if (!isPreAllocatedSlot && targetSlot > 1 && !slotExistsInRaw && session.stage !== 'ADD_OBJECT_SENT') {
+            if (isWanConfigCommand && targetSlot > 1 && !slotExistsInRaw && session.stage !== 'ADD_OBJECT_SENT') {
               session.stage = 'ADD_OBJECT_SENT';
               const addObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
