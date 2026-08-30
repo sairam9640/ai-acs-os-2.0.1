@@ -145,12 +145,67 @@ describe('AI ISP OS — Genexis Platinum GX 4410 Comprehensive End-to-End Test S
     expect(userParam?.[1]).toBe('gx4410_updated@isp.in');
   });
 
-  it('9. Should run full agent standalone test successfully', async () => {
+  it('9. Should dispatch SetParameterValues to write updated Wi-Fi & WAN credentials on GX 4410', async () => {
+    const dev = await Device.findOne({ serialNumber: testSerial });
+    expect(dev).toBeDefined();
+
+    // Queue SET_WIFI_CONFIG command
+    const wifiCmd = await DeviceCommand.create({
+      tenantId: testTenant._id,
+      deviceId: dev!._id,
+      action: 'SET_WIFI_CONFIG',
+      parameters: {
+        wifi24: { ssid: 'Genexis_4410_Office', password: 'NewSecurePass@2026' },
+        wifi5g: { ssid: 'Genexis_4410_5G_VIP', password: 'New5GSecurePass@2026' },
+      },
+      status: 'queued',
+      requestedBy: { email: 'test-agent@genexis.com', role: 'operator_admin' },
+      queuedAt: new Date(),
+    });
+
+    expect(wifiCmd).toBeDefined();
+    expect(wifiCmd.status).toBe('queued');
+
+    // Simulate ACS dispatching SetParameterValues
+    const spvXml = agent.generateSpvXml([
+      { name: 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', value: 'Genexis_4410_Office', type: 'xsd:string' },
+      { name: 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase', value: 'NewSecurePass@2026', type: 'xsd:string' },
+      { name: 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID', value: 'Genexis_4410_5G_VIP', type: 'xsd:string' },
+      { name: 'InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase', value: 'New5GSecurePass@2026', type: 'xsd:string' },
+    ]);
+    expect(spvXml).toContain('Genexis_4410_Office');
+
+    // Simulate CPE returning SetParameterValuesResponse (Status 0 = Applied)
+    const spvResXml = agent.generateSpvResponse();
+    const handleSpvRes = await CwmpService.handleParameterValuesResponse(spvResXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    expect(handleSpvRes).toBeDefined();
+  });
+
+  it('10. Should confirm Write-Back Verification via follow-up GetParameterValues', async () => {
+    // Update local agent state to reflect written values
+    agent.state.wifi24.ssid = 'Genexis_4410_Office';
+    agent.state.wifi24.key = 'NewSecurePass@2026';
+    agent.state.wifi5g.ssid = 'Genexis_4410_5G_VIP';
+    agent.state.wifi5g.key = 'New5GSecurePass@2026';
+
+    // CPE sends GPV response confirming written parameters
+    const verifyGpvXml = agent.generateGpvResponse();
+    const gpvRes = await CwmpService.handleParameterValuesResponse(verifyGpvXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    expect(gpvRes).toBeDefined();
+
+    const dev = await Device.findOne({ serialNumber: testSerial });
+    expect(dev?.wifi24?.ssid).toBe('Genexis_4410_Office');
+    expect(dev?.wifi24?.password).toBe('NewSecurePass@2026');
+    expect(dev?.wifi5g?.ssid).toBe('Genexis_4410_5G_VIP');
+    expect(dev?.wifi5g?.password).toBe('New5GSecurePass@2026');
+  });
+
+  it('11. Should run full agent standalone test successfully', async () => {
     const fullResult = await agent.runFullEndToEndSession();
     expect(fullResult.success).toBe(true);
     expect(fullResult.discoveredVendor).toBe('GENEXIS');
-    expect(fullResult.wifi24Ssid).toBe('Genexis_GX4410_2.4G');
-    expect(fullResult.wifi5gSsid).toBe('Genexis_GX4410_5G');
+    expect(fullResult.wifi24Ssid).toBe('Genexis_4410_Office');
+    expect(fullResult.wifi5gSsid).toBe('Genexis_4410_5G_VIP');
     expect(fullResult.wanPppoeUser).toBe('gx4410_user@isp.in');
   });
 });

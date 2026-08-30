@@ -282,6 +282,48 @@ ${paramEntries}
   }
 
   /**
+   * Generates SetParameterValues XML request
+   */
+  public generateSpvXml(params: Array<{ name: string; value: any; type?: string }>, id = '3'): string {
+    const paramEntries = params
+      .map(
+        (p) => `        <ParameterValueStruct>
+          <Name>${p.name}</Name>
+          <Value xsi:type="${p.type || 'xsd:string'}">${p.value}</Value>
+        </ParameterValueStruct>`
+      )
+      .join('\n');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">${id}</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[${params.length}]">
+${paramEntries}
+      </ParameterList>
+      <ParameterKey>spv_genexis_test</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+  }
+
+  /**
+   * Generates SetParameterValuesResponse XML
+   */
+  public generateSpvResponse(status = 0, id = '3'): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">${id}</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValuesResponse>
+      <Status>${status}</Status>
+    </cwmp:SetParameterValuesResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+  }
+
+  /**
    * Applies incoming SetParameterValues to local simulated state
    */
   public applySetParameterValues(spvXml: string): string {
