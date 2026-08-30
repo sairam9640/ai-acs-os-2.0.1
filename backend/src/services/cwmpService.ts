@@ -1559,9 +1559,15 @@ ${stringElements}
 
             const isPppoeConn = targetParamName.includes('WANPPPConnection');
             const targetConnObj = isPppoeConn ? 'WANPPPConnection.' : 'WANIPConnection.';
-            const targetObjectName = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${targetConnObj}`;
+            
+            const slotDeviceExists = targetSlot === 1 || Object.keys(dev.rawParameters || {}).some(k =>
+              k.includes(`WANConnectionDevice.${targetSlot}.`)
+            );
+            const targetObjectName = !slotDeviceExists
+              ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.'
+              : `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${targetConnObj}`;
 
-            const slotExistsInRaw = targetSlot === 1 || Object.keys(dev.rawParameters || {}).some(k =>
+            const slotExistsInRaw = Object.keys(dev.rawParameters || {}).some(k =>
               k.includes(`WANConnectionDevice.${targetSlot}.${targetConnObj}`)
             );
 
