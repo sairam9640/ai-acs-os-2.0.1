@@ -39,7 +39,8 @@ export type CommandStatus =
   | 'timed_out'
   | 'canceled'
   | 'cancelled'
-  | 'rolled_back';
+  | 'rolled_back'
+  | 'waiting_for_wan_slot'; // AddObject-unsupported firmware: waiting for WAN slot to appear in device GUI
 
 export interface IDeviceCommand extends Document {
   _id: Types.ObjectId;
@@ -139,6 +140,7 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
         'canceled',
         'cancelled',
         'rolled_back',
+        'waiting_for_wan_slot',
       ],
       default: 'pending',
       index: true,

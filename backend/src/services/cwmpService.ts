@@ -1319,7 +1319,7 @@ ${stringElements}
         let pendingCmd = await DeviceCommand.findOne({
           deviceId: dev._id,
           action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
-          status: { $in: ['pending', 'queued', 'authorized', 'created', 'sending', 'sent'] }
+          status: { $in: ['pending', 'queued', 'authorized', 'created', 'sending', 'sent', 'waiting_for_wan_slot'] }
         }).sort({ queuedAt: 1, createdAt: 1 });
 
         // STRICT SINGLE-COMMAND LOCK: If a high-priority command is already in-flight (sending/verifying),
@@ -1583,6 +1583,33 @@ ${stringElements}
             );
 
             const addObjectAttempted = !!(pendingCmd as any).parameters?.addObjectAttempted;
+            // --- POLL-THEN-PROVISION for AddObject-unsupported firmware (e.g. Genexis P4410-V2-1.44) ---
+            // If this device has been confirmed to not support AddObject, skip AddObject entirely.
+            // Instead, send a WAN tree GPV to check if the slot has appeared after manual GUI provisioning.
+            if (isWanConfigCommand && targetSlot > 1 && !slotExistsInRaw && (dev as any).addObjectNotSupported) {
+              console.log(`[CWMP ACS] 🔄 [POLL-THEN-PROVISION] Device ${session.serialNumber} has addObjectNotSupported=true. Dispatching WAN slot GPV to detect if slot ${targetSlot} is available yet.`);
+              // Check if command is not yet in waiting_for_wan_slot
+              if ((pendingCmd as any).status !== 'waiting_for_wan_slot') {
+                (pendingCmd as any).status = 'waiting_for_wan_slot';
+                await pendingCmd.save();
+              }
+              // Dispatch a WAN slot discovery GPV — check WANConnectionDevice tree
+              const slotDiscoveryGpvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">6</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soapenv:arrayType="xsd:string[1]">
+        <string>InternetGatewayDevice.WANDevice.1.</string>
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+              session.stage = 'WAN_SLOT_GPN_SENT';
+              console.log(`[Native CWMP OUT] Dispatched WAN Slot Discovery GPV for ${session.serialNumber} (Slot Target: ${targetSlot})`);
+              return slotDiscoveryGpvXml;
+            }
+
             if (isWanConfigCommand && targetSlot > 1 && !slotExistsInRaw && !addObjectAttempted && session.stage !== 'ADD_OBJECT_SENT') {
               session.stage = 'ADD_OBJECT_SENT';
               if (pendingCmd.parameters) {
@@ -2010,6 +2037,35 @@ ${stringElements}
     if (!device.rawParameters) device.rawParameters = {};
     Object.assign(device.rawParameters, rawMap);
 
+    // --- POLL-THEN-PROVISION: WAN Slot Activation Check ---
+    // After every GPV response, check if any waiting_for_wan_slot commands can now be fulfilled.
+    // This fires when the operator manually adds a WAN connection in the router GUI and the slot
+    // appears in the next GetParameterValues response (CWMP ID 6 = WAN slot discovery GPV).
+    if ((device as any).addObjectNotSupported) {
+      const waitingCmds = await DeviceCommand.find({
+        deviceId: device._id,
+        action: 'SET_WAN_CONFIG',
+        status: 'waiting_for_wan_slot',
+      });
+      for (const waitCmd of waitingCmds) {
+        const rawParams = (waitCmd as any).parameters?.tr069ParamValues || [];
+        const samplePath = Array.isArray(rawParams[0]) ? rawParams[0][0] : (rawParams[0]?.name || '');
+        const slotM = String(samplePath).match(/WANConnectionDevice\.(\d+)\./i);
+        const neededSlot = slotM ? slotM[1] : '2';
+        const slotNowExists = Object.keys(device.rawParameters || {}).some(k =>
+          k.includes(`WANConnectionDevice.${neededSlot}.`)
+        );
+        if (slotNowExists) {
+          console.log(`[CWMP ACS] ✅ [POLL-THEN-PROVISION] WAN Slot ${neededSlot} detected on ${device.serialNumber}! Activating waiting command ${waitCmd._id}.`);
+          (waitCmd as any).status = 'queued';
+          (waitCmd as any).errorMessage = `Slot ${neededSlot} detected in device parameter tree. ACS will now provision parameters.`;
+          (device as any).wanSlotPollPending = false;
+          await waitCmd.save();
+          triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+        }
+      }
+    }
+
     // Handle AddObjectResponse from CPE
     if (xml.includes('AddObjectResponse')) {
       // 1. Locate the exact in-flight command that triggered AddObject
@@ -2360,15 +2416,43 @@ Detailed: ${detailedErrorMsg}
 Timestamp: ${new Date().toISOString()}
       `);
 
-      // If AddObject was rejected (e.g. router only supports pre-allocated hardware slots), fallback to SPV on intended slot (Slot 2 for PPPoE)
+      // If AddObject was rejected with Fault 9003 (firmware doesn't support dynamic WAN object creation)
+      // → Flag device as addObjectNotSupported and transition to Poll-Then-Provision mode
       if (session?.stage === 'ADD_OBJECT_SENT') {
-        session.stage = 'SPV_SENT';
+        const is9003 = fault?.faultCode === '9003' || fault?.faultCode === 9003 || String(fault?.faultCode) === '9003';
         const pendingCmd = await DeviceCommand.findOne({
           deviceId: device._id,
           action: 'SET_WAN_CONFIG',
           status: { $in: ['queued', 'sending', 'sent', 'pending'] },
         }).sort({ createdAt: -1 });
 
+        if (is9003) {
+          // Permanently flag this device firmware as AddObject-unsupported
+          console.log(`[CWMP ACS] 🚫 AddObject Fault 9003 confirmed for ${device.serialNumber}. Flagging device.addObjectNotSupported=true and switching to POLL-THEN-PROVISION mode.`);
+          (device as any).addObjectNotSupported = true;
+          (device as any).wanSlotPollPending = true;
+          await device.save();
+
+          if (pendingCmd) {
+            // Extract target slot from stored params
+            const rawParams = (pendingCmd as any).parameters?.tr069ParamValues || [];
+            const samplePath = Array.isArray(rawParams[0]) ? rawParams[0][0] : (rawParams[0]?.name || '');
+            const slotM = String(samplePath).match(/WANConnectionDevice\.(\d+)\./i);
+            const slotNum = slotM ? slotM[1] : '2';
+
+            (pendingCmd as any).status = 'waiting_for_wan_slot';
+            (pendingCmd as any).errorMessage = [
+              `[WAITING_FOR_WAN_SLOT] AddObject not supported by firmware (Fault 9003).`,
+              `Please add WAN Connection Slot ${slotNum} manually in the router GUI (192.168.1.1),`,
+              `then ACS will automatically detect the slot and complete provisioning.`,
+            ].join(' ');
+            await pendingCmd.save();
+          }
+          return null;
+        }
+
+        // Non-9003 AddObject fault → fallback to SPV on intended slot
+        session.stage = 'SPV_SENT';
         if (pendingCmd) {
           let rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues;
           if (Array.isArray(rawParams) && rawParams.length > 0) {

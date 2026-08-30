@@ -195,6 +195,9 @@ export interface IDevice extends Document {
   periodicInformConfigured?: boolean;
   opticalTelemetrySourcePath?: string;
   cwmpSessionId?: string;
+  // Firmware capability flags — set by ACS after live probing
+  addObjectNotSupported?: boolean; // true if firmware returns Fault 9003 on AddObject (e.g. Genexis P4410-V2-1.44)
+  wanSlotPollPending?: boolean;   // true while ACS is waiting for WAN slot to appear after GUI provisioning
 
   createdAt: Date;
   updatedAt: Date;
@@ -379,6 +382,9 @@ const DeviceSchema = new Schema<IDevice>(
     cwmpUsername: { type: String },
     cwmpPassword: { type: String },
     acsUrl: { type: String },
+    // Firmware capability flags
+    addObjectNotSupported: { type: Boolean, default: false },
+    wanSlotPollPending: { type: Boolean, default: false },
     pendingConfig: {
       status: { type: String, enum: ['PENDING_PUSH', 'APPLIED', 'FAILED', 'PENDING', 'APPLYING'] },
       queuedAt: { type: Date },
