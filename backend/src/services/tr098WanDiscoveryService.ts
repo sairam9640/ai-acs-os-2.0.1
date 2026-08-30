@@ -449,37 +449,51 @@ export async function buildDynamicTr098WanParams(
   const rawParams = discoveredTree || device?.rawParameters || {};
   const topology = discoverLiveTr098WanTree(rawParams);
 
-  // Select customer slot dynamically (never touching management slot)
-  const selectedSlot = selectCustomerWanSlot(topology, isPppoe);
-
-  let basePath: string = selectedSlot?.basePath || '';
+  // If profile already has an assigned cpeObjectPath (e.g. editing existing profile), prioritize it
+  let basePath: string = profile.cpeObjectPath ? profile.cpeObjectPath.replace(/\.$/, '') : '';
 
   if (!basePath) {
-    const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
-      ? Object.keys(rawParams)
-      : Array.from(normalizeParameterMap(rawParams).keys());
+    const otherProfiles = (device?.wanProfiles || []).filter((p: any) => p._id && String(p._id) !== String(profile._id));
+    const usedPaths = new Set(otherProfiles.map((p: any) => p.cpeObjectPath ? p.cpeObjectPath.replace(/\.$/, '') : '').filter(Boolean));
 
-    // Search for existing confirmed PPPoE connection instances across slots 1..8
-    const pppInst1Key = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.1\./i.test(k));
-    const pppAnyKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
-    const ipInst1Key = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANIPConnection\.1\./i.test(k));
-    const ipAnyKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANIPConnection\.\d+\./i.test(k));
+    // Select customer slot dynamically (never touching management slot)
+    const selectedSlot = selectCustomerWanSlot(topology, isPppoe);
 
-    if (isPppoe && (pppInst1Key || pppAnyKey)) {
-      const matchKey = pppInst1Key || pppAnyKey;
-      const m = matchKey!.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
-      if (m) basePath = m[1];
-    } else if (!isPppoe && (ipInst1Key || ipAnyKey)) {
-      const matchKey = ipInst1Key || ipAnyKey;
-      const m = matchKey!.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANIPConnection\.\d+)/i);
-      if (m) basePath = m[1];
-    } else if (profile.cpeObjectPath) {
-      basePath = profile.cpeObjectPath.replace(/\.$/, '');
+    if (selectedSlot?.basePath && !usedPaths.has(selectedSlot.basePath)) {
+      basePath = selectedSlot.basePath;
     } else {
-      // Default to standard TR-098 primary WAN slot 1
-      const connName = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-      basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.${connName}`;
+      const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
+        ? Object.keys(rawParams)
+        : Array.from(normalizeParameterMap(rawParams).keys());
+
+      // Search for an unused existing confirmed connection instance across slots 1..8
+      let foundUnusedKey = '';
+      for (let s = 1; s <= 8; s++) {
+        const candidatePrefix = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.${isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1'}`;
+        if (!usedPaths.has(candidatePrefix) && rawKeys.some(k => k.startsWith(candidatePrefix))) {
+          foundUnusedKey = candidatePrefix;
+          break;
+        }
+      }
+
+      if (foundUnusedKey) {
+        basePath = foundUnusedKey;
+      } else {
+        // Allocate next sequential slot for new WAN profile (e.g. Slot 2, Slot 3)
+        let candidateSlot = 1;
+        while (usedPaths.has(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${candidateSlot}.${isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1'}`)) {
+          candidateSlot++;
+          if (candidateSlot > 8) break;
+        }
+        const connName = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
+        basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${candidateSlot}.${connName}`;
+      }
     }
+  }
+
+  // Bind the allocated physical CPE path to the profile
+  if (!profile.cpeObjectPath && basePath) {
+    profile.cpeObjectPath = `${basePath}.`;
   }
 
   const rawCandidateParams: Array<[string, any, string]> = [];

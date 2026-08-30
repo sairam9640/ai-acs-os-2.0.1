@@ -1571,8 +1571,7 @@ ${stringElements}
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
 
-            const isGenexis4410 = /4410|Platinum|GX[-_ ]?4410/i.test(String(dev.modelName || session.modelName || ''));
-            const isPreAllocatedSlot = isGenexis4410 || targetSlot === 1 || targetSlot === 3;
+            const isPreAllocatedSlot = targetSlot === 1 && Object.keys(dev.rawParameters || {}).some(k => k.includes('WANConnectionDevice.1.'));
 
             const parentSlotExists = isPreAllocatedSlot || Object.keys(dev.rawParameters || {}).some(k =>
               k.includes(`WANConnectionDevice.${targetSlot}.`)
@@ -2221,6 +2220,73 @@ ${stringElements}
         { deviceId: device._id, action: 'REBOOT_DEVICE', status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
         { $set: { status: 'success', completedAt: new Date() } }
       );
+      return null;
+    }
+
+    // Handle AddObjectResponse from CPE
+    if (xml.includes('AddObjectResponse')) {
+      console.log(`[Native CWMP IN] CPE returned AddObjectResponse for ${device.serialNumber}`);
+      CwmpSessionLog.create({
+        tenantId: tenant?._id,
+        deviceId: device?._id,
+        serialNumber: device.serialNumber,
+        sessionId: session?.sessionId || incomingSessionId || 'unknown',
+        cwmpId: '3',
+        direction: 'CPE_TO_ACS',
+        rpcMethod: 'AddObjectResponse',
+        httpStatus: 200,
+        rawXml: xml,
+        timestamp: new Date(),
+      }).catch(() => {});
+
+      const instanceMatch = xml.match(/<InstanceNumber>(\d+)<\/InstanceNumber>/i);
+      const newInst = instanceMatch ? instanceMatch[1] : '1';
+      console.log(`[CWMP ACS] AddObject created new instance: ${newInst} on ${device.serialNumber}`);
+
+      const pendingCmd = await DeviceCommand.findOne({
+        deviceId: device._id,
+        action: 'SET_WAN_CONFIG',
+        status: { $in: ['queued', 'sending', 'sent', 'pending'] },
+      }).sort({ createdAt: -1 });
+
+      if (pendingCmd && session) {
+        let rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues;
+        if (Array.isArray(rawParams) && rawParams.length > 0) {
+          const validParams = rawParams.map(([name, value, type]) => ({
+            name: name.replace(/(\.WAN(?:PPP|IP)Connection\.)\d+\./, `$1${newInst}.`),
+            value,
+            type: type || 'xsd:string',
+          }));
+
+          const spvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[${validParams.length}]">
+${validParams.map((p: any) => `        <ParameterValueStruct>
+          <Name>${p.name}</Name>
+          <Value xsi:type="${p.type}">${p.value}</Value>
+        </ParameterValueStruct>`).join('\n')}
+      </ParameterList>
+      <ParameterKey>${pendingCmd._id}</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+          session.stage = 'SPV_SENT';
+          pendingCmd.status = 'sending';
+          pendingCmd.cwmpRequestId = '3';
+          pendingCmd.affectedParameterPaths = validParams.map((p: any) => p.name);
+          pendingCmd.verificationTargetValues = validParams.reduce((acc: any, p: any) => {
+            acc[p.name] = p.value;
+            return acc;
+          }, {});
+          await pendingCmd.save();
+
+          console.log(`[Native CWMP OUT] Dispatched SetParameterValues after AddObject for ${device.serialNumber} (Cmd: ${pendingCmd._id})`);
+          return spvXml;
+        }
+      }
       return null;
     }
 
