@@ -449,11 +449,13 @@ export async function buildDynamicTr098WanParams(
     rawCandidateParams.push([`${basePath}.Enable`, true, 'xsd:boolean']);
   }
 
-  // Service List (e.g. INTERNET, VOICE, TR069, IPTV)
-  const resolvedServiceList = (profile.serviceType === 'VOIP' || profile.serviceUsage?.voip) ? 'VOICE' :
-    (profile.serviceType === 'TR069' || profile.serviceUsage?.tr069) ? 'TR069' :
-    (profile.serviceType === 'IPTV' || profile.serviceUsage?.iptvDhcp) ? 'IPTV' : 'INTERNET';
-  rawCandidateParams.push([`${basePath}.X_CT-COM_ServiceList`, resolvedServiceList, 'xsd:string']);
+  // Service List (only valid on WANIPConnection, omit on WANPPPConnection to prevent Fault 9005)
+  if (!isPppoe) {
+    const resolvedServiceList = (profile.serviceType === 'VOIP' || profile.serviceUsage?.voip) ? 'VOICE' :
+      (profile.serviceType === 'TR069' || profile.serviceUsage?.tr069) ? 'TR069' :
+      (profile.serviceType === 'IPTV' || profile.serviceUsage?.iptvDhcp) ? 'IPTV' : 'INTERNET';
+    rawCandidateParams.push([`${basePath}.X_CT-COM_ServiceList`, resolvedServiceList, 'xsd:string']);
+  }
 
   if (isPppoe) {
     const pUsername = profile.pppoeUsername || profile.username;

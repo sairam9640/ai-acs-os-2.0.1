@@ -1552,6 +1552,12 @@ ${stringElements}
                 continue;
               }
 
+              // Suppress X_CT-COM_ServiceList if targeted on WANPPPConnection (as it causes Fault 9005 on Genexis/Broadcom/CTC ONTs)
+              if (/WANPPPConnection\.\d+\..*ServiceList$/i.test(targetName)) {
+                console.warn(`[CWMP ACS] 🛡️ Suppressed invalid parameter '${targetName}' on WANPPPConnection before SetParameterValues dispatch.`);
+                continue;
+              }
+
               const isCoreParam = /Username|Password|NATEnabled$/i.test(targetName);
               if (!isCoreParam) {
                 const cached = await SupportedParameterCache.findOne({
