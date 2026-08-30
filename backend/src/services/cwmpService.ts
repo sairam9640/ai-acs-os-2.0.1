@@ -1565,8 +1565,14 @@ ${stringElements}
               k.includes(`WANConnectionDevice.${targetSlot}.${targetConnObj}`)
             );
 
-            if (isWanConfigCommand && targetSlot > 1 && !slotExistsInRaw && session.stage !== 'ADD_OBJECT_SENT') {
+            const addObjectAttempted = !!(pendingCmd as any).parameters?.addObjectAttempted;
+            if (isWanConfigCommand && targetSlot > 1 && !slotExistsInRaw && !addObjectAttempted && session.stage !== 'ADD_OBJECT_SENT') {
               session.stage = 'ADD_OBJECT_SENT';
+              if (pendingCmd.parameters) {
+                (pendingCmd.parameters as any).addObjectAttempted = true;
+                pendingCmd.markModified('parameters');
+                await pendingCmd.save();
+              }
               const addObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
   <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
@@ -2387,6 +2393,7 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
             return spvXml;
           }
         }
+        return null;
       }
 
       const idMatch = xml.match(/<(?:cwmp:)?ID[^>]*>([^<]+)<\/(?:cwmp:)?ID>/i);
