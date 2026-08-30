@@ -869,6 +869,71 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                   </div>
                 </div>
 
+                {/* SECTION: PPPoE CREDENTIALS (When Link Mode == PPP and Service is INTERNET) */}
+                {isPppMode && !isVoipService && !isTr069Service && (
+                  <div className="p-4 bg-purple-50/60 rounded-xl border border-purple-200 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">User Name:</label>
+                        <input
+                          type="text"
+                          value={activeForm.pppoeUsername || ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, pppoeUsername: e.target.value })}
+                          placeholder="e.g. bsnl_user_100"
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-purple-300 rounded-lg bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold text-slate-700">Password:</label>
+                          <label className="flex items-center space-x-1 text-[10px] text-slate-500 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={showPassword}
+                              onChange={(e) => setShowPassword(e.target.checked)}
+                              className="w-3 h-3 text-[#7928CA] rounded"
+                            />
+                            <span>Show Password</span>
+                          </label>
+                        </div>
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={activeForm.pppoePassword || activeForm.pppoePasswordEncrypted || ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, pppoePassword: e.target.value })}
+                          placeholder="••••••••••••"
+                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-purple-300 rounded-lg bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block">Service Name:</label>
+                        <input
+                          type="text"
+                          value={activeForm.serviceName || ''}
+                          onChange={(e) => setActiveForm({ ...activeForm, serviceName: e.target.value })}
+                          placeholder="Optional"
+                          className="w-full px-3 py-1.5 text-xs border border-purple-300 rounded-lg bg-white"
+                        />
+                      </div>
+
+                      <div className="flex items-end pb-1.5">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={activeForm.enablePppoeBridgeMode || false}
+                            onChange={(e) => setActiveForm({ ...activeForm, enablePppoeBridgeMode: e.target.checked })}
+                            className="w-4 h-4 text-[#7928CA] rounded"
+                          />
+                          <span className="text-xs font-bold text-slate-700">Enable PPPoE Router Bridge Mode</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Row 8: IP Protocol Version */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-2">
                   <label className="text-xs font-bold text-slate-700">IP Protocol Version:</label>
@@ -1105,70 +1170,7 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                   </div>
                 </div>
 
-                {/* SECTION: PPPoE CREDENTIALS (When Link Mode == PPP and Service is INTERNET) */}
-                {isPppMode && !isVoipService && !isTr069Service && (
-                  <div className="p-4 bg-purple-50/60 rounded-xl border border-purple-200 space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-700 block">User Name:</label>
-                        <input
-                          type="text"
-                          value={activeForm.pppoeUsername || ''}
-                          onChange={(e) => setActiveForm({ ...activeForm, pppoeUsername: e.target.value })}
-                          placeholder="e.g. bsnl_user_100"
-                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-purple-300 rounded-lg bg-white"
-                        />
-                      </div>
 
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-bold text-slate-700">Password:</label>
-                          <label className="flex items-center space-x-1 text-[10px] text-slate-500 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={showPassword}
-                              onChange={(e) => setShowPassword(e.target.checked)}
-                              className="w-3 h-3 text-[#7928CA] rounded"
-                            />
-                            <span>Show Password</span>
-                          </label>
-                        </div>
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          value={activeForm.pppoePassword || activeForm.pppoePasswordEncrypted || ''}
-                          onChange={(e) => setActiveForm({ ...activeForm, pppoePassword: e.target.value })}
-                          placeholder="••••••••••••"
-                          className="w-full px-3 py-1.5 text-xs font-mono font-bold border border-purple-300 rounded-lg bg-white"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-700 block">Service Name:</label>
-                        <input
-                          type="text"
-                          value={activeForm.serviceName || ''}
-                          onChange={(e) => setActiveForm({ ...activeForm, serviceName: e.target.value })}
-                          placeholder="Optional"
-                          className="w-full px-3 py-1.5 text-xs border border-purple-300 rounded-lg bg-white"
-                        />
-                      </div>
-
-                      <div className="flex items-end pb-1.5">
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={activeForm.enablePppoeBridgeMode || false}
-                            onChange={(e) => setActiveForm({ ...activeForm, enablePppoeBridgeMode: e.target.checked })}
-                            className="w-4 h-4 text-[#7928CA] rounded"
-                          />
-                          <span className="text-xs font-bold text-slate-700">Enable PPPoE Router Bridge Mode</span>
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
                 {/* SECTION: TR-069 DEDICATED ACS SERVICE (When Bearer Service == TR069) */}
                 {isTr069Service && (
