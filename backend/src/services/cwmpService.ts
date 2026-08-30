@@ -2419,7 +2419,7 @@ Timestamp: ${new Date().toISOString()}
       // If AddObject was rejected with Fault 9003 (firmware doesn't support dynamic WAN object creation)
       // → Flag device as addObjectNotSupported and transition to Poll-Then-Provision mode
       if (session?.stage === 'ADD_OBJECT_SENT') {
-        const is9003 = fault?.faultCode === '9003' || fault?.faultCode === 9003 || String(fault?.faultCode) === '9003';
+        const is9003 = String(fault?.faultCode ?? '') === '9003';
         const pendingCmd = await DeviceCommand.findOne({
           deviceId: device._id,
           action: 'SET_WAN_CONFIG',
