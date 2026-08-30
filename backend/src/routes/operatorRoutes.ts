@@ -2410,45 +2410,59 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       }
     );
 
-    // Queue TR-069 command to disable customer WAN connection on the physical ONT
+    // Check if the target slot exists on the physical ONT
     const slotMatch = targetProfile.cpeObjectPath?.match(/WANConnectionDevice\.(\d+)\./i);
     const targetSlot = slotMatch ? slotMatch[1] : '2';
     const isPpp = (targetProfile as any).connectionType === 'PPPoE' || (targetProfile as any).linkMode === 'PPP';
     const connType = isPpp ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-    const disablePayload = await buildTr069WanParams({ ...targetProfile, enableWan: false, pppoeUsername: '' }, device);
-    const deleteCmd = await DeviceCommand.create({
-      tenantId: device.tenantId,
-      deviceId: device._id,
-      action: 'SET_WAN_CONFIG',
-      parameters: {
-        operation: 'DELETE_OR_DISABLE',
-        targetProfile: removedName,
-        tr069ParamValues: disablePayload.length > 0 ? disablePayload : [
-          [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Enable`, false, 'xsd:boolean'],
-          [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Username`, '', 'xsd:string'],
-          [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Password`, '', 'xsd:string'],
-        ],
-      },
-      status: 'queued',
-      requestedBy: {
-        userId: req.user?.id || 'system',
-        role: req.user?.role || 'operator',
-        email: req.user?.email || 'admin@ai-isp.com',
-      },
-      queuedAt: new Date(),
-      correlationId: `wan_delete_${Date.now()}`,
-    }).catch(() => null);
+    
+    const slotExistsOnDevice = Object.keys(device.rawParameters || {}).some(k => 
+      k.includes(`WANConnectionDevice.${targetSlot}.`)
+    );
 
+    let deleteCmd: any = null;
+
+    if (slotExistsOnDevice) {
+      // Slot exists on physical ONT: Queue clean TR-069 command to disable it
+      deleteCmd = await DeviceCommand.create({
+        tenantId: device.tenantId,
+        deviceId: device._id,
+        action: 'SET_WAN_CONFIG',
+        parameters: {
+          operation: 'DELETE_OR_DISABLE',
+          targetProfile: removedName,
+          tr069ParamValues: [
+            [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Enable`, false, 'xsd:boolean'],
+            ...(isPpp ? [
+              [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Username`, '', 'xsd:string'],
+              [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Password`, '', 'xsd:string'],
+            ] : []),
+          ],
+        },
+        status: 'queued',
+        requestedBy: {
+          userId: req.user?.id || 'system',
+          role: req.user?.role || 'operator',
+          email: req.user?.email || 'admin@ai-isp.com',
+        },
+        queuedAt: new Date(),
+        correlationId: `wan_delete_${Date.now()}`,
+      }).catch(() => null);
+
+      triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+    }
+
+    // Always remove from local device.wanProfiles
     device.wanProfiles.splice(targetIdx, 1);
     device.markModified('wanProfiles');
     await device.save();
 
-    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
-
     return res.json({
       success: true,
-      status: 'QUEUED_FOR_DISABLE',
-      message: `Customer Internet WAN [${removedName}] removed from DB and disable command queued for ONT. Monitor Pending Updates for CPE confirmation.`,
+      status: slotExistsOnDevice ? 'QUEUED_FOR_DISABLE' : 'DELETED_LOCALLY',
+      message: slotExistsOnDevice
+        ? `Customer WAN [${removedName}] removed and disable command queued for physical ONT.`
+        : `Customer WAN [${removedName}] was already absent on physical ONT. Removed from database immediately.`,
       commandId: deleteCmd?._id,
       profiles: device.wanProfiles,
       wanProfiles: device.wanProfiles,

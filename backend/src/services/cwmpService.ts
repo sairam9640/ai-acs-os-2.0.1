@@ -1564,6 +1564,7 @@ ${stringElements}
             }
 
             const isWanConfigCommand = pendingCmd.action === 'SET_WAN_CONFIG' || validParams.some(p => p.name.includes('WANConnectionDevice.'));
+            const isDeleteOp = (pendingCmd.parameters as any)?.operation === 'DELETE_OR_DISABLE';
             const targetParamName = validParams.find(p => p.name.includes('WANConnectionDevice.'))?.name || '';
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
@@ -1581,6 +1582,16 @@ ${stringElements}
             const slotExistsInRaw = Object.keys(dev.rawParameters || {}).some(k =>
               k.includes(`WANConnectionDevice.${targetSlot}.${targetConnObj}`)
             );
+
+            // Fast-path for DELETE_OR_DISABLE: If slot is already gone from physical ONT, mark success immediately
+            if (isDeleteOp && !slotDeviceExists) {
+              console.log(`[CWMP ACS] 🗑️ [WAN DELETE] Target slot ${targetSlot} is already absent on ${session.serialNumber}. Marking Cmd ${pendingCmd._id} as success.`);
+              pendingCmd.status = 'success';
+              pendingCmd.errorMessage = `Target WAN slot ${targetSlot} is already absent on physical ONT.`;
+              pendingCmd.completedAt = new Date();
+              await pendingCmd.save();
+              return null;
+            }
 
             const addObjectAttempted = !!(pendingCmd as any).parameters?.addObjectAttempted;
             // --- POLL-THEN-PROVISION for AddObject-unsupported firmware (e.g. Genexis P4410-V2-1.44) ---
