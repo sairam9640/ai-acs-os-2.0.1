@@ -150,8 +150,8 @@ export class CwmpVendorProfiles {
    */
   static isDualBandModel(vendor?: string, modelName?: string, productClass?: string): boolean {
     const text = `${vendor || ''} ${modelName || ''} ${productClass || ''}`.toLowerCase();
-    // Explicit single-band ONLY if specifically tagged as single-band / bridge-only
-    if (/single[-_ ]?band|1t1r|bridge[-_ ]?ont|onu[-_ ]?1ge$/i.test(text)) return false;
+    // Explicit single-band ONLY if specifically tagged as single-band / bridge-only / earth-2022
+    if (/single[-_ ]?band|1t1r|bridge[-_ ]?ont|onu[-_ ]?1ge|earth[-_ ]?2022/i.test(text)) return false;
     // All modern GPON / XPON HGUs (Genexis, Huawei, ZTE, Syrotech, VSOL, RicherLink, TP-Link, Netlink) support dual-band or have multi-SSID
     return true;
   }
@@ -184,7 +184,17 @@ export class CwmpVendorProfiles {
       ];
     }
 
-    // Comprehensive Universal TR-098 Baseline (Guaranteed universal parameters on all TR-098 CPEs):
+    const isDual = this.isDualBandModel(vendor, modelName);
+    const wlan5gInstance = (vendor === 'TPLINK' || vendor === 'VSOL' || vendor === 'RICHERLINK') ? 2 : 5;
+    const wlan5gParams = isDual ? [
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.SSID`,
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.PreSharedKey.1.KeyPassphrase`,
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.Channel`,
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.BeaconType`,
+      `InternetGatewayDevice.LANDevice.1.WLANConfiguration.${wlan5gInstance}.Enable`,
+    ] : [];
+
+    // Comprehensive Universal TR-098 Baseline:
     return [
       'InternetGatewayDevice.DeviceInfo.Manufacturer',
       'InternetGatewayDevice.DeviceInfo.ManufacturerOUI',
@@ -194,32 +204,30 @@ export class CwmpVendorProfiles {
       'InternetGatewayDevice.DeviceInfo.HardwareVersion',
       'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
       'InternetGatewayDevice.DeviceInfo.UpTime',
-      // Wi-Fi 2.4 GHz (Instance 1 — Universal on all Wi-Fi routers)
+      // Wi-Fi 2.4 GHz (Instance 1)
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
+      // Wi-Fi 5 GHz (Included when dual-band model is detected)
+      ...wlan5gParams,
       // LAN Host Count
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
       // WAN Slot 1 — Management / TR-069 / Internet
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Name',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ConnectionStatus',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Enable',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ConnectionStatus',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Enable',
       // WAN Slot 2 — High-Speed Internet PPPoE / Voice
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Name',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ExternalIPAddress',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.ConnectionStatus',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Enable',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.VLANID',
-      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.Name',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.ExternalIPAddress',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.ConnectionStatus',
       'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANIPConnection.1.Enable',
