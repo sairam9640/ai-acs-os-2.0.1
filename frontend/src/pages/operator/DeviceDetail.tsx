@@ -1265,8 +1265,11 @@ export const DeviceDetail: React.FC = () => {
     try {
       const res = await api.deleteWanProfile(id, deleteProfileConfirm.id);
       if (res.success) {
-        setWanProfileSuccessMsg(`✅ Succeeded: Profile [${deleteProfileConfirm.name}] deleted.`);
+        setWanProfileSuccessMsg(`⏳ Succeeded: Profile [${deleteProfileConfirm.name}] deleted from DB and disable command queued for ONT.`);
         setDeleteProfileConfirm(null);
+        if (res.commandId) {
+          start30sCommandTracking(res.commandId, `Disabling WAN Profile [${deleteProfileConfirm.name}] on physical ONT...`);
+        }
         await fetchWorkspace();
         setTimeout(() => setWanProfileSuccessMsg(null), 5000);
       } else {
@@ -1286,7 +1289,10 @@ export const DeviceDetail: React.FC = () => {
     try {
       const res = await api.commitWanProfile(id, pId);
       if (res.success) {
-        setWanProfileSuccessMsg(`✅ Succeeded: Profile [${profile.name}] committed to physical ONT via TR-069.`);
+        setWanProfileSuccessMsg(`⏳ Queued: Profile [${profile.name}] queued for physical ONT delivery via TR-069. Awaiting verification...`);
+        if (res.commandId) {
+          start30sCommandTracking(res.commandId, `Pushing WAN Profile [${profile.name}] to ONT via TR-069...`);
+        }
         await fetchWorkspace();
         setTimeout(() => setWanProfileSuccessMsg(null), 6000);
       } else {
@@ -1351,7 +1357,15 @@ export const DeviceDetail: React.FC = () => {
       }
 
       if (res && res.success) {
-        setWanProfileSuccessMsg(`✅ Succeeded: Profile [${pName}] ${wanModalMode === 'create' ? 'created' : 'updated'} and committed to TR-069.`);
+        const isQueued = res.status === 'SAVED_AND_QUEUED' || res.commandId;
+        setWanProfileSuccessMsg(
+          isQueued
+            ? `⏳ Succeeded: Profile [${pName}] saved and queued for TR-069 delivery to physical ONT. Awaiting verification.`
+            : `✅ Succeeded: Profile [${pName}] ${wanModalMode === 'create' ? 'created' : 'updated'}.`
+        );
+        if (res.commandId) {
+          start30sCommandTracking(res.commandId, `Applying WAN Profile [${pName}] on ONT...`);
+        }
         await fetchWorkspace();
         if (res.profile) {
           handleOpenEditProfile(res.profile);
@@ -1377,7 +1391,10 @@ export const DeviceDetail: React.FC = () => {
       const elapsedMs = Math.round(performance.now() - startTimestamp);
       const elapsedSec = (elapsedMs / 1000).toFixed(2);
       if (res.success) {
-        setSummonSuccess(`✅ Succeeded: ONT Summoned & Synchronized in ${elapsedSec}s (${elapsedMs} ms) at ${new Date().toLocaleTimeString()}`);
+        setSummonSuccess(`✅ Succeeded: ONT Summoned & Live Poll Queued in ${elapsedSec}s (${elapsedMs} ms) at ${new Date().toLocaleTimeString()}.`);
+        if (res.commandId) {
+          start30sCommandTracking(res.commandId, 'Summoning ONT & synchronizing live parameters...');
+        }
         await fetchWorkspace();
         setTimeout(() => setSummonSuccess(null), 6000);
       } else {
@@ -1510,13 +1527,21 @@ export const DeviceDetail: React.FC = () => {
               </div>
 
               <div className="flex items-center space-x-2.5 flex-wrap">
+                {/* Active Command in Progress Indicator */}
+                {workspace.activeCommand?.exists && (
+                  <div className="flex items-center space-x-2 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs font-bold animate-pulse">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-700" />
+                    <span>In-flight: {workspace.activeCommand.action} ({workspace.activeCommand.status})</span>
+                  </div>
+                )}
+
                 <Button
                   size="sm"
                   variant="primary"
                   onClick={handleSummonDevice}
                   isLoading={isSummoning}
-                  disabled={!isOnline}
-                  title={!isOnline ? "Device Offline - configuration changes unavailable" : undefined}
+                  disabled={!isOnline || workspace.activeCommand?.exists}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : workspace.activeCommand?.exists ? "Command already in progress" : undefined}
                   className="bg-amber-600 hover:bg-amber-500 text-white font-bold disabled:opacity-50"
                 >
                   <Zap className="w-4 h-4 mr-1.5" />
@@ -1527,8 +1552,8 @@ export const DeviceDetail: React.FC = () => {
                   variant="primary"
                   onClick={handleFetchParameters}
                   isLoading={isFetchingParams}
-                  disabled={!isOnline}
-                  title={!isOnline ? "Device Offline - configuration changes unavailable" : "Fetch all live parameters and optical power from router via TR-069"}
+                  disabled={!isOnline || workspace.activeCommand?.exists}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : workspace.activeCommand?.exists ? "Command already in progress" : "Fetch all live parameters and optical power from router via TR-069"}
                   className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold disabled:opacity-50"
                 >
                   <Cpu className="w-4 h-4 mr-1.5" />
@@ -1539,8 +1564,8 @@ export const DeviceDetail: React.FC = () => {
                   variant="outline"
                   onClick={handleRefreshTelemetry}
                   isLoading={isRefreshing}
-                  disabled={!isOnline}
-                  title={!isOnline ? "Device Offline - configuration changes unavailable" : undefined}
+                  disabled={!isOnline || workspace.activeCommand?.exists}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : workspace.activeCommand?.exists ? "Command already in progress" : undefined}
                 >
                   <RefreshCw className="w-4 h-4 mr-1.5" />
                   <span>Refresh Telemetry</span>
@@ -1549,8 +1574,8 @@ export const DeviceDetail: React.FC = () => {
                   size="sm"
                   variant="secondary"
                   onClick={handleOpenEditConfig}
-                  disabled={!isOnline}
-                  title={!isOnline ? "Device Offline - configuration changes unavailable" : undefined}
+                  disabled={!isOnline || workspace.activeCommand?.exists}
+                  title={!isOnline ? "Device Offline - configuration changes unavailable" : workspace.activeCommand?.exists ? "Command already in progress" : undefined}
                 >
                   <Edit3 className="w-4 h-4 mr-1.5" />
                   <span>Edit Config</span>
@@ -1561,6 +1586,32 @@ export const DeviceDetail: React.FC = () => {
                 </Button>
               </div>
             </div>
+
+            {/* Cached Report & Synchronization Status Banner */}
+            {workspace.cachedReport && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
+                <div className="flex items-center space-x-2.5">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-200 text-slate-800">
+                    {workspace.cachedReport.dataSource === 'CACHED_TR069_GPV' ? 'CACHED ROUTER REPORT' : 'UNSYNCHRONIZED'}
+                  </span>
+                  <span>
+                    Last Live CPE Sync:{' '}
+                    <strong className="text-slate-900 font-mono">
+                      {workspace.cachedReport.lastSyncAt ? new Date(workspace.cachedReport.lastSyncAt).toLocaleString() : 'Never synced'}
+                    </strong>
+                  </span>
+                  {workspace.cachedReport.stale && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                      STALE (&gt;5m)
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center space-x-3 text-slate-500 text-[11px]">
+                  <span>Raw Parameters: <strong className="font-mono text-slate-700">{workspace.cachedReport.rawParametersCount || 0}</strong></span>
+                  <span>Auto-Refresh: <strong className="text-slate-700">Every 5m (Cached)</strong></span>
+                </div>
+              </div>
+            )}
 
             {/* Offline Guard Banner */}
             {!isOnline && (

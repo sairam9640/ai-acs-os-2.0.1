@@ -1322,7 +1322,29 @@ ${stringElements}
           status: { $in: ['pending', 'queued', 'authorized', 'created', 'sending', 'sent'] }
         }).sort({ queuedAt: 1, createdAt: 1 });
 
-        // Priority 2: General telemetry poll / summon commands
+        // STRICT SINGLE-COMMAND LOCK: If a high-priority command is already in-flight (sending/verifying),
+        // do NOT dispatch any other command. Fall through to baseline GPV telemetry only.
+        const inFlightHighPriority = await DeviceCommand.findOne({
+          deviceId: dev._id,
+          action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
+          status: { $in: ['sending', 'verifying', 'applied_pending_verification'] },
+        });
+        if (inFlightHighPriority) {
+          const ageMs = Date.now() - new Date(inFlightHighPriority.sentAt || inFlightHighPriority.queuedAt).getTime();
+          // Only hard-block if the command is genuinely in-flight (< 90 seconds old).
+          // Beyond 90 seconds without a response it's stale and should be cleared by workspace reconciliation.
+          if (ageMs < 90_000) {
+            console.log(
+              `[CWMP ACS] ⏸ Single-command lock active for ${session.serialNumber}: ` +
+              `Cmd ${inFlightHighPriority._id} (${inFlightHighPriority.action}) is ${inFlightHighPriority.status}. ` +
+              `Falling through to baseline GPV only.`
+            );
+            // Skip all command dispatching — fall through to end of function (baseline GPV)
+            pendingCmd = null;
+          }
+        }
+
+        // Priority 2: General telemetry poll / summon commands (only if no high-priority cmd is pending)
         if (!pendingCmd) {
           pendingCmd = await DeviceCommand.findOne({
             deviceId: dev._id,
@@ -2114,18 +2136,17 @@ ${normalizedParams.map((p: any) => `        <ParameterValueStruct>
 
       console.log(`[Native CWMP IN] CPE successfully acknowledged SetParameterValues for ${device.serialNumber} (Status: ${spvStatus}, CWMP ID: ${cwmpId})`);
 
-      const inFlightCommands = await DeviceCommand.find({
-        deviceId: device._id,
-        status: { $in: ['sent', 'sending', 'queued', 'pending'] },
-      });
-
       await DeviceCommand.updateMany(
         { deviceId: device._id, status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
         { $set: { status: spvStatus === 1 ? 'applied_pending_verification' : 'success', completedAt: new Date() } }
       );
 
+      const inFlightCommands = await DeviceCommand.find({
+        deviceId: device._id,
+        status: { $in: ['sent', 'sending', 'queued', 'pending', 'applied_pending_verification', 'success', 'applied'] },
+      });
+
       for (const cmd of inFlightCommands) {
-        cmd.status = spvStatus === 1 ? 'applied_pending_verification' : 'applied';
         cmd.cwmpRequestId = cwmpId;
         cmd.cwmpResponseStatus = spvStatus;
         cmd.cwmpResponseTimestamp = new Date();

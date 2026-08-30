@@ -1962,10 +1962,49 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
     device.markModified('wanProfiles');
     await device.save();
 
+    // COMMAND LOCK: If a high-priority command is actively sending/verifying, warn but still save locally
+    const inFlightCmd = await DeviceCommand.findOne({
+      deviceId: device._id,
+      action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
+      status: { $in: ['sending', 'verifying', 'applied_pending_verification'] },
+    });
+    if (inFlightCmd) {
+      const ageMs = Date.now() - new Date(inFlightCmd.sentAt || inFlightCmd.queuedAt).getTime();
+      if (ageMs < 90_000) {
+        // Profile is saved locally; TR-069 push will be queued but blocked until in-flight cmd resolves
+        return res.json({
+          success: true,
+          status: 'SAVED_LOCALLY_COMMAND_LOCKED',
+          message: `WAN Profile [${currentProfile.name}] saved. TR-069 delivery is queued — waiting for active command (${inFlightCmd.action}) to complete first.`,
+          profile: currentProfile,
+          wanProfiles: device.wanProfiles,
+          commandLocked: true,
+          activeCommandId: inFlightCmd._id,
+        });
+      }
+    }
+
+    // DEDUP: Cancel any existing queued/pending SET_WAN_CONFIG for this device
+    await DeviceCommand.updateMany(
+      {
+        deviceId: device._id,
+        action: 'SET_WAN_CONFIG',
+        status: { $in: ['pending', 'queued'] },
+      },
+      {
+        $set: {
+          status: 'canceled',
+          errorMessage: 'SUPERSEDED: Replaced by newer WAN edit request.',
+          completedAt: new Date(),
+        },
+      }
+    );
+
     // Queue TR-069 parameters
     const tr069Params = await buildTr069WanParams(currentProfile, device);
+    let commandId: any = null;
     if (tr069Params.length > 0) {
-      await DeviceCommand.create({
+      const cmd = await DeviceCommand.create({
         tenantId: device.tenantId,
         deviceId: device._id,
         customerId: device.customerId,
@@ -1982,7 +2021,8 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
         },
         queuedAt: new Date(),
         correlationId: req.correlationId || `wan_edit_${Date.now()}`,
-      }).catch(() => {});
+      }).catch(() => null);
+      if (cmd) commandId = cmd._id;
     }
 
     if (targetIdx === 0 || currentProfile.isDefault) {
@@ -1993,9 +2033,13 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
 
     return res.json({
       success: true,
-      message: `WAN Profile [${currentProfile.name}] successfully updated and committed to ONT.`,
+      status: commandId ? 'SAVED_AND_QUEUED' : 'SAVED_LOCALLY',
+      message: commandId
+        ? `WAN Profile [${currentProfile.name}] saved and queued for TR-069 delivery. Monitor Pending Updates for CPE verification.`
+        : `WAN Profile [${currentProfile.name}] saved locally (no TR-069 parameters to push).`,
       profile: currentProfile,
       wanProfiles: device.wanProfiles,
+      commandId,
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -2254,11 +2298,45 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       });
     }
 
+    // COMMAND LOCK: If a high-priority command is actively sending/verifying, block delete
+    const inFlightCmd = await DeviceCommand.findOne({
+      deviceId: device._id,
+      action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
+      status: { $in: ['sending', 'verifying', 'applied_pending_verification'] },
+    });
+    if (inFlightCmd) {
+      const ageMs = Date.now() - new Date(inFlightCmd.sentAt || inFlightCmd.queuedAt).getTime();
+      if (ageMs < 90_000) {
+        return res.status(423).json({
+          success: false,
+          error: `Command in progress: ${inFlightCmd.action} is currently ${inFlightCmd.status}. Please wait for it to complete before deleting a WAN profile.`,
+          code: 'COMMAND_IN_FLIGHT',
+          commandId: inFlightCmd._id,
+        });
+      }
+    }
+
     const removedName = targetProfile.name;
+
+    // DEDUP: Cancel any existing queued/pending SET_WAN_CONFIG for this device
+    await DeviceCommand.updateMany(
+      {
+        deviceId: device._id,
+        action: 'SET_WAN_CONFIG',
+        status: { $in: ['pending', 'queued'] },
+      },
+      {
+        $set: {
+          status: 'canceled',
+          errorMessage: 'SUPERSEDED: Replaced by WAN delete operation.',
+          completedAt: new Date(),
+        },
+      }
+    );
 
     // Queue TR-069 command to disable customer WAN connection on the physical ONT
     const disablePayload = await buildTr069WanParams({ ...targetProfile, enableWan: false, pppoeUsername: '' }, device);
-    await DeviceCommand.create({
+    const deleteCmd = await DeviceCommand.create({
       tenantId: device.tenantId,
       deviceId: device._id,
       action: 'SET_WAN_CONFIG',
@@ -2281,18 +2359,23 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       },
       queuedAt: new Date(),
       correlationId: `wan_delete_${Date.now()}`,
-    }).catch(() => {});
+    }).catch(() => null);
 
     device.wanProfiles.splice(targetIdx, 1);
     device.markModified('wanProfiles');
     await device.save();
 
+    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+
     return res.json({
       success: true,
-      message: `Customer Internet WAN [${removedName}] deleted successfully and disabled on ONT.`,
+      status: 'QUEUED_FOR_DISABLE',
+      message: `Customer Internet WAN [${removedName}] removed from DB and disable command queued for ONT. Monitor Pending Updates for CPE confirmation.`,
+      commandId: deleteCmd?._id,
       profiles: device.wanProfiles,
       wanProfiles: device.wanProfiles,
     });
+
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -2344,6 +2427,40 @@ operatorRouter.post('/devices/:id/wan/profiles/:profileId/commit', async (req: A
       return res.status(404).json({ success: false, error: 'Target WAN profile not found.' });
     }
 
+    // COMMAND LOCK: If a high-priority command is actively sending/verifying, block commit
+    const inFlightCmd = await DeviceCommand.findOne({
+      deviceId: device._id,
+      action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
+      status: { $in: ['sending', 'verifying', 'applied_pending_verification'] },
+    });
+    if (inFlightCmd) {
+      const ageMs = Date.now() - new Date(inFlightCmd.sentAt || inFlightCmd.queuedAt).getTime();
+      if (ageMs < 90_000) {
+        return res.status(423).json({
+          success: false,
+          error: `Command in progress: ${inFlightCmd.action} is currently ${inFlightCmd.status}. Please wait for it to complete before committing another WAN configuration.`,
+          code: 'COMMAND_IN_FLIGHT',
+          commandId: inFlightCmd._id,
+        });
+      }
+    }
+
+    // DEDUP: Cancel any existing queued/pending SET_WAN_CONFIG for this device
+    await DeviceCommand.updateMany(
+      {
+        deviceId: device._id,
+        action: 'SET_WAN_CONFIG',
+        status: { $in: ['pending', 'queued'] },
+      },
+      {
+        $set: {
+          status: 'canceled',
+          errorMessage: 'SUPERSEDED: Replaced by newer WAN commit request.',
+          completedAt: new Date(),
+        },
+      }
+    );
+
     const tr069Params = buildTr069WanParams(targetProfile, device);
     const command = await DeviceCommand.create({
       tenantId: device.tenantId,
@@ -2364,13 +2481,15 @@ operatorRouter.post('/devices/:id/wan/profiles/:profileId/commit', async (req: A
       correlationId: req.correlationId || `wan_commit_${Date.now()}`,
     });
 
+    await Device.updateOne({ _id: device._id }, { $set: { lastLivePollAt: new Date() } });
     await triggerGenieAcsConnectionRequest(device.serialNumber);
 
     return res.json({
       success: true,
-      message: `WAN Profile [${targetProfile.name}] committed to physical ONT via TR-069.`,
       status: 'QUEUED_FOR_TR069',
+      message: `WAN Profile [${targetProfile.name}] queued for delivery to physical ONT via TR-069. Monitor Pending Updates for verification status.`,
       commandId: command._id,
+      commandStatus: 'queued',
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -2645,8 +2764,44 @@ operatorRouter.post('/devices/:id/summon', async (req: AuthenticatedRequest, res
     const device = await Device.findOne(getSafeDeviceQuery(req.params.id, tenantId)).populate('customerId', 'fullName accountNumber');
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
+    // COMMAND LOCK: If a high-priority command is actively sending/verifying, block summon
+    const inFlightCmd = await DeviceCommand.findOne({
+      deviceId: device._id,
+      action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
+      status: { $in: ['sending', 'verifying', 'applied_pending_verification'] },
+    });
+    if (inFlightCmd) {
+      const ageMs = Date.now() - new Date(inFlightCmd.sentAt || inFlightCmd.queuedAt).getTime();
+      if (ageMs < 90_000) {
+        return res.status(423).json({
+          success: false,
+          error: `Command in progress: ${inFlightCmd.action} is currently ${inFlightCmd.status}. Please wait for it to complete.`,
+          code: 'COMMAND_IN_FLIGHT',
+          commandId: inFlightCmd._id,
+          commandAction: inFlightCmd.action,
+          commandStatus: inFlightCmd.status,
+        });
+      }
+    }
+
+    // DEDUP: Cancel any existing pending/queued SUMMON_LIVE_POLL for this device
+    await DeviceCommand.updateMany(
+      {
+        deviceId: device._id,
+        action: 'SUMMON_LIVE_POLL',
+        status: { $in: ['pending', 'queued', 'sending', 'sent'] },
+      },
+      {
+        $set: {
+          status: 'canceled',
+          errorMessage: 'SUPERSEDED: Replaced by newer summon request.',
+          completedAt: new Date(),
+        },
+      }
+    );
+
     // Queue safe telemetry poll command in Native CWMP engine (NEVER reboot)
-    await DeviceCommand.create({
+    const cmd = await DeviceCommand.create({
       tenantId: device.tenantId,
       deviceId: device._id,
       serialNumber: device.serialNumber,
@@ -2655,8 +2810,17 @@ operatorRouter.post('/devices/:id/summon', async (req: AuthenticatedRequest, res
       rpcMethod: 'GetParameterValues',
       status: 'pending',
       payload: { parameterNames: ['InternetGatewayDevice.'] },
+      requestedBy: {
+        userId: req.user!.id,
+        role: req.user!.role,
+        email: req.user!.email,
+      },
+      queuedAt: new Date(),
       correlationId: req.correlationId || `summon_${Date.now()}`
     });
+
+    // Update lastLivePollAt so refresh-telemetry knows when we last polled
+    await Device.updateOne({ _id: device._id }, { $set: { lastLivePollAt: new Date() } });
 
     // Trigger Connection Request so ONT immediately checks in
     await triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
@@ -2676,6 +2840,7 @@ operatorRouter.post('/devices/:id/summon', async (req: AuthenticatedRequest, res
     return res.json({
       success: true,
       message: `Summon dispatched for ONT ${device.serialNumber}. Awaiting real-time CWMP inform.`,
+      commandId: cmd._id,
       lastInform: device.lastInform,
       status: device.status,
       device,
@@ -3107,16 +3272,33 @@ operatorRouter.post('/devices/:id/refresh-telemetry', async (req: AuthenticatedR
     const device = await Device.findOne(getSafeDeviceQuery(req.params.id, tenantId));
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
+    // 5-MINUTE THROTTLE: Don't issue a live poll if one was triggered less than 5 minutes ago
+    const d = device as any;
+    const lastPoll = d.lastLivePollAt ? new Date(d.lastLivePollAt).getTime() : 0;
+    const msSinceLastPoll = Date.now() - lastPoll;
+    const FIVE_MINUTES_MS = 5 * 60 * 1000;
+    if (msSinceLastPoll < FIVE_MINUTES_MS) {
+      const remainingSec = Math.ceil((FIVE_MINUTES_MS - msSinceLastPoll) / 1000);
+      return res.json({
+        success: true,
+        throttled: true,
+        message: `Live telemetry was recently refreshed. Next live poll available in ${remainingSec}s.`,
+        lastLivePollAt: d.lastLivePollAt,
+        lastParameterSyncAt: d.lastParameterSyncAt,
+      });
+    }
+
     await triggerGenieAcsConnectionRequest(device.serialNumber);
 
-    device.lastInform = new Date();
-    device.status = 'online';
-    await device.save();
+    const now = new Date();
+    await Device.updateOne({ _id: device._id }, { $set: { lastLivePollAt: now, status: 'online' } });
 
     return res.json({
       success: true,
+      throttled: false,
       message: 'Live telemetry polling requested from ACS engine.',
-      lastUpdated: device.lastInform,
+      lastLivePollAt: now,
+      lastParameterSyncAt: d.lastParameterSyncAt,
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
@@ -3817,11 +3999,30 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
           else if (cmd.status === 'cancelled') normalizedStatus = 'canceled';
           else if (cmd.status === 'queued') normalizedStatus = 'pending';
 
+          // Human-readable status label for Pending Updates tab
+          const statusLabel: Record<string, string> = {
+            pending: 'Queued',
+            sending: 'In Progress',
+            sent: 'Sent to ONT',
+            verifying: 'Verifying on CPE',
+            applied_pending_verification: 'Applied — Awaiting Verification',
+            verified: 'Verified on CPE ✅',
+            verification_failed: 'Verification Failed ❌',
+            success: 'Completed ✅',
+            failed: 'Failed ❌',
+            timed_out: 'Timed Out',
+            expired: 'Expired',
+            canceled: 'Cancelled',
+            cancelled: 'Cancelled',
+            rolled_back: 'Rolled Back',
+          };
+
           return {
             _id: cmd._id,
             id: cmd._id,
             action: cmd.action,
             status: normalizedStatus,
+            statusLabel: statusLabel[normalizedStatus] || normalizedStatus,
             parameters: cmd.parameters,
             queuedAt: cmd.queuedAt || (cmd as any).createdAt,
             sentAt: cmd.sentAt,
@@ -3845,6 +4046,45 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
             correlationId: cmd.correlationId,
           };
         }),
+        // Source-of-truth metadata for when live data was last pulled from CPE
+        cachedReport: (() => {
+          const lastSyncAt: Date | undefined = (d as any).lastParameterSyncAt;
+          const lastLivePollAt: Date | undefined = (d as any).lastLivePollAt;
+          const FIVE_MIN_MS = 5 * 60 * 1000;
+          const ageMs = lastSyncAt ? Date.now() - new Date(lastSyncAt).getTime() : Infinity;
+          const pollAgeMs = lastLivePollAt ? Date.now() - new Date(lastLivePollAt).getTime() : Infinity;
+          return {
+            lastSyncAt: lastSyncAt || null,
+            lastLivePollAt: lastLivePollAt || null,
+            lastSyncStatus: (d as any).lastParameterSyncStatus || 'NEVER_SYNCED',
+            rawParametersCount: rawKeys.length,
+            dataSource: rawKeys.length > 0 ? 'CACHED_TR069_GPV' : 'NO_DATA',
+            stale: ageMs > FIVE_MIN_MS,
+            staleMinutes: lastSyncAt ? Math.floor(ageMs / 60_000) : null,
+            livePollThrottled: pollAgeMs < FIVE_MIN_MS,
+            livePollThrottledRemainingSeconds: pollAgeMs < FIVE_MIN_MS ? Math.ceil((FIVE_MIN_MS - pollAgeMs) / 1000) : 0,
+          };
+        })(),
+        // Active command state — used by frontend to disable action buttons when a command is in-flight
+        activeCommand: await (async () => {
+          const inFlight = await DeviceCommand.findOne({
+            deviceId: device._id,
+            action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY'] },
+            status: { $in: ['sending', 'verifying', 'applied_pending_verification'] },
+          }).lean();
+          if (inFlight) {
+            const ageMs = Date.now() - new Date((inFlight as any).sentAt || (inFlight as any).queuedAt).getTime();
+            return {
+              exists: ageMs < 90_000,
+              commandId: String(inFlight._id),
+              action: inFlight.action,
+              status: inFlight.status,
+              queuedAt: inFlight.queuedAt,
+              sentAt: (inFlight as any).sentAt || null,
+            };
+          }
+          return { exists: false };
+        })(),
       },
     });
   } catch (error: any) {

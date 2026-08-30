@@ -190,6 +190,7 @@ export interface IDevice extends Document {
   lastRawGetParameterValuesResponseXml?: string;
   lastParameterSyncAt?: Date;
   lastParameterSyncStatus?: string;
+  lastLivePollAt?: Date; // Timestamp when operator last triggered a live poll (summon/refresh-telemetry)
   periodicInformInterval?: number;
   periodicInformConfigured?: boolean;
   opticalTelemetrySourcePath?: string;
@@ -208,6 +209,7 @@ const DeviceSchema = new Schema<IDevice>(
     lastRawGetParameterValuesResponseXml: { type: String },
     lastParameterSyncAt: { type: Date },
     lastParameterSyncStatus: { type: String },
+    lastLivePollAt: { type: Date, index: true }, // Operator-triggered live poll timestamp
     opticalTelemetrySourcePath: { type: String },
     cwmpSessionId: { type: String },
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
