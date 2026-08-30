@@ -2735,33 +2735,49 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
         // First discovery: populate from CPE
         device.wanProfiles = discoveredWanProfiles;
       } else {
-        // Bug 4 fix: Merge — never blindly overwrite. Preserve operator-configured profiles.
-        // Match by cpeObjectPath (most precise), then name, then pppoeUsername, then
-        // fall back to same-connectionType enrichment for placeholder profiles.
+        // Full synchronization: accurately match and update all live fields from CPE
         let modified = false;
+        const validDiscoveredPaths = new Set(discoveredWanProfiles.map(p => p.cpeObjectPath).filter(Boolean));
+
+        // Purge obsolete profiles that were deleted from the physical router
+        if (validDiscoveredPaths.size > 0) {
+          const filtered = (device.wanProfiles as any[]).filter((p: any) => {
+            if (p.cpeObjectPath && !validDiscoveredPaths.has(p.cpeObjectPath)) {
+              console.log(`[CWMP ACS] 🗑️ Removing deleted WAN profile '${p.name}' (${p.cpeObjectPath}) no longer present on CPE.`);
+              modified = true;
+              return false;
+            }
+            return true;
+          });
+          device.wanProfiles = filtered;
+        }
+
         for (const incoming of discoveredWanProfiles) {
           const existing = (device.wanProfiles as any[]).find((p: any) =>
             // 1. Exact CPE path match (most reliable)
             (incoming.cpeObjectPath && p.cpeObjectPath && p.cpeObjectPath === incoming.cpeObjectPath) ||
-            // 2. Profile name match (skip generic fallback names)
+            // 2. Profile name match
             (incoming.name && incoming.name !== 'Internet_TR069' && incoming.name !== 'WAN_PPPoE' && p.name === incoming.name) ||
             // 3. PPPoE username match
             (incoming.pppoeUsername && p.pppoeUsername && p.pppoeUsername === incoming.pppoeUsername) ||
-            // 4. Enrich empty placeholder: same connection type, no existing cpeObjectPath or pppoeUsername yet
+            // 4. Enrich empty placeholder: same connection type
             (incoming.connectionType === p.connectionType && !p.cpeObjectPath && !p.pppoeUsername && incoming.connectionType === 'PPPoE')
           );
 
           if (existing) {
-            // Update live telemetry fields
+            // Update live telemetry and configuration fields directly from CPE
             if (incoming.status) existing.status = incoming.status;
             if (incoming.ipAddress && incoming.ipAddress !== '0.0.0.0') existing.ipAddress = incoming.ipAddress;
-            // Enrich previously empty fields with discovered data
             if (incoming.pppoeUsername) existing.pppoeUsername = incoming.pppoeUsername;
-            if (incoming.vlanId && !existing.vlanId) existing.vlanId = incoming.vlanId;
-            if (!existing.cpeObjectPath && incoming.cpeObjectPath) existing.cpeObjectPath = incoming.cpeObjectPath;
+            if (incoming.vlanId) existing.vlanId = incoming.vlanId;
+            if (incoming.cpeObjectPath) existing.cpeObjectPath = incoming.cpeObjectPath;
             if (incoming.serviceType) existing.serviceType = incoming.serviceType;
+            if (incoming.bearerService) existing.bearerService = incoming.bearerService;
             if (incoming.serviceUsage) existing.serviceUsage = incoming.serviceUsage;
-            if (!existing.name || existing.name === 'Internet_TR069' || existing.name === 'WAN_PPPoE') existing.name = incoming.name || existing.name;
+            if (incoming.linkMode) existing.linkMode = incoming.linkMode;
+            if (incoming.connectionType) existing.connectionType = incoming.connectionType;
+            if (incoming.isProtected !== undefined) existing.isProtected = incoming.isProtected;
+            if (incoming.name && incoming.name !== 'Internet_TR069' && incoming.name !== 'WAN_PPPoE') existing.name = incoming.name;
             modified = true;
           } else {
             // New profile discovered on CPE that we don't have yet — append it
