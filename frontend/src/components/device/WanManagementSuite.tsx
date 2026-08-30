@@ -169,8 +169,8 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       if (res.success && res.profiles) {
         setProfiles(res.profiles);
         if (res.profiles.length > 0) {
-          // Default to active customer Internet profile (3_INTERNET_R_VID_488) so real Internet VLAN is shown immediately
-          const internetProf = res.profiles.find((p: any) => p.bearerService === 'INTERNET' || p.serviceType === 'INTERNET' || p.name?.includes('INTERNET') || p.name?.includes('488'));
+          // Default to active customer Internet profile so real Internet VLAN and PPPoE are selected immediately
+          const internetProf = res.profiles.find((p: any) => p.bearerService === 'INTERNET' || p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || /INTERNET|PPP/i.test(p.name || '')) || res.profiles.find((p: any) => !p.isProtected && p.serviceType !== 'TR069');
           const current = (selectedProfileId && res.profiles.find((p: any) => p._id === selectedProfileId)) || internetProf || res.profiles[0];
           setSelectedProfileId(current._id || '0');
           setActiveForm(JSON.parse(JSON.stringify(current)));
