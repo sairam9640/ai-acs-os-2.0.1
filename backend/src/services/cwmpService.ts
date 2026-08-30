@@ -3075,19 +3075,15 @@ Timestamp: ${new Date().toISOString()}
             readBackValues,
             mismatches,
           };
-          vCmd.errorMessage = `Verification failed: expected [${mismatches.join(', ')}] not matching CPE reported values.`;
+          vCmd.errorMessage = `VERIFICATION_MISMATCH: ${mismatches.join('; ')}`;
           await vCmd.save();
 
-          console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
+          console.warn(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
             event: 'CWMP_VERIFICATION_FAILED',
             taskId: vCmd._id.toString(),
             deviceId: device._id.toString(),
             serialNumber: device.serialNumber,
-            dataModel: vCmd.dataModel,
-            verificationResult: 'VERIFICATION_FAILED',
             mismatches,
-            readBackValues,
-            retryNumber: vCmd.retryCount || 0,
             taskStatus: 'verification_failed',
           })}`);
         }

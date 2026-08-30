@@ -725,28 +725,48 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
     // Build TR-069 Parameter Values for GenieACS NBI
     const tr069ParamValues: [string, any, string][] = [];
 
-    // 0. Handle Specific Instance Modification (Multi-SSID)
+    if (!device.rawParameters) device.rawParameters = {};
+
+    // 0. Handle Specific Instance Modification (Multi-SSID, WLAN 3, 4, etc.)
     if (ssidInstance !== undefined && (customSsid || (ssidInstance === 1 && wifi24) || ((ssidInstance === 2 || ssidInstance === 5) && wifi5g))) {
       const instNum = Number(ssidInstance);
       if (instNum !== 1 && instNum !== 2 && instNum !== 5) {
         if (!device.additionalSsids) device.additionalSsids = [];
         const idx = device.additionalSsids.findIndex((s: any) => s.instance === instNum);
         const data = customSsid || wifi24 || wifi5g;
-        if (idx >= 0 && data) {
-          if (data.ssid) device.additionalSsids[idx].ssid = data.ssid.trim();
-          if (data.password) device.additionalSsids[idx].password = data.password;
-          if (data.channel !== undefined) device.additionalSsids[idx].channel = Number(data.channel);
-          if (data.enabled !== undefined) device.additionalSsids[idx].enabled = Boolean(data.enabled);
-          if (data.securityMode) device.additionalSsids[idx].securityMode = data.securityMode;
-          if (data.bandwidthMhz) device.additionalSsids[idx].bandwidthMhz = Number(data.bandwidthMhz);
+        if (data) {
+          const newItem: any = {
+            instance: instNum,
+            ssid: data.ssid ? data.ssid.trim() : `WLAN-${instNum}`,
+            password: data.password || '',
+            channel: data.channel !== undefined ? Number(data.channel) : (data.band === '5GHz' ? 44 : 6),
+            enabled: data.enabled !== undefined ? Boolean(data.enabled) : true,
+            securityMode: data.securityMode || 'WPA2-PSK',
+            bandwidthMhz: data.bandwidthMhz !== undefined ? Number(data.bandwidthMhz) : 20,
+            band: data.band || '2.4GHz',
+          };
+          if (idx >= 0) {
+            device.additionalSsids[idx] = { ...device.additionalSsids[idx], ...newItem };
+          } else {
+            device.additionalSsids.push(newItem);
+          }
           device.markModified('additionalSsids');
 
-          tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.SSID`, device.additionalSsids[idx].ssid, 'xsd:string']);
+          const sVal = newItem.ssid;
+          tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.SSID`, sVal, 'xsd:string']);
+          device.rawParameters[`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.SSID`] = sVal;
+
           if (data.password) {
             tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.PreSharedKey.1.KeyPassphrase`, data.password, 'xsd:string']);
+            device.rawParameters[`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.PreSharedKey.1.KeyPassphrase`] = data.password;
           }
           if (data.enabled !== undefined) {
             tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.Enable`, Boolean(data.enabled), 'xsd:boolean']);
+            device.rawParameters[`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.Enable`] = data.enabled ? '1' : '0';
+          }
+          if (data.channel !== undefined) {
+            tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.Channel`, Number(data.channel), 'xsd:unsignedInt']);
+            device.rawParameters[`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${instNum}.Channel`] = String(data.channel);
           }
         }
       }
@@ -759,21 +779,32 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
         if (!device.wifi24) device.wifi24 = {} as any;
         device.wifi24.ssid = wifi24.ssid.trim();
         tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID', wifi24.ssid.trim(), 'xsd:string']);
+        device.rawParameters['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID'] = wifi24.ssid.trim();
       }
       if (wifi24.password && wifi24.password.length >= 8) {
         auditChanges['wifi24.password'] = { old: '********', new: '********' };
+        if (!device.wifi24) device.wifi24 = {} as any;
         device.wifi24.password = wifi24.password;
         tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase', wifi24.password, 'xsd:string']);
+        device.rawParameters['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase'] = wifi24.password;
       }
       if (wifi24.channel !== undefined) {
         auditChanges['wifi24.channel'] = { old: device.wifi24?.channel, new: Number(wifi24.channel) };
+        if (!device.wifi24) device.wifi24 = {} as any;
         device.wifi24.channel = Number(wifi24.channel);
         tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel', Number(wifi24.channel), 'xsd:unsignedInt']);
+        device.rawParameters['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel'] = String(wifi24.channel);
       }
       if (wifi24.enabled !== undefined) {
         auditChanges['wifi24.enabled'] = { old: device.wifi24?.enabled, new: Boolean(wifi24.enabled) };
+        if (!device.wifi24) device.wifi24 = {} as any;
         device.wifi24.enabled = Boolean(wifi24.enabled);
         tr069ParamValues.push(['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable', Boolean(wifi24.enabled), 'xsd:boolean']);
+        device.rawParameters['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable'] = wifi24.enabled ? '1' : '0';
+      }
+      if (wifi24.securityMode) {
+        if (!device.wifi24) device.wifi24 = {} as any;
+        device.wifi24.securityMode = wifi24.securityMode;
       }
     }
 
@@ -785,23 +816,38 @@ operatorRouter.put('/devices/:id/configuration', async (req: AuthenticatedReques
         if (!device.wifi5g) device.wifi5g = {} as any;
         device.wifi5g.ssid = wifi5g.ssid.trim();
         tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.SSID`, wifi5g.ssid.trim(), 'xsd:string']);
+        device.rawParameters[`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.SSID`] = wifi5g.ssid.trim();
       }
       if (wifi5g.password && wifi5g.password.length >= 8) {
         auditChanges['wifi5g.password'] = { old: '********', new: '********' };
+        if (!device.wifi5g) device.wifi5g = {} as any;
         device.wifi5g.password = wifi5g.password;
         tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.PreSharedKey.1.KeyPassphrase`, wifi5g.password, 'xsd:string']);
+        device.rawParameters[`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.PreSharedKey.1.KeyPassphrase`] = wifi5g.password;
       }
       if (wifi5g.channel !== undefined) {
         auditChanges['wifi5g.channel'] = { old: device.wifi5g?.channel, new: Number(wifi5g.channel) };
+        if (!device.wifi5g) device.wifi5g = {} as any;
         device.wifi5g.channel = Number(wifi5g.channel);
         tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.Channel`, Number(wifi5g.channel), 'xsd:unsignedInt']);
+        device.rawParameters[`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.Channel`] = String(wifi5g.channel);
       }
       if (wifi5g.enabled !== undefined) {
         auditChanges['wifi5g.enabled'] = { old: device.wifi5g?.enabled, new: Boolean(wifi5g.enabled) };
+        if (!device.wifi5g) device.wifi5g = {} as any;
         device.wifi5g.enabled = Boolean(wifi5g.enabled);
         tr069ParamValues.push([`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.Enable`, Boolean(wifi5g.enabled), 'xsd:boolean']);
+        device.rawParameters[`InternetGatewayDevice.LANDevice.1.WLANConfiguration.${inst5g}.Enable`] = wifi5g.enabled ? '1' : '0';
+      }
+      if (wifi5g.securityMode) {
+        if (!device.wifi5g) device.wifi5g = {} as any;
+        device.wifi5g.securityMode = wifi5g.securityMode;
       }
     }
+
+    device.markModified('rawParameters');
+    device.markModified('wifi24');
+    device.markModified('wifi5g');
 
     // 3. WAN & PPPoE Profile Changes
     if (wan) {
@@ -1799,10 +1845,10 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
 
     const savedProfile = device.wanProfiles[device.wanProfiles.length - 1];
 
-    // Queue TR-069 command
+    let createdCmd: any = null;
     const tr069Params = await buildTr069WanParams(savedProfile, device);
     if (tr069Params.length > 0) {
-      await DeviceCommand.create({
+      createdCmd = await DeviceCommand.create({
         tenantId: device.tenantId,
         deviceId: device._id,
         customerId: device.customerId,
@@ -1819,7 +1865,7 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
         },
         queuedAt: new Date(),
         correlationId: req.correlationId || `wan_add_${Date.now()}`,
-      }).catch(() => {});
+      }).catch(() => null);
     }
 
     if (savedProfile.isDefault) {
@@ -1830,6 +1876,8 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
 
     return res.json({
       success: true,
+      status: createdCmd ? 'SAVED_AND_QUEUED' : 'SAVED_LOCALLY',
+      commandId: createdCmd?._id,
       message: `New WAN Profile [${savedProfile.name}] created and queued for TR-069 provisioning.`,
       profile: savedProfile,
       wanProfiles: device.wanProfiles,
@@ -3689,7 +3737,11 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
                       (customerObj?.wanConfig?.wifiPassword || null);
 
         const beaconVal = beaconKey ? rawParams[beaconKey] : (idx === 1 ? d.wifi24?.securityMode : 'WPA2-PSK');
-        const isEnabled = enableKey ? (rawParams[enableKey] === '1' || rawParams[enableKey] === true || rawParams[enableKey] === 'true') : true;
+        const isEnabled = (idx === 1 && d.wifi24?.enabled !== undefined)
+          ? Boolean(d.wifi24.enabled)
+          : ((idx === 2 || idx === 5) && d.wifi5g?.enabled !== undefined)
+          ? Boolean(d.wifi5g.enabled)
+          : (enableKey ? (rawParams[enableKey] === '1' || rawParams[enableKey] === true || rawParams[enableKey] === 'true') : true);
 
         const detectedBand = idx === 1 ? '2.4GHz' : (idx === 2 || idx === 5) ? '5GHz' : CwmpVendorProfiles.determineWifiBand(rawParams, idx, String(ssidVal || ''));
 
