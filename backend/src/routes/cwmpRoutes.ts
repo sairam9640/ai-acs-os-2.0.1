@@ -104,6 +104,11 @@ async function handleCwmpPost(req: Request, res: Response) {
   }
 }
 
+const handleCwmpProbe = (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.status(200).send('Native Enterprise TR-069 CWMP ACS Engine Active & Online');
+};
+
 // Inbound Native CWMP standard routes
 cwmpRouter.post('/', handleCwmpPost);
 cwmpRouter.post('/cwmp', handleCwmpPost);
@@ -124,14 +129,27 @@ cwmpRouter.post('/tr69/:tenantSlug', handleCwmpPost);
 cwmpRouter.post('/acs/:tenantSlug', handleCwmpPost);
 cwmpRouter.post('/service/tr069/:tenantSlug', handleCwmpPost);
 cwmpRouter.post('/service/tr69/:tenantSlug', handleCwmpPost);
+cwmpRouter.post('/genieacs/:tenantSlug', handleCwmpPost);
+cwmpRouter.post('/:tenantSlug', handleCwmpPost);
 
-cwmpRouter.get('/', (req, res) => res.send('Native Enterprise TR-069 CWMP ACS Engine Active & Online'));
-cwmpRouter.get('/cwmp', (req, res) => res.send('Native Enterprise TR-069 CWMP ACS Engine Active & Online'));
-cwmpRouter.get('/tr069', (req, res) => res.send('Native Enterprise TR-069 CWMP ACS Engine Active & Online'));
-cwmpRouter.get('/tr69', (req, res) => res.send('Native Enterprise TR-069 CWMP ACS Engine Active & Online'));
-cwmpRouter.get('/acs', (req, res) => res.send('Native Enterprise TR-069 CWMP ACS Engine Active & Online'));
-cwmpRouter.get('/service/tr069', (req, res) => res.send('Native Enterprise TR-069 CWMP ACS Engine Active & Online'));
-cwmpRouter.get('/service/tr69', (req, res) => res.send('Native Enterprise TR-069 CWMP ACS Engine Active & Online'));
+// Probe endpoints (for ONT connectivity check / HTTP GET probe)
+cwmpRouter.get('/', handleCwmpProbe);
+cwmpRouter.get('/cwmp', handleCwmpProbe);
+cwmpRouter.get('/inform', handleCwmpProbe);
+cwmpRouter.get('/tr069', handleCwmpProbe);
+cwmpRouter.get('/tr69', handleCwmpProbe);
+cwmpRouter.get('/acs', handleCwmpProbe);
+cwmpRouter.get('/service/tr069', handleCwmpProbe);
+cwmpRouter.get('/service/tr69', handleCwmpProbe);
+cwmpRouter.get('/cwmp/:tenantSlug', handleCwmpProbe);
+cwmpRouter.get('/inform/:tenantSlug', handleCwmpProbe);
+cwmpRouter.get('/tr069/:tenantSlug', handleCwmpProbe);
+cwmpRouter.get('/tr69/:tenantSlug', handleCwmpProbe);
+cwmpRouter.get('/acs/:tenantSlug', handleCwmpProbe);
+cwmpRouter.get('/service/tr069/:tenantSlug', handleCwmpProbe);
+cwmpRouter.get('/service/tr69/:tenantSlug', handleCwmpProbe);
+cwmpRouter.get('/genieacs/:tenantSlug', handleCwmpProbe);
+cwmpRouter.get('/:tenantSlug', handleCwmpProbe);
 
 /**
  * TR-369 / USP Inbound Endpoint
