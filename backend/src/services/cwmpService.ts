@@ -2357,9 +2357,8 @@ Detailed: ${detailedErrorMsg}
 Timestamp: ${new Date().toISOString()}
       `);
 
-      // If AddObject was rejected (e.g. router only supports pre-allocated WANConnectionDevice.1), fallback to SPV on Slot 1
+      // If AddObject was rejected (e.g. router only supports pre-allocated hardware slots), fallback to SPV on intended slot (Slot 2 for PPPoE)
       if (session?.stage === 'ADD_OBJECT_SENT') {
-        console.warn(`[CWMP ACS] AddObject failed with Fault ${fault.faultCode} on ${device.serialNumber}. Falling back to direct SetParameterValues on WANConnectionDevice.1.`);
         session.stage = 'SPV_SENT';
         const pendingCmd = await DeviceCommand.findOne({
           deviceId: device._id,
@@ -2370,11 +2369,17 @@ Timestamp: ${new Date().toISOString()}
         if (pendingCmd) {
           let rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues;
           if (Array.isArray(rawParams) && rawParams.length > 0) {
-            const validParams = rawParams.map(([name, value, type]) => ({
-              name: name.replace(/WANConnectionDevice\.\d+\./, 'WANConnectionDevice.1.'),
-              value,
-              type: type || 'xsd:string',
-            }));
+            const validParams = rawParams.map(([name, value, type]) => {
+              // Never fallback PPPoE parameters to Slot 1 (Management TR069)
+              const adjustedName = (name.includes('WANPPPConnection') && name.includes('WANConnectionDevice.1.'))
+                ? name.replace('WANConnectionDevice.1.', 'WANConnectionDevice.2.')
+                : name;
+              return {
+                name: adjustedName,
+                value,
+                type: type || 'xsd:string',
+              };
+            });
 
             const spvXml = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">

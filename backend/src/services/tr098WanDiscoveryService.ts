@@ -397,11 +397,17 @@ export async function buildDynamicTr098WanParams(
   isPppoe: boolean;
 }> {
   const isPppoe = profile.connectionType === 'PPPoE' || profile.mode === 'Route' || profile.linkMode === 'PPP';
+  const isInternet = isPppoe || profile.serviceType === 'INTERNET' || profile.bearerService === 'INTERNET';
   const rawParams = discoveredTree || device?.rawParameters || {};
   const topology = discoverLiveTr098WanTree(rawParams);
 
   // If profile already has an assigned cpeObjectPath (e.g. editing existing profile), prioritize it
   let basePath: string = profile.cpeObjectPath ? profile.cpeObjectPath.replace(/\.$/, '') : '';
+
+  // Prevent routing PPPoE onto Slot 1 (Management TR069) or unallocated high slots
+  if (isInternet && basePath.includes('WANConnectionDevice.1.')) {
+    basePath = basePath.replace('WANConnectionDevice.1.', 'WANConnectionDevice.2.');
+  }
 
   if (!basePath) {
     const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
@@ -419,16 +425,16 @@ export async function buildDynamicTr098WanParams(
       }
     }
     
-    // If device has an existing TR-069 management profile on slot 1, reserve slot 1
-    if (otherProfiles.some((p: any) => p.serviceType === 'TR069' || p.isProtected || /TR069/i.test(p.name))) {
-      usedSlots.add(1);
-    }
+    // Reserve slot 1 for TR-069 Management
+    usedSlots.add(1);
 
-    // Allocate next sequential slot (Slot 2 for WAN 2, Slot 3 for WAN 3, Slot 4 for WAN 4)
-    let targetSlot = 2;
-    while (usedSlots.has(targetSlot)) {
-      targetSlot++;
-      if (targetSlot > 8) break;
+    // If customer Internet profile, default to hardware Slot 2
+    let targetSlot = isInternet ? 2 : 2;
+    if (!isInternet) {
+      while (usedSlots.has(targetSlot)) {
+        targetSlot++;
+        if (targetSlot > 8) break;
+      }
     }
 
     const connName = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
@@ -436,9 +442,7 @@ export async function buildDynamicTr098WanParams(
   }
 
   // Bind the allocated physical CPE path to the profile
-  if (!profile.cpeObjectPath && basePath) {
-    profile.cpeObjectPath = `${basePath}.`;
-  }
+  profile.cpeObjectPath = `${basePath}.`;
 
   const rawCandidateParams: Array<[string, any, string]> = [];
 
