@@ -458,31 +458,30 @@ export async function buildDynamicTr098WanParams(
       : Array.from(normalizeParameterMap(rawParams).keys());
 
     const otherProfiles = (device?.wanProfiles || []).filter((p: any) => p._id && String(p._id) !== String(profile._id));
-    const usedPaths = new Set(otherProfiles.map((p: any) => p.cpeObjectPath ? p.cpeObjectPath.replace(/\.$/, '') : '').filter(Boolean));
-
-    // Search for existing confirmed connection instances on WANConnectionDevice.1
-    const pppInst1 = rawKeys.find(k => /WANConnectionDevice\.1\.WANPPPConnection\.1\./i.test(k));
-    const pppInst2 = rawKeys.find(k => /WANConnectionDevice\.1\.WANPPPConnection\.2\./i.test(k));
-    const ipInst1 = rawKeys.find(k => /WANConnectionDevice\.1\.WANIPConnection\.1\./i.test(k));
-    const ipInst2 = rawKeys.find(k => /WANConnectionDevice\.1\.WANIPConnection\.2\./i.test(k));
-
-    if (isPppoe) {
-      if (!usedPaths.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1')) {
-        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1';
-      } else if (pppInst2 || !usedPaths.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2')) {
-        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2';
-      } else {
-        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1';
-      }
-    } else {
-      if (!usedPaths.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1')) {
-        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1';
-      } else if (ipInst2 || !usedPaths.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.2')) {
-        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.2';
-      } else {
-        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1';
+    
+    // Find all slots already occupied by other WAN profiles
+    const usedSlots = new Set<number>();
+    for (const p of otherProfiles) {
+      if (p.cpeObjectPath) {
+        const m = p.cpeObjectPath.match(/WANConnectionDevice\.(\d+)\./i);
+        if (m) usedSlots.add(parseInt(m[1], 10));
       }
     }
+    
+    // If device has an existing TR-069 management profile on slot 1, reserve slot 1
+    if (otherProfiles.some((p: any) => p.serviceType === 'TR069' || p.isProtected || /TR069/i.test(p.name))) {
+      usedSlots.add(1);
+    }
+
+    // Allocate next sequential slot (Slot 2 for WAN 2, Slot 3 for WAN 3, Slot 4 for WAN 4)
+    let targetSlot = 2;
+    while (usedSlots.has(targetSlot)) {
+      targetSlot++;
+      if (targetSlot > 8) break;
+    }
+
+    const connName = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
+    basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connName}`;
   }
 
   // Bind the allocated physical CPE path to the profile
@@ -498,6 +497,12 @@ export async function buildDynamicTr098WanParams(
   } else {
     rawCandidateParams.push([`${basePath}.Enable`, true, 'xsd:boolean']);
   }
+
+  // Service List (e.g. INTERNET, VOICE, TR069, IPTV)
+  const resolvedServiceList = (profile.serviceType === 'VOIP' || profile.serviceUsage?.voip) ? 'VOICE' :
+    (profile.serviceType === 'TR069' || profile.serviceUsage?.tr069) ? 'TR069' :
+    (profile.serviceType === 'IPTV' || profile.serviceUsage?.iptvDhcp) ? 'IPTV' : 'INTERNET';
+  rawCandidateParams.push([`${basePath}.X_CT-COM_ServiceList`, resolvedServiceList, 'xsd:string']);
 
   if (isPppoe) {
     const pUsername = profile.pppoeUsername || profile.username;
@@ -524,37 +529,15 @@ export async function buildDynamicTr098WanParams(
     }
   }
 
-  // Dynamic VLAN Path Generation based on live discovered parameter tree
+  // Dynamic VLAN Path Generation targeting the exact allocated slot
   const hasVlan = (profile.vlanEnabled !== false && profile.vlanId && Number(profile.vlanId) > 0) || profile.vlanMode === 'TAG';
   if (hasVlan && profile.vlanId) {
-    const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
-      ? Object.keys(rawParams)
-      : Array.from(normalizeParameterMap(rawParams).keys());
-
-    const slotMatch = basePath.match(/WANConnectionDevice\.(\d+)\./);
+    const slotMatch = basePath.match(/WANConnectionDevice\.(\d+)\./i);
     const slotNum = slotMatch ? slotMatch[1] : '1';
 
-    // Prioritize Slot 1 CT-COM VLAN parameter
-    const ctComVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\.X_CT-COM_WANEponLinkConfig\\.VLANIDMark`, 'i').test(k))
-      || rawKeys.find(k => /WANConnectionDevice\.1\.X_CT-COM_WANEponLinkConfig\.VLANIDMark/i.test(k));
-    const ctComVlan2 = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\..*\\.X_CT-COM_VlanID`, 'i').test(k));
-    const hwVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\..*\\.X_HW_VLAN`, 'i').test(k));
-    const zteVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\.X_ZTE-COM_VLAN`, 'i').test(k));
-    const stdVlan = rawKeys.find(k => new RegExp(`${basePath.replace(/\./g, '\\.')}\\.VLANID`, 'i').test(k));
-
-    if (ctComVlan) {
-      rawCandidateParams.push([ctComVlan, Number(profile.vlanId), 'xsd:int']);
-    } else if (ctComVlan2) {
-      rawCandidateParams.push([ctComVlan2, Number(profile.vlanId), 'xsd:int']);
-    } else if (hwVlan) {
-      rawCandidateParams.push([hwVlan, Number(profile.vlanId), 'xsd:int']);
-    } else if (zteVlan) {
-      rawCandidateParams.push([zteVlan, Number(profile.vlanId), 'xsd:int']);
-    } else if (stdVlan) {
-      rawCandidateParams.push([stdVlan, Number(profile.vlanId), 'xsd:unsignedInt']);
-    } else {
-      rawCandidateParams.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_CT-COM_WANEponLinkConfig.VLANIDMark`, Number(profile.vlanId), 'xsd:int']);
-    }
+    // Target the specific slot's EPON link config for VLAN Mode and VLAN ID
+    rawCandidateParams.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.Mode`, 2, 'xsd:int']);
+    rawCandidateParams.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`, Number(profile.vlanId), 'xsd:int']);
   }
 
   // NOTE: Requirement 5: MulticastVlan is explicitly removed from Internet WAN task!

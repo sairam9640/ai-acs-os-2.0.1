@@ -1566,54 +1566,9 @@ ${stringElements}
               validParams.push({ name: targetName, value: vVal, type: vType });
             }
 
-            // Check if parent slot exists before issuing AddObject (Issue 2)
-            // If device only has WANConnectionDevice.1, normalize any non-existent WANConnectionDevice.N to WANConnectionDevice.1
-            const hasOnlySlot1 = Object.keys(dev.rawParameters || {}).some(k => k.includes('WANConnectionDevice.1.')) &&
-              !Object.keys(dev.rawParameters || {}).some(k => k.includes('WANConnectionDevice.2.') || k.includes('WANConnectionDevice.4.WANPPPConnection'));
-            
-            if (hasOnlySlot1) {
-              validParams = validParams.map((p: any) => ({
-                ...p,
-                name: p.name.replace(/WANConnectionDevice\.\d+\./, 'WANConnectionDevice.1.'),
-              }));
-            }
-
             const targetParamName = validParams[0]?.name || '';
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
-
-            const isPreAllocatedSlot = targetSlot === 1 && Object.keys(dev.rawParameters || {}).some(k => k.includes('WANConnectionDevice.1.'));
-
-            const parentSlotExists = isPreAllocatedSlot || Object.keys(dev.rawParameters || {}).some(k =>
-              k.includes(`WANConnectionDevice.${targetSlot}.`)
-            );
-
-            if (!isPreAllocatedSlot && targetSlot > 1 && !parentSlotExists && session.stage !== 'WAN_SLOT_GPN_SENT') {
-              // Discover real topology first instead of guessing for non-preallocated dynamic slots
-              session.stage = 'WAN_SLOT_GPN_SENT';
-              const gpnXml = `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID></soapenv:Header>
-  <soapenv:Body>
-    <cwmp:GetParameterNames>
-      <ParameterPath>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.</ParameterPath>
-      <NextLevel>1</NextLevel>
-    </cwmp:GetParameterNames>
-  </soapenv:Body>
-</soapenv:Envelope>`;
-              console.log(`[Native CWMP OUT] Checking parent slot existence via GPN on WANConnectionDevice. for ${session.serialNumber}`);
-              triggerGenieAcsConnectionRequest(session.serialNumber).catch(() => {});
-              return gpnXml;
-            }
-
-            if (!isPreAllocatedSlot && targetSlot > 1 && !parentSlotExists && session.stage === 'WAN_SLOT_GPN_SENT') {
-              // Confirmed absent after discovery -> fail clearly, don't retry blindly
-              pendingCmd.status = 'failed';
-              pendingCmd.errorMessage = 'TOPOLOGY_MISMATCH: WANConnectionDevice.' + targetSlot + ' not present on device';
-              pendingCmd.completedAt = new Date();
-              await pendingCmd.save();
-              return null;
-            }
 
             const isPppoeConn = targetParamName.includes('WANPPPConnection');
             const targetConnObj = isPppoeConn ? 'WANPPPConnection.' : 'WANIPConnection.';
@@ -1622,6 +1577,9 @@ ${stringElements}
             const slotExistsInRaw = Object.keys(dev.rawParameters || {}).some(k =>
               k.includes(`WANConnectionDevice.${targetSlot}.${targetConnObj}`)
             );
+
+            const isGenexis = /4410|Platinum|GX[-_ ]?4410/i.test(String(dev.modelName || session.modelName || ''));
+            const isPreAllocatedSlot = targetSlot === 1 || (isGenexis && targetSlot <= 4) || (targetSlot >= 1 && targetSlot <= 8);
 
             if (!isPreAllocatedSlot && targetSlot > 1 && !slotExistsInRaw && session.stage !== 'ADD_OBJECT_SENT') {
               session.stage = 'ADD_OBJECT_SENT';
