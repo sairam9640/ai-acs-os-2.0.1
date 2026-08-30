@@ -1538,6 +1538,17 @@ ${stringElements}
                 continue;
               }
 
+              // Suppress direct WLAN KeyPassphrase if PreSharedKey is used/supported (as it causes Fault 9003 on Genexis ONTs)
+              if (/WLANConfiguration\.\d+\.KeyPassphrase$/i.test(targetName)) {
+                const instMatch = targetName.match(/WLANConfiguration\.(\d+)\./);
+                const instNum = instMatch ? instMatch[1] : '1';
+                if (validation.validParams.some(([p]) => p.includes(`WLANConfiguration.${instNum}.PreSharedKey`)) ||
+                    rawKeys.some(k => k.includes(`WLANConfiguration.${instNum}.PreSharedKey`))) {
+                  console.warn(`[CWMP ACS] 🛡️ Suppressed redundant/unsupported parameter '${targetName}' in favor of PreSharedKey.`);
+                  continue;
+                }
+              }
+
               const isCoreParam = /Username|Password|NATEnabled$/i.test(targetName);
               if (!isCoreParam) {
                 const cached = await SupportedParameterCache.findOne({
