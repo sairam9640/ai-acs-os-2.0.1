@@ -2679,9 +2679,17 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
       const slotMatch = prefix.match(/WANConnectionDevice\.(\d+)\./i);
       const slotNum = slotMatch ? slotMatch[1] : '1';
 
-      // Resolve VLAN ID
+      // Resolve VLAN ID from live pMap, rawParameters, or slot link config
       let connVlan: number | null = null;
-      const vlanRaw = pMap.get(`${prefix}.X_CT-COM_VlanID`) || pMap.get(`${prefix}.X_HW_VLAN`) || pMap.get(`${prefix}.VLANID`) || pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`);
+      const rawMap = ((device as any)?.rawParameters || {}) as Record<string, any>;
+      const vlanRaw = pMap.get(`${prefix}.X_CT-COM_VlanID`) || 
+                      pMap.get(`${prefix}.X_HW_VLAN`) || 
+                      pMap.get(`${prefix}.VLANID`) || 
+                      pMap.get(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`) ||
+                      rawMap[`${prefix}.X_CT-COM_VlanID`] || 
+                      rawMap[`${prefix}.X_HW_VLAN`] || 
+                      rawMap[`${prefix}.VLANID`] || 
+                      rawMap[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`];
       if (vlanRaw) {
         const v = parseInt(String(vlanRaw), 10);
         if (!isNaN(v) && v > 0) connVlan = v;
@@ -2690,9 +2698,16 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
         const m = connName.match(/VID_(\d+)/i);
         if (m) connVlan = parseInt(m[1], 10);
       }
+      if (!connVlan && slotNum === '2') {
+        connVlan = (device as any).wanVlan || 480;
+      } else if (!connVlan && slotNum === '3') {
+        connVlan = 1849;
+      } else if (!connVlan && isPpp) {
+        connVlan = (device as any).wanVlan || 480;
+      }
 
       // Resolve service type
-      const serviceList = pMap.get(`${prefix}.X_CT-COM_ServiceList`) || pMap.get(`${prefix}.X_CT_COM_ServiceList`) || pMap.get(`${prefix}.X_HW_SERVICELIST`) || pMap.get(`${prefix}.ServiceList`) || '';
+      const serviceList = pMap.get(`${prefix}.X_CT-COM_ServiceList`) || pMap.get(`${prefix}.X_CT_COM_ServiceList`) || pMap.get(`${prefix}.X_HW_SERVICELIST`) || pMap.get(`${prefix}.ServiceList`) || rawMap[`${prefix}.X_CT-COM_ServiceList`] || '';
       const isTr069 = (/TR069/i.test(connName) || /TR069/i.test(serviceList)) && !/INTERNET|VOIP|VOICE/i.test(connName + serviceList);
       const isVoip = /VOIP|VOICE/i.test(connName) || /VOIP|VOICE/i.test(serviceList);
       const isInternet = /INTERNET/i.test(connName) || /INTERNET/i.test(serviceList) || isPpp || (!isTr069 && !isVoip);
@@ -2720,7 +2735,7 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
         ipAssignment: isPpp ? 'DHCP' : 'DHCP',
         vlanMode: connVlan ? 'TAG' : 'UNTAG',
         vlanEnabled: Boolean(connVlan),
-        vlanId: connVlan || (isTr069 ? 100 : 100),
+        vlanId: connVlan || (isTr069 ? 100 : (slotNum === '2' ? 480 : 100)),
         isProtected: isTr069,
         cpeObjectPath: `${prefix}.`,
         pppoeUsername: connUser,

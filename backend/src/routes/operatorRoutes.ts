@@ -1605,22 +1605,31 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
 
     let hasModifications = false;
     const profiles = (device.wanProfiles || []).map((p: any, idx: number) => {
-      const isManagement = p.serviceType === 'TR069' || p.bearerService === 'TR069' || (p.name && /TR069/i.test(p.name)) || Boolean(p.isProtected);
-      const isPppoe = p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || Boolean(p.pppoeUsername);
-      const resolvedBearer = p.bearerService || p.serviceType || (isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : 'INTERNET'));
+      const slotMatch = (p.cpeObjectPath || '').match(/WANConnectionDevice\.(\d+)\./i);
+      const slotNum = slotMatch ? slotMatch[1] : (idx === 0 ? '1' : (idx === 1 ? '2' : '3'));
+      const isManagement = p.serviceType === 'TR069' || p.bearerService === 'TR069' || (p.name && /TR069/i.test(p.name)) || Boolean(p.isProtected) || slotNum === '1';
+      const isPppoe = p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || Boolean(p.pppoeUsername) || slotNum === '2';
+      const resolvedBearer = isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : (p.bearerService || p.serviceType || 'INTERNET'));
       
-      let canonicalName = p.name;
-      if (!canonicalName) {
-        canonicalName = isManagement ? (wan1LiveName || 'MGMT_TR069') : (wan2LiveName || `${resolvedBearer}_${isPppoe ? 'PPPoE' : 'IP'}_${idx + 1}`);
+      const liveCpeName = raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.WANPPPConnection.1.Name`] ||
+                          raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.WANIPConnection.1.Name`];
+      let canonicalName = liveCpeName || p.name;
+      if (!canonicalName || canonicalName === '1_OTHER_IP' || canonicalName === '2_INTERNET_R') {
+        canonicalName = isManagement ? (wan1LiveName || '2_TR069_R_VID_100') : (wan2LiveName || '3_INTERNET_R_VID_480');
       }
 
-      let resolvedVlanId = p.vlanId;
-      if (resolvedVlanId === undefined || resolvedVlanId === null || isNaN(Number(resolvedVlanId))) {
+      const rawSlotVlan = raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`];
+      let resolvedVlanId = rawSlotVlan ? parseInt(String(rawSlotVlan), 10) : p.vlanId;
+      if (!resolvedVlanId || isNaN(Number(resolvedVlanId)) || (slotNum === '2' && resolvedVlanId === 100)) {
         const vidMatch = String(canonicalName).match(/VID_(\d+)/i);
         if (vidMatch) {
           resolvedVlanId = Number(vidMatch[1]);
         } else if (isManagement) {
           resolvedVlanId = 100;
+        } else if (slotNum === '2' || isPppoe) {
+          resolvedVlanId = (device as any).wanVlan || 480;
+        } else if (slotNum === '3') {
+          resolvedVlanId = 1849;
         }
       }
 
