@@ -1517,28 +1517,8 @@ ${stringElements}
             let validParams: Array<{ name: string; value: any; type: string }> = [];
             const rawKeys = Object.keys(dev.rawParameters || {});
 
-            // Dynamically locate existing confirmed WAN PPP connection prefix on this device
-            const confirmedPppInstanceKey = rawKeys.find(k => /WANConnectionDevice\.\d+\.WANPPPConnection\.\d+\./i.test(k));
-            let confirmedPppPrefix = '';
-            if (confirmedPppInstanceKey) {
-              const m = confirmedPppInstanceKey.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
-              if (m) confirmedPppPrefix = m[1];
-            }
-            if (!confirmedPppPrefix) {
-              confirmedPppPrefix = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1';
-            }
-
             for (const [vName, vVal, vType] of validation.validParams) {
               let targetName = vName;
-
-              // If parameter is targeting WANPPPConnection.X (e.g. WANPPPConnection.2) but that instance doesn't exist on device:
-              if (/WANPPPConnection\.\d+\./i.test(targetName)) {
-                const targetInstanceMatch = targetName.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.WANPPPConnection\.\d+)/i);
-                if (targetInstanceMatch && targetInstanceMatch[1] !== confirmedPppPrefix && !rawKeys.some(k => k.startsWith(targetInstanceMatch[1]))) {
-                  console.log(`[CWMP ACS] 🔄 Rewriting parameter '${targetName}' to confirmed instance '${confirmedPppPrefix}'`);
-                  targetName = targetName.replace(targetInstanceMatch[1], confirmedPppPrefix);
-                }
-              }
 
               // Suppress unsupported vendor VLAN parameters if not present in CPE rawParameters
               if (targetName.includes('X_CT-COM_WANEponLinkConfig') && !rawKeys.some(k => k.includes('X_CT-COM_WANEponLinkConfig'))) {
@@ -2409,8 +2389,35 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
         }
       }
 
+      const idMatch = xml.match(/<(?:cwmp:)?ID[^>]*>([^<]+)<\/(?:cwmp:)?ID>/i);
+      const incomingCwmpId = idMatch ? idMatch[1].trim() : '';
+
+      // If Baseline GPV failed (ID 2), do not fail operator commands: fallback to GetParameterNames discovery
+      if (session?.stage === 'BASELINE_SENT' || incomingCwmpId === '2') {
+        console.warn(
+          `[CWMP ACS] Baseline GPV batch (ID: ${incomingCwmpId}) rejected with Fault ${fault.faultCode} on ${session?.serialNumber || device.serialNumber} (${session?.modelName || device.modelName}). Dispatching GPN discovery fallback.`
+        );
+        if (session) session.stage = 'GPN_SENT';
+        device.lastParameterSyncStatus = `FAULT_${fault.faultCode}_DISCOVERY_FALLBACK`;
+        await device.save();
+
+        const isTr181 = session?.vendor === 'TR181_STANDARD';
+        const gpnRoot = isTr181 ? 'Device.' : 'InternetGatewayDevice.';
+        const gpnXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterNames>
+      <ParameterPath>${gpnRoot}</ParameterPath>
+      <NextLevel>0</NextLevel>
+    </cwmp:GetParameterNames>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+        return gpnXml;
+      }
+
       // Only mark configuration commands as failed if the fault occurred during SetParameterValues (SPV) or Custom RPC
-      if (session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT') {
+      if ((session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT') && incomingCwmpId !== '2') {
 
         console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
           event: 'CWMP_FAULT',
@@ -2451,32 +2458,7 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
           device.pendingConfig.errorMessage = detailedErrorMsg;
         }
         await device.save();
-      }
-
-      // If Baseline GPV failed, do not fail operator commands: fallback to GetParameterNames discovery
-      if (session?.stage === 'BASELINE_SENT') {
-        console.warn(
-          `[CWMP ACS] Baseline GPV batch rejected with Fault ${fault.faultCode} on ${session.serialNumber} (${session.modelName}). Dispatching GPN discovery fallback.`
-        );
-        session.stage = 'GPN_SENT';
-        device.lastParameterSyncStatus = `FAULT_${fault.faultCode}_DISCOVERY_FALLBACK`;
-        await device.save();
-
-        const isTr181 = session.vendor === 'TR181_STANDARD';
-        const gpnPath = isTr181 ? 'Device.' : 'InternetGatewayDevice.';
-        const gpnXml = `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
-  <soapenv:Header>
-    <cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID>
-  </soapenv:Header>
-  <soapenv:Body>
-    <cwmp:GetParameterNames>
-      <ParameterPath>${gpnPath}</ParameterPath>
-      <NextLevel>0</NextLevel>
-    </cwmp:GetParameterNames>
-  </soapenv:Body>
-</soapenv:Envelope>`;
-        return gpnXml;
+        return null;
       }
 
       if (session?.stage === 'OPTICAL_SENT' && session.activeOpticalCandidate) {

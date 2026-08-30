@@ -264,11 +264,11 @@ export class CwmpVendorProfiles {
 
       case 'GENEXIS':
         return [
+          'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower',
+          'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
+          'InternetGatewayDevice.WANDevice.1.WANGponInterfaceConfig.RXPower',
           'InternetGatewayDevice.X_GNXS_Gpon.OpticalRxPower',
           'InternetGatewayDevice.X_Genexis_Gpon.OpticalRxPower',
-          'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
-          'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower',
-          'InternetGatewayDevice.WANDevice.1.WANGponInterfaceConfig.RXPower',
         ];
 
       case 'NOKIA':
