@@ -1514,7 +1514,7 @@ ${stringElements}
             }
 
             // Validate against SupportedParameterCache (reject known unsupported vendor parameters, never core params)
-            const validParams: Array<{ name: string; value: any; type: string }> = [];
+            let validParams: Array<{ name: string; value: any; type: string }> = [];
             const rawKeys = Object.keys(dev.rawParameters || {});
 
             // Dynamically locate existing confirmed WAN PPP connection prefix on this device
@@ -1567,6 +1567,17 @@ ${stringElements}
             }
 
             // Check if parent slot exists before issuing AddObject (Issue 2)
+            // If device only has WANConnectionDevice.1, normalize any non-existent WANConnectionDevice.N to WANConnectionDevice.1
+            const hasOnlySlot1 = Object.keys(dev.rawParameters || {}).some(k => k.includes('WANConnectionDevice.1.')) &&
+              !Object.keys(dev.rawParameters || {}).some(k => k.includes('WANConnectionDevice.2.') || k.includes('WANConnectionDevice.4.WANPPPConnection'));
+            
+            if (hasOnlySlot1) {
+              validParams = validParams.map((p: any) => ({
+                ...p,
+                name: p.name.replace(/WANConnectionDevice\.\d+\./, 'WANConnectionDevice.1.'),
+              }));
+            }
+
             const targetParamName = validParams[0]?.name || '';
             const slotMatch = targetParamName.match(/WANConnectionDevice\.(\d+)\./);
             const targetSlot = slotMatch ? parseInt(slotMatch[1], 10) : 1;
