@@ -337,12 +337,10 @@ describe('AI ISP OS — Section 29 Production Data Isolation & Wi-Fi Hardening T
     const isDual = CwmpVendorProfiles.isDualBandModel('GENEXIS', 'Titanium-2122A', 'C40-210');
     expect(isDual).toBe(true);
 
-    // Baseline parameters for GENEXIS include both instance 1 (2.4G) and instance 5 (5G) plus password paths
+    // Baseline parameters guaranteed for all TR-098 Wi-Fi CPEs
     const baseline = CwmpVendorProfiles.getSafeBaselineParameters('GENEXIS');
     expect(baseline).toContain('InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID');
     expect(baseline).toContain('InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase');
-    expect(baseline).toContain('InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.SSID');
-    expect(baseline).toContain('InternetGatewayDevice.LANDevice.1.WLANConfiguration.5.PreSharedKey.1.KeyPassphrase');
 
     // Simulate Genexis Titanium-2122A returning 2.4G and 5G Wi-Fi with passwords
     const genexisGpvXml = `<?xml version="1.0" encoding="UTF-8"?>

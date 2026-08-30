@@ -204,13 +204,12 @@ export class CwmpVendorProfiles {
       'InternetGatewayDevice.DeviceInfo.HardwareVersion',
       'InternetGatewayDevice.DeviceInfo.SoftwareVersion',
       'InternetGatewayDevice.DeviceInfo.UpTime',
-      // Wi-Fi 2.4 GHz & Multi-Band Subtrees (CPE returns all active instances without 9005 faults)
+      // Wi-Fi 2.4 GHz (Guaranteed universal on all TR-098 Wi-Fi CPEs; secondary bands discovered via GPN / rawParameters)
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.PreSharedKey.1.KeyPassphrase',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Channel',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.BeaconType',
       'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable',
-      ...wlan5gParams,
       // LAN Host Count & Subtree
       'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries',
       // Universal WAN Connection Subtree (Discovers all active PPP and IP connection slots without leaf path mismatches)
