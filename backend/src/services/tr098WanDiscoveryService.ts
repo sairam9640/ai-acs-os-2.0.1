@@ -453,40 +453,34 @@ export async function buildDynamicTr098WanParams(
   let basePath: string = profile.cpeObjectPath ? profile.cpeObjectPath.replace(/\.$/, '') : '';
 
   if (!basePath) {
+    const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
+      ? Object.keys(rawParams)
+      : Array.from(normalizeParameterMap(rawParams).keys());
+
     const otherProfiles = (device?.wanProfiles || []).filter((p: any) => p._id && String(p._id) !== String(profile._id));
     const usedPaths = new Set(otherProfiles.map((p: any) => p.cpeObjectPath ? p.cpeObjectPath.replace(/\.$/, '') : '').filter(Boolean));
 
-    // Select customer slot dynamically (never touching management slot)
-    const selectedSlot = selectCustomerWanSlot(topology, isPppoe);
+    // Search for existing confirmed connection instances on WANConnectionDevice.1
+    const pppInst1 = rawKeys.find(k => /WANConnectionDevice\.1\.WANPPPConnection\.1\./i.test(k));
+    const pppInst2 = rawKeys.find(k => /WANConnectionDevice\.1\.WANPPPConnection\.2\./i.test(k));
+    const ipInst1 = rawKeys.find(k => /WANConnectionDevice\.1\.WANIPConnection\.1\./i.test(k));
+    const ipInst2 = rawKeys.find(k => /WANConnectionDevice\.1\.WANIPConnection\.2\./i.test(k));
 
-    if (selectedSlot?.basePath && !usedPaths.has(selectedSlot.basePath)) {
-      basePath = selectedSlot.basePath;
-    } else {
-      const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
-        ? Object.keys(rawParams)
-        : Array.from(normalizeParameterMap(rawParams).keys());
-
-      // Search for an unused existing confirmed connection instance across slots 1..8
-      let foundUnusedKey = '';
-      for (let s = 1; s <= 8; s++) {
-        const candidatePrefix = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${s}.${isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1'}`;
-        if (!usedPaths.has(candidatePrefix) && rawKeys.some(k => k.startsWith(candidatePrefix))) {
-          foundUnusedKey = candidatePrefix;
-          break;
-        }
-      }
-
-      if (foundUnusedKey) {
-        basePath = foundUnusedKey;
+    if (isPppoe) {
+      if (!usedPaths.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1')) {
+        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1';
+      } else if (pppInst2 || !usedPaths.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2')) {
+        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2';
       } else {
-        // Allocate next sequential slot for new WAN profile (e.g. Slot 2, Slot 3)
-        let candidateSlot = 1;
-        while (usedPaths.has(`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${candidateSlot}.${isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1'}`)) {
-          candidateSlot++;
-          if (candidateSlot > 8) break;
-        }
-        const connName = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-        basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${candidateSlot}.${connName}`;
+        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1';
+      }
+    } else {
+      if (!usedPaths.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1')) {
+        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1';
+      } else if (ipInst2 || !usedPaths.has('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.2')) {
+        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.2';
+      } else {
+        basePath = 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1';
       }
     }
   }
@@ -501,6 +495,8 @@ export async function buildDynamicTr098WanParams(
   // Enable
   if (profile.enableWan !== undefined) {
     rawCandidateParams.push([`${basePath}.Enable`, Boolean(profile.enableWan), 'xsd:boolean']);
+  } else {
+    rawCandidateParams.push([`${basePath}.Enable`, true, 'xsd:boolean']);
   }
 
   if (isPppoe) {
@@ -538,8 +534,9 @@ export async function buildDynamicTr098WanParams(
     const slotMatch = basePath.match(/WANConnectionDevice\.(\d+)\./);
     const slotNum = slotMatch ? slotMatch[1] : '1';
 
-    // Check if the CPE parameter tree has any known VLAN parameter for this slot/connection
-    const ctComVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\.X_CT-COM_WANEponLinkConfig\\.VLANIDMark`, 'i').test(k));
+    // Prioritize Slot 1 CT-COM VLAN parameter
+    const ctComVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\.X_CT-COM_WANEponLinkConfig\\.VLANIDMark`, 'i').test(k))
+      || rawKeys.find(k => /WANConnectionDevice\.1\.X_CT-COM_WANEponLinkConfig\.VLANIDMark/i.test(k));
     const ctComVlan2 = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\..*\\.X_CT-COM_VlanID`, 'i').test(k));
     const hwVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\..*\\.X_HW_VLAN`, 'i').test(k));
     const zteVlan = rawKeys.find(k => new RegExp(`WANConnectionDevice\\.${slotNum}\\.X_ZTE-COM_VLAN`, 'i').test(k));
@@ -548,20 +545,15 @@ export async function buildDynamicTr098WanParams(
     if (ctComVlan) {
       rawCandidateParams.push([ctComVlan, Number(profile.vlanId), 'xsd:int']);
     } else if (ctComVlan2) {
-      rawCandidateParams.push([ctComVlan2, Number(profile.vlanId), 'xsd:unsignedInt']);
+      rawCandidateParams.push([ctComVlan2, Number(profile.vlanId), 'xsd:int']);
     } else if (hwVlan) {
-      rawCandidateParams.push([hwVlan, Number(profile.vlanId), 'xsd:unsignedInt']);
+      rawCandidateParams.push([hwVlan, Number(profile.vlanId), 'xsd:int']);
     } else if (zteVlan) {
-      rawCandidateParams.push([zteVlan, Number(profile.vlanId), 'xsd:unsignedInt']);
+      rawCandidateParams.push([zteVlan, Number(profile.vlanId), 'xsd:int']);
     } else if (stdVlan) {
       rawCandidateParams.push([stdVlan, Number(profile.vlanId), 'xsd:unsignedInt']);
     } else {
-      // If no tree has been discovered yet (initial bootstrap), try CT-COM default only if device is CTC/EPON
-      const isEpon = String(device?.modelName || '').toLowerCase().includes('epon') || String(device?.vendor || '').includes('CHINA');
-      if (isEpon) {
-        const targetVlanPath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`;
-        rawCandidateParams.push([targetVlanPath, Number(profile.vlanId), 'xsd:int']);
-      }
+      rawCandidateParams.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.X_CT-COM_WANEponLinkConfig.VLANIDMark`, Number(profile.vlanId), 'xsd:int']);
     }
   }
 

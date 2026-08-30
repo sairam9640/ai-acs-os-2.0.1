@@ -2384,9 +2384,55 @@ Detailed: ${detailedErrorMsg}
 Timestamp: ${new Date().toISOString()}
       `);
 
-      // Only mark configuration commands as failed if the fault occurred during SetParameterValues (SPV) or AddObject
-      if (session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT' || session?.stage === 'ADD_OBJECT_SENT') {
-        const stageDesc = session?.stage === 'ADD_OBJECT_SENT' ? ' [AddObject Failed]' : '';
+      // If AddObject was rejected (e.g. router only supports pre-allocated WANConnectionDevice.1), fallback to SPV on Slot 1
+      if (session?.stage === 'ADD_OBJECT_SENT') {
+        console.warn(`[CWMP ACS] AddObject failed with Fault ${fault.faultCode} on ${device.serialNumber}. Falling back to direct SetParameterValues on WANConnectionDevice.1.`);
+        session.stage = 'SPV_SENT';
+        const pendingCmd = await DeviceCommand.findOne({
+          deviceId: device._id,
+          action: 'SET_WAN_CONFIG',
+          status: { $in: ['queued', 'sending', 'sent', 'pending'] },
+        }).sort({ createdAt: -1 });
+
+        if (pendingCmd) {
+          let rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues;
+          if (Array.isArray(rawParams) && rawParams.length > 0) {
+            const validParams = rawParams.map(([name, value, type]) => ({
+              name: name.replace(/WANConnectionDevice\.\d+\./, 'WANConnectionDevice.1.'),
+              value,
+              type: type || 'xsd:string',
+            }));
+
+            const spvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[${validParams.length}]">
+${validParams.map((p: any) => `        <ParameterValueStruct>
+          <Name>${p.name}</Name>
+          <Value xsi:type="${p.type}">${p.value}</Value>
+        </ParameterValueStruct>`).join('\n')}
+      </ParameterList>
+      <ParameterKey>${pendingCmd._id}</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+            pendingCmd.cwmpRequestId = '3';
+            pendingCmd.status = 'sending';
+            pendingCmd.affectedParameterPaths = validParams.map((p: any) => p.name);
+            pendingCmd.verificationTargetValues = validParams.reduce((acc: any, p: any) => {
+              acc[p.name] = p.value;
+              return acc;
+            }, {});
+            await pendingCmd.save();
+            return spvXml;
+          }
+        }
+      }
+
+      // Only mark configuration commands as failed if the fault occurred during SetParameterValues (SPV) or Custom RPC
+      if (session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT') {
 
         console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
           event: 'CWMP_FAULT',
@@ -2405,7 +2451,7 @@ Timestamp: ${new Date().toISOString()}
         const resolvedFaultCode = isFault9005 ? 9005 : Number(fault.faultCode || 9002);
         const cmdUpdatePayload: any = {
           status: 'failed',
-          errorMessage: `${detailedErrorMsg}${stageDesc}`,
+          errorMessage: detailedErrorMsg,
           completedAt: new Date(),
           faultCode: resolvedFaultCode,
           faultString: fault.faultString,
@@ -2424,7 +2470,7 @@ Timestamp: ${new Date().toISOString()}
         if (device.pendingConfig && device.pendingConfig.status === 'APPLYING') {
           device.pendingConfig.status = 'FAILED';
           device.pendingConfig.failedAt = new Date();
-          device.pendingConfig.errorMessage = `${detailedErrorMsg}${stageDesc}`;
+          device.pendingConfig.errorMessage = detailedErrorMsg;
         }
         await device.save();
       }
