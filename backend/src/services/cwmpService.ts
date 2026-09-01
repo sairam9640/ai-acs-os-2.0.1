@@ -1486,11 +1486,58 @@ ${stringElements}
           let rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues;
           if (!Array.isArray(rawParams) || rawParams.length === 0) {
             const prof = (pendingCmd as any).parameters?.profile;
-            if (prof) {
+            if (prof && prof.cpeObjectPath) {
               rawParams = await buildTr069WanParams(prof, dev);
             } else {
               rawParams = [];
             }
+          }
+
+          const isWanConfigCommand = pendingCmd.action === 'SET_WAN_CONFIG' || (Array.isArray(rawParams) && rawParams.some((p: any) => {
+            const name = Array.isArray(p) ? p[0] : (p?.name || p?.path || '');
+            return name.includes('WANConnectionDevice.');
+          }));
+          const requiresAddObject = !!(pendingCmd as any).parameters?.requiresAddObject;
+          const addObjectAttempted = !!(pendingCmd as any).parameters?.addObjectAttempted;
+
+          // Dispatch AddObject FIRST if dynamic new slot creation is required (even if rawParams is initially empty)
+          if (isWanConfigCommand && requiresAddObject && !addObjectAttempted && session.stage !== 'ADD_OBJECT_SENT') {
+            pendingCmd.status = 'sending';
+            pendingCmd.sentAt = new Date();
+            session.stage = 'ADD_OBJECT_SENT';
+            const targetObjectName = (pendingCmd.parameters as any)?.targetObjectName || 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.';
+            if (pendingCmd.parameters) {
+              (pendingCmd.parameters as any).addObjectAttempted = true;
+              (pendingCmd.parameters as any).targetObjectName = targetObjectName;
+              pendingCmd.markModified('parameters');
+            }
+            await pendingCmd.save();
+
+            const addObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:AddObject>
+      <ObjectName>${targetObjectName}</ObjectName>
+      <ParameterKey>${pendingCmd._id}</ParameterKey>
+    </cwmp:AddObject>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+            CwmpSessionLog.create({
+              tenantId: session.tenantId,
+              deviceId: dev._id,
+              serialNumber: session.serialNumber,
+              sessionId: session.sessionId,
+              cwmpId: '3',
+              direction: 'ACS_TO_CPE',
+              rpcMethod: 'AddObject',
+              httpStatus: 200,
+              rawXml: addObjectXml,
+              timestamp: new Date(),
+            }).catch(() => {});
+            console.log(`[Native CWMP OUT] Dispatched AddObject RPC for ${targetObjectName} on ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
+            triggerGenieAcsConnectionRequest(session.serialNumber).catch(() => {});
+            return addObjectXml;
           }
 
           if (Array.isArray(rawParams) && rawParams.length > 0) {
