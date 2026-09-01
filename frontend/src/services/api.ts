@@ -593,7 +593,7 @@ class ApiService {
   }
 
   async deleteWanProfile(deviceId: string, profileId: string) {
-    return this.request(`/operator/devices/${deviceId}/wan/profiles/${profileId}`, {
+    return this.request(`/operator/devices/${deviceId}/wan/profiles/${encodeURIComponent(profileId)}`, {
       method: 'DELETE',
     });
   }

@@ -2452,42 +2452,51 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       }
     );
 
-    // Check if the target slot exists on the physical ONT
+    // Resolve target WAN Connection slot on physical ONT
     const slotMatch = targetProfile.cpeObjectPath?.match(/WANConnectionDevice\.(\d+)\./i);
-    const targetSlot = slotMatch ? slotMatch[1] : '2';
-    const isPpp = (targetProfile as any).connectionType === 'PPPoE' || (targetProfile as any).linkMode === 'PPP';
-    const connType = isPpp ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-    
-    const slotExistsOnDevice = Object.keys(device.rawParameters || {}).some(k => 
-      k.includes(`WANConnectionDevice.${targetSlot}.`)
-    );
+    let targetSlot = slotMatch ? slotMatch[1] : '';
 
-    let deleteCmd: any = null;
-
-    if (slotExistsOnDevice) {
-      // Slot exists on physical ONT: Queue clean TR-069 DeleteObject RPC to remove the slot entirely
-      deleteCmd = await DeviceCommand.create({
-        tenantId: device.tenantId,
-        deviceId: device._id,
-        action: 'DELETE_WAN_CONFIG',
-        parameters: {
-          operation: 'DELETE_OBJECT',
-          targetProfile: removedName,
-          targetObjectName: `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`,
-          cpeObjectPath: `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`,
-        },
-        status: 'queued',
-        requestedBy: {
-          userId: req.user?.id || 'system',
-          role: req.user?.role || 'operator',
-          email: req.user?.email || 'admin@ai-isp.com',
-        },
-        queuedAt: new Date(),
-        correlationId: `wan_delete_${Date.now()}`,
-      }).catch(() => null);
-
-      triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+    if (!targetSlot) {
+      const raw = device.rawParameters || {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (typeof v === 'string' && (v === targetProfile.name || (targetProfile.vlanId && k.includes('VLANIDMark') && String(v) === String(targetProfile.vlanId)))) {
+          const m = k.match(/WANConnectionDevice\.(\d+)\./i);
+          if (m) {
+            targetSlot = m[1];
+            break;
+          }
+        }
+      }
     }
+
+    if (!targetSlot) {
+      targetSlot = '2';
+    }
+
+    const targetObjectName = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`;
+
+    // ALWAYS create and queue DELETE_WAN_CONFIG DeviceCommand so it appears in Pending Updates and triggers DeleteObject RPC
+    const deleteCmd = await DeviceCommand.create({
+      tenantId: device.tenantId,
+      deviceId: device._id,
+      action: 'DELETE_WAN_CONFIG',
+      parameters: {
+        operation: 'DELETE_OBJECT',
+        targetProfile: removedName,
+        targetObjectName: targetObjectName,
+        cpeObjectPath: targetObjectName,
+      },
+      status: 'queued',
+      requestedBy: {
+        userId: req.user?.id || 'system',
+        role: req.user?.role || 'operator',
+        email: req.user?.email || 'admin@ai-isp.com',
+      },
+      queuedAt: new Date(),
+      correlationId: `wan_delete_${Date.now()}`,
+    }).catch(() => null);
+
+    triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
 
     // Purge deleted slot keys from rawParameters so GET /devices/:id/wan/profiles never resurrects it
     if (device.rawParameters) {
@@ -2507,10 +2516,8 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
 
     return res.json({
       success: true,
-      status: slotExistsOnDevice ? 'QUEUED_FOR_DELETE' : 'DELETED_LOCALLY',
-      message: slotExistsOnDevice
-        ? `Customer WAN [${removedName}] removed and DeleteObject command queued for physical ONT.`
-        : `Customer WAN [${removedName}] was already absent on physical ONT. Removed from database immediately.`,
+      status: 'QUEUED_FOR_DELETE',
+      message: `Customer WAN [${removedName}] removed and DeleteObject command queued for physical ONT.`,
       commandId: deleteCmd?._id,
       profiles: device.wanProfiles,
       wanProfiles: device.wanProfiles,
