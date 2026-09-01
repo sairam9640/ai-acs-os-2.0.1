@@ -9,14 +9,12 @@ conn.on('ready', () => {
 const mongoose = require("mongoose");
 async function run() {
   await mongoose.connect("mongodb://127.0.0.1:27017/ai_isp_os_prod");
-  const logs = await mongoose.connection.db.collection("cwmpsessionlogs").find({
-    timestamp: { $gte: new Date("2026-09-01T18:20:00Z") }
-  }).sort({ timestamp: 1 }).toArray();
-  console.log("=== CWMP SESSION LOGS AT 23:51 ===");
-  logs.forEach(l => {
-    console.log(\`[\${l.timestamp ? new Date(l.timestamp).toISOString() : "NO_TIME"}] \${l.direction} | RPC: \${l.rpcMethod} | CWMP ID: \${l.cwmpId}\`);
-    if (l.rawXml) console.log(l.rawXml.substring(0, 600) + "\\n");
-  });
+  const dev = await mongoose.connection.db.collection("devices").findOne({ serialNumber: "BC62D21470F0" });
+  console.log("=== LANDEVICE KEYS IN RAWPARAMETERS ===");
+  const keys = Object.keys(dev.rawParameters || {});
+  const lanKeys = keys.filter(k => k.startsWith("InternetGatewayDevice.LANDevice.1."));
+  console.log("Total LANDevice.1 keys:", lanKeys.length);
+  lanKeys.forEach(k => console.log(\` - \${k} = \${JSON.stringify(dev.rawParameters[k])}\`));
   await mongoose.disconnect();
 }
 run().catch(console.error);

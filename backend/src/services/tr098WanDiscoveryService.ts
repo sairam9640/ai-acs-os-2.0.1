@@ -338,7 +338,7 @@ export function validateWanParameters(
   const omittedOptional: string[] = [];
 
   // Optional parameter patterns (never fail command if absent/unsupported)
-  const optionalRegex = /NATEnabled$|MulticastVlan$|DNSServers$|ExternalIPAddress$|SubnetMask$|DefaultGateway$/i;
+  const optionalRegex = /NATEnabled$|MulticastVlan$|DNSServers$|ExternalIPAddress$|SubnetMask$|DefaultGateway$|X_CT-COM_LanInterface/i;
 
   // Required parameter patterns for PPPoE/WAN
   const requiredRegex = /Username$|Password$|Enable$|ConnectionType$/i;
@@ -487,6 +487,48 @@ export async function buildDynamicTr098WanParams(
     // Target the specific slot's EPON link config for VLAN Mode and VLAN ID
     rawCandidateParams.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.Mode`, 2, 'xsd:int']);
     rawCandidateParams.push([`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`, Number(profile.vlanId), 'xsd:int']);
+  }
+
+  // Dynamic LAN Port & SSID Binding (X_CT-COM_LanInterface)
+  // Maps ['FE', 'GE'] / ['LAN1', 'LAN2'] and ['SSID1', 'SSID2'] to standard TR-098 interface paths
+  const lanInterfaces: string[] = [];
+  const lanList = Array.isArray(profile.lanPortBindings) && profile.lanPortBindings.length > 0
+    ? profile.lanPortBindings
+    : ['LAN1', 'LAN2', 'FE', 'GE'];
+
+  for (const p of lanList) {
+    const pUpper = String(p || '').toUpperCase().trim();
+    if (pUpper === 'FE' || pUpper === 'LAN1' || pUpper === 'LAN 1' || pUpper === 'ETH1') {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
+    } else if (pUpper === 'GE' || pUpper === 'LAN2' || pUpper === 'LAN 2' || pUpper === 'ETH2') {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
+    } else if (pUpper === 'LAN3' || pUpper === 'LAN 3' || pUpper === 'ETH3') {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
+    } else if (pUpper === 'LAN4' || pUpper === 'LAN 4' || pUpper === 'ETH4') {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
+    }
+  }
+
+  const ssidList = Array.isArray(profile.ssidBindings) && profile.ssidBindings.length > 0
+    ? profile.ssidBindings
+    : ['SSID1', 'SSID2'];
+
+  for (const s of ssidList) {
+    const sUpper = String(s || '').toUpperCase().trim();
+    if (sUpper === 'SSID1' || sUpper === 'WLAN1' || sUpper.includes('2.4')) {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.1');
+    } else if (sUpper === 'SSID2' || sUpper === 'WLAN2' || sUpper.includes('5G')) {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.2');
+    } else if (sUpper === 'SSID3' || sUpper === 'WLAN3') {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.3');
+    } else if (sUpper === 'SSID4' || sUpper === 'WLAN4') {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.4');
+    }
+  }
+
+  if (lanInterfaces.length > 0) {
+    const boundLanStr = Array.from(new Set(lanInterfaces)).join(',');
+    rawCandidateParams.push([`${basePath}.X_CT-COM_LanInterface`, boundLanStr, 'xsd:string']);
   }
 
   // NOTE: Requirement 5: MulticastVlan is explicitly removed from Internet WAN task!
