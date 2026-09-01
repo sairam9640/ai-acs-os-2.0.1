@@ -480,11 +480,14 @@ export async function buildDynamicTr098WanParams(
     rawCandidateParams.push([`${basePath}.Enable`, true, 'xsd:boolean']);
   }
 
+  const isVoice = profile.bearerService === 'VOICE' || profile.bearerService === 'VOIP' || profile.serviceType === 'VOIP' || profile.serviceType === 'VOICE' || profile.serviceUsage?.voip;
+  const isTr069 = profile.bearerService === 'TR069' || profile.serviceType === 'TR069' || profile.serviceUsage?.tr069;
+
   // Service List & IP Connection Parameters (only valid on WANIPConnection, omit on WANPPPConnection to prevent Fault 9005)
   if (!isPppoe) {
     const sType = String(profile.serviceType || profile.bearerService || '').toUpperCase();
-    const resolvedServiceList = (sType === 'VOIP' || sType === 'VOICE' || profile.serviceUsage?.voip) ? 'VOICE' :
-      (sType === 'TR069' || sType === 'MANAGEMENT' || profile.serviceUsage?.tr069) ? 'TR069' :
+    const resolvedServiceList = isVoice ? 'VOICE' :
+      (isTr069) ? 'TR069' :
       (sType === 'IPTV' || profile.serviceUsage?.iptvDhcp) ? 'IPTV' : 'INTERNET';
     rawCandidateParams.push([`${basePath}.X_CT-COM_ServiceList`, resolvedServiceList, 'xsd:string']);
     rawCandidateParams.push([`${basePath}.ConnectionType`, profile.connectionType === 'Bridge' || profile.bridgeMode ? 'IP_Bridged' : 'IP_Routed', 'xsd:string']);
@@ -506,7 +509,7 @@ export async function buildDynamicTr098WanParams(
     }
     // ConnectionType is read-only on most TR-098 ONTs (e.g. Genexis) and defaults to IP_Routed on WANPPPConnection. Omit to prevent Fault 9003.
   } else {
-    if (profile.natEnabled !== undefined && profile.bearerService !== 'TR069') {
+    if (profile.natEnabled !== undefined && !isTr069 && !isVoice && profile.connectionType !== 'Bridge' && !profile.bridgeMode) {
       rawCandidateParams.push([`${basePath}.NATEnabled`, Boolean(profile.natEnabled), 'xsd:boolean']);
     }
     if (profile.connectionType === 'Static' || profile.ipAssignment === 'Static') {
@@ -532,58 +535,60 @@ export async function buildDynamicTr098WanParams(
   }
 
   // Dynamic LAN Port & SSID Binding (X_CT-COM_LanInterface)
-  // Maps ['FE', 'GE'] / ['LAN1', 'LAN2'] and ['SSID1', 'SSID2'] to standard TR-098 interface paths
-  const lanInterfaces: string[] = [];
-  const lanList = Array.isArray(profile.lanPortBindings) && profile.lanPortBindings.length > 0
-    ? profile.lanPortBindings
-    : ['LAN1', 'LAN2', 'FE', 'GE'];
+  // Only for INTERNET / Bridge WAN connections (omit for VOICE and TR-069)
+  if (!isTr069 && !isVoice) {
+    const lanInterfaces: string[] = [];
+    const lanList = Array.isArray(profile.lanPortBindings) && profile.lanPortBindings.length > 0
+      ? profile.lanPortBindings
+      : ['LAN1', 'LAN2', 'FE', 'GE'];
 
-  for (const p of lanList) {
-    const pUpper = String(p || '').toUpperCase().trim();
-    if (pUpper === 'FE' || pUpper === 'LAN1' || pUpper === 'LAN 1' || pUpper === 'ETH1') {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
-      if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.3'))) {
-        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
+    for (const p of lanList) {
+      const pUpper = String(p || '').toUpperCase().trim();
+      if (pUpper === 'FE' || pUpper === 'LAN1' || pUpper === 'LAN 1' || pUpper === 'ETH1') {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
+        if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.3'))) {
+          lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
+        }
+      } else if (pUpper === 'GE' || pUpper === 'LAN2' || pUpper === 'LAN 2' || pUpper === 'ETH2') {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
+        if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.4'))) {
+          lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
+        }
+      } else if (pUpper === 'LAN3' || pUpper === 'LAN 3' || pUpper === 'ETH3') {
+        if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.3'))) {
+          lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
+        }
+      } else if (pUpper === 'LAN4' || pUpper === 'LAN 4' || pUpper === 'ETH4') {
+        if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.4'))) {
+          lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
+        }
+      } else {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
       }
-    } else if (pUpper === 'GE' || pUpper === 'LAN2' || pUpper === 'LAN 2' || pUpper === 'ETH2') {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
-      if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.4'))) {
-        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
-      }
-    } else if (pUpper === 'LAN3' || pUpper === 'LAN 3' || pUpper === 'ETH3') {
-      if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.3'))) {
-        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
-      }
-    } else if (pUpper === 'LAN4' || pUpper === 'LAN 4' || pUpper === 'ETH4') {
-      if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.4'))) {
-        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
-      }
-    } else {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
     }
-  }
 
-  const ssidList = Array.isArray(profile.ssidBindings) && profile.ssidBindings.length > 0
-    ? profile.ssidBindings
-    : ['SSID1', 'SSID2'];
+    const ssidList = Array.isArray(profile.ssidBindings) && profile.ssidBindings.length > 0
+      ? profile.ssidBindings
+      : ['SSID1', 'SSID2'];
 
-  for (const s of ssidList) {
-    const sUpper = String(s || '').toUpperCase().trim();
-    if (sUpper === 'SSID1' || sUpper === 'WLAN1' || sUpper.includes('2.4')) {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.1');
-    } else if (sUpper === 'SSID2' || sUpper === 'WLAN2' || sUpper.includes('5G')) {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.2');
-    } else if (sUpper === 'SSID3' || sUpper === 'WLAN3') {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.3');
-    } else if (sUpper === 'SSID4' || sUpper === 'WLAN4') {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.4');
+    for (const s of ssidList) {
+      const sUpper = String(s || '').toUpperCase().trim();
+      if (sUpper === 'SSID1' || sUpper === 'WLAN1' || sUpper.includes('2.4')) {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.1');
+      } else if (sUpper === 'SSID2' || sUpper === 'WLAN2' || sUpper.includes('5G')) {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.2');
+      } else if (sUpper === 'SSID3' || sUpper === 'WLAN3') {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.3');
+      } else if (sUpper === 'SSID4' || sUpper === 'WLAN4') {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.WLANConfiguration.4');
+      }
     }
-  }
 
-  if (lanInterfaces.length > 0) {
-    const boundLanStr = Array.from(new Set(lanInterfaces)).join(',');
-    rawCandidateParams.push([`${basePath}.X_CT-COM_LanInterface`, boundLanStr, 'xsd:string']);
+    if (lanInterfaces.length > 0) {
+      const boundLanStr = Array.from(new Set(lanInterfaces)).join(',');
+      rawCandidateParams.push([`${basePath}.X_CT-COM_LanInterface`, boundLanStr, 'xsd:string']);
+    }
   }
 
   // NOTE: Requirement 5: MulticastVlan is explicitly removed from Internet WAN task!
