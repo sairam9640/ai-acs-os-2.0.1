@@ -261,18 +261,30 @@ export function discoverLiveTr098WanTree(
 export function selectCustomerWanSlot(
   topology: ITr098WanTopology,
   isPppoe: boolean,
-  targetSlotHint?: number
+  targetSlotHint?: number,
+  claimedPaths?: Set<string>
 ): { slot: number; basePath: string; pppConnection?: IWanConnectionInstance; ipConnection?: IWanConnectionInstance } | null {
-  // If a hint is provided and it exists and is NOT management:
+  const isClaimed = (basePath: string) => {
+    if (!claimedPaths || claimedPaths.size === 0) return false;
+    const clean = basePath.replace(/\.$/, '');
+    for (const cp of claimedPaths) {
+      if (clean === cp || clean.startsWith(cp) || cp.startsWith(clean)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // If a hint is provided and it exists and is NOT management and NOT claimed:
   if (targetSlotHint && targetSlotHint !== topology.managementSlot && topology.slots.has(targetSlotHint)) {
     const slotObj = topology.slots.get(targetSlotHint)!;
-    if (isPppoe && slotObj.pppConnections.length > 0) {
+    if (isPppoe && slotObj.pppConnections.length > 0 && !isClaimed(slotObj.pppConnections[0].basePath)) {
       return {
         slot: targetSlotHint,
         basePath: slotObj.pppConnections[0].basePath,
         pppConnection: slotObj.pppConnections[0],
       };
-    } else if (!isPppoe && slotObj.ipConnections.length > 0) {
+    } else if (!isPppoe && slotObj.ipConnections.length > 0 && !isClaimed(slotObj.ipConnections[0].basePath)) {
       return {
         slot: targetSlotHint,
         basePath: slotObj.ipConnections[0].basePath,
@@ -281,39 +293,48 @@ export function selectCustomerWanSlot(
     }
   }
 
-  // Search existing customer PPP slots (excluding management slot)
+  // Search existing customer PPP slots (excluding management slot and claimed slots)
   if (isPppoe) {
     for (const slotNum of topology.availableCustomerPppSlots) {
       const slotObj = topology.slots.get(slotNum);
       if (slotObj && slotObj.pppConnections.length > 0) {
-        return {
-          slot: slotNum,
-          basePath: slotObj.pppConnections[0].basePath,
-          pppConnection: slotObj.pppConnections[0],
-        };
+        const bp = slotObj.pppConnections[0].basePath;
+        if (!isClaimed(bp)) {
+          return {
+            slot: slotNum,
+            basePath: bp,
+            pppConnection: slotObj.pppConnections[0],
+          };
+        }
       }
     }
   } else {
     for (const slotNum of topology.availableCustomerIpSlots) {
       const slotObj = topology.slots.get(slotNum);
       if (slotObj && slotObj.ipConnections.length > 0) {
-        return {
-          slot: slotNum,
-          basePath: slotObj.ipConnections[0].basePath,
-          ipConnection: slotObj.ipConnections[0],
-        };
+        const bp = slotObj.ipConnections[0].basePath;
+        if (!isClaimed(bp)) {
+          return {
+            slot: slotNum,
+            basePath: bp,
+            ipConnection: slotObj.ipConnections[0],
+          };
+        }
       }
     }
   }
 
-  // If no dedicated customer connection exists yet, check non-management writable slots
+  // If no dedicated customer connection exists yet, check non-management writable slots that are not claimed
   for (const [slotNum, slotObj] of topology.slots.entries()) {
     if (!slotObj.isManagementSlot && slotObj.writable) {
       const connName = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-      return {
-        slot: slotNum,
-        basePath: `${slotObj.basePath}${connName}`,
-      };
+      const candidateBp = `${slotObj.basePath}${connName}`;
+      if (!isClaimed(candidateBp) && !isClaimed(slotObj.basePath)) {
+        return {
+          slot: slotNum,
+          basePath: candidateBp,
+        };
+      }
     }
   }
 
@@ -407,18 +428,32 @@ export async function buildDynamicTr098WanParams(
   const rawParams = discoveredTree || device?.rawParameters || {};
   const topology = discoverLiveTr098WanTree(rawParams);
 
+  // Determine all basePaths already claimed by OTHER profiles on this device
+  const claimedPaths = new Set<string>();
+  if (device && Array.isArray(device.wanProfiles)) {
+    for (const p of device.wanProfiles) {
+      if (p && p.cpeObjectPath) {
+        const cleanPath = String(p.cpeObjectPath).replace(/\.$/, '');
+        // If this is a different profile (or we are creating a new profile), mark cleanPath as claimed
+        if (!profile._id || !p._id || String(p._id) !== String(profile._id)) {
+          claimedPaths.add(cleanPath);
+        }
+      }
+    }
+  }
+
   // 1. If profile already has an assigned cpeObjectPath, prioritize it
   let basePath: string = profile.cpeObjectPath ? profile.cpeObjectPath.replace(/\.$/, '') : '';
   let requiresAddObject = false;
 
   if (!basePath) {
-    // 2. Discover best customer slot using live topology from the physical ONT
-    const discoveredCustomerSlot = selectCustomerWanSlot(topology, isPppoe);
+    // 2. Discover best UNCLAIMED customer slot using live topology from the physical ONT
+    const discoveredCustomerSlot = selectCustomerWanSlot(topology, isPppoe, undefined, claimedPaths);
     if (discoveredCustomerSlot) {
       basePath = discoveredCustomerSlot.basePath;
       profile.cpeObjectPath = `${basePath}.`;
     } else {
-      // 3. No customer slot found in live parameter tree — require dynamic slot creation via AddObject RPC
+      // 3. No unclaimed customer slot found in live parameter tree — require dynamic slot creation via AddObject RPC
       requiresAddObject = true;
       basePath = '';
       profile.cpeObjectPath = '';

@@ -130,7 +130,10 @@ describe('AI ISP OS — Genexis Platinum GX 4410 Comprehensive End-to-End Test S
 
   it('8. Should build TR-069 WAN params for GX 4410 without PRE_DISPATCH_VALIDATION_FAILED', async () => {
     const dev = await Device.findOne({ serialNumber: testSerial });
+    const existingProf = dev?.wanProfiles?.[0];
     const targetProfile = {
+      _id: existingProf?._id,
+      cpeObjectPath: existingProf?.cpeObjectPath,
       enableWan: true,
       pppoeUsername: 'gx4410_updated@isp.in',
       pppoePassword: 'NewSecretPassword2026',

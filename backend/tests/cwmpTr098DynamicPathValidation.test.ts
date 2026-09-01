@@ -641,4 +641,49 @@ describe('TR-098 Dynamic WAN Path Validation & Fault 9005 Remediation Suite', ()
     expect(updatedFaultCmd?.status).toBe('failed');
     expect(updatedFaultCmd?.errorMessage).toContain('FAILED_UNKNOWN_WAN_SLOT');
   });
+
+  // 20. Multi-WAN Slot Preservation: Creating a new Voice WAN does not overwrite existing Internet WAN in Slot 2
+  it('20. should preserve existing Internet WAN in Slot 2 and require AddObject when creating a second Voice WAN profile', async () => {
+    const rawTreeWithInternet = {
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name': '1_TR069_R_VID_100',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.X_CT-COM_ServiceList': 'TR069',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Enable': true,
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username': 'internet_user@isp.in',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Password': 'secret',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.X_CT-COM_WANEponLinkConfig.Mode': 2,
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.X_CT-COM_WANEponLinkConfig.VLANIDMark': 100,
+    };
+
+    const mockDeviceWithInternet = {
+      _id: 'dev_multi_wan_test',
+      modelName: 'Platinum-4410',
+      wanProfiles: [
+        {
+          _id: 'prof_internet_1',
+          name: 'Internet_WAN',
+          serviceType: 'INTERNET',
+          connectionType: 'PPPoE',
+          vlanId: 100,
+          cpeObjectPath: 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.',
+        }
+      ],
+      rawParameters: rawTreeWithInternet,
+    };
+
+    // Attempting to create a NEW Voice WAN profile (no cpeObjectPath yet)
+    const newVoiceProfile = {
+      _id: 'prof_voice_2',
+      name: 'Voice_WAN',
+      serviceType: 'VOIP',
+      connectionType: 'IP_Routed',
+      vlanId: 200,
+    };
+
+    const voiceResult = await buildDynamicTr098WanParams(newVoiceProfile, mockDeviceWithInternet, rawTreeWithInternet);
+
+    // MUST NOT overwrite slot 2! MUST require AddObject to create a new slot on CPE.
+    expect(voiceResult.requiresAddObject).toBe(true);
+    expect(voiceResult.basePath).toBe('');
+    expect(voiceResult.params.length).toBe(0);
+  });
 });
