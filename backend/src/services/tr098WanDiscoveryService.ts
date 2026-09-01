@@ -503,5 +503,6 @@ export async function buildDynamicTr098WanParams(
     payloadHash,
     basePath,
     isPppoe,
+    requiresAddObject: false,
   };
 }

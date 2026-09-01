@@ -112,7 +112,7 @@ async function runLiveVerification() {
   // STEP 3: Immediately attempt to create a new WAN connection (WITHOUT waiting for Inform)
   // ---------------------------------------------------------------------------
   console.log('\n>>> STEP 3: Immediately create new WAN connection (stale MongoDB rawParameters simulation)');
-  console.log(`[RAW EVIDENCE] DB rawParameters still has stale slot 2 keys:`, Object.keys(initialDevice.rawParameters).filter(k => k.includes('WANConnectionDevice.2')));
+  console.log(`[RAW EVIDENCE] DB rawParameters still has stale slot 2 keys:`, Object.keys(initialDevice.rawParameters || {}).filter(k => k.includes('WANConnectionDevice.2')));
 
   // Freshness check logic as in operatorRoutes.ts
   const lastActive = initialDevice.lastInform || (initialDevice as any).lastGpvTimestamp || initialDevice.updatedAt;
