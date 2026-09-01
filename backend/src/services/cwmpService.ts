@@ -1500,6 +1500,46 @@ ${stringElements}
           const requiresAddObject = !!(pendingCmd as any).parameters?.requiresAddObject;
           const addObjectAttempted = !!(pendingCmd as any).parameters?.addObjectAttempted;
 
+          // Dispatch DeleteObject if action is SET_WAN_CONFIG with operation DELETE_OBJECT
+          const requiresDeleteObject = (pendingCmd.parameters as any)?.operation === 'DELETE_OBJECT' || (pendingCmd as any).action === 'DELETE_WAN_CONFIG';
+          if (requiresDeleteObject && (session as any).stage !== 'CUSTOM_RPC_SENT') {
+            const deleteTarget = (pendingCmd.parameters as any)?.targetObjectName || (pendingCmd.parameters as any)?.cpeObjectPath;
+            if (deleteTarget) {
+              pendingCmd.status = 'sending';
+              pendingCmd.sentAt = new Date();
+              (session as any).stage = 'CUSTOM_RPC_SENT';
+              await pendingCmd.save();
+
+              const deleteObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:DeleteObject>
+      <ObjectName>${deleteTarget}</ObjectName>
+      <ParameterKey>${pendingCmd._id}</ParameterKey>
+    </cwmp:DeleteObject>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+              CwmpSessionLog.create({
+                tenantId: session.tenantId,
+                deviceId: dev._id,
+                serialNumber: session.serialNumber,
+                sessionId: session.sessionId,
+                cwmpId: '3',
+                direction: 'ACS_TO_CPE',
+                rpcMethod: 'DeleteObject',
+                httpStatus: 200,
+                rawXml: deleteObjectXml,
+                timestamp: new Date(),
+              }).catch(() => {});
+
+              console.log(`[Native CWMP OUT] Dispatched DeleteObject RPC for ${deleteTarget} on ${session.serialNumber} (Cmd: ${pendingCmd._id})`);
+              triggerGenieAcsConnectionRequest(session.serialNumber).catch(() => {});
+              return deleteObjectXml;
+            }
+          }
+
           // Dispatch AddObject FIRST if dynamic new slot creation is required (even if rawParams is initially empty)
           if (isWanConfigCommand && requiresAddObject && !addObjectAttempted && session.stage !== 'ADD_OBJECT_SENT') {
             pendingCmd.status = 'sending';
@@ -2155,6 +2195,46 @@ ${stringElements}
           triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
         }
       }
+    }
+
+    // 0. Handle DeleteObjectResponse from CPE
+    if (xml.includes('DeleteObjectResponse')) {
+      CwmpSessionLog.create({
+        tenantId: tenant?._id,
+        deviceId: device?._id,
+        serialNumber: device.serialNumber,
+        sessionId: session?.sessionId || incomingSessionId || 'unknown',
+        cwmpId: '3',
+        direction: 'CPE_TO_ACS',
+        rpcMethod: 'DeleteObjectResponse',
+        httpStatus: 200,
+        rawXml: xml,
+        timestamp: new Date(),
+      }).catch(() => {});
+
+      const statusMatch = xml.match(/<Status>(\d+)<\/Status>/i);
+      const delStatus = statusMatch ? parseInt(statusMatch[1], 10) : 0;
+      console.log(`[Native CWMP IN] CPE successfully acknowledged DeleteObject for ${device.serialNumber} (Status: ${delStatus})`);
+
+      await DeviceCommand.updateMany(
+        { deviceId: device._id, status: 'sending', action: { $in: ['SET_WAN_CONFIG', 'DELETE_WAN_CONFIG'] } },
+        { $set: { status: 'success', completedAt: new Date() } }
+      );
+
+      // Trigger immediate GPV discovery to refresh device rawParameters and purge deleted slot
+      const gpvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">6</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValues>
+      <ParameterNames soapenv:arrayType="xsd:string[1]">
+        <string>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.</string>
+      </ParameterNames>
+    </cwmp:GetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+      if (session) (session as any).stage = 'BASELINE_SENT';
+      return gpvXml;
     }
 
     // 1. Handle AddObjectResponse from CPE

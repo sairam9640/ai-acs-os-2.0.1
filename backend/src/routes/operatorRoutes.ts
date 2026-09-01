@@ -2464,21 +2464,16 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     let deleteCmd: any = null;
 
     if (slotExistsOnDevice) {
-      // Slot exists on physical ONT: Queue clean TR-069 command to disable it
+      // Slot exists on physical ONT: Queue clean TR-069 DeleteObject RPC to remove the slot entirely
       deleteCmd = await DeviceCommand.create({
         tenantId: device.tenantId,
         deviceId: device._id,
-        action: 'SET_WAN_CONFIG',
+        action: 'DELETE_WAN_CONFIG',
         parameters: {
-          operation: 'DELETE_OR_DISABLE',
+          operation: 'DELETE_OBJECT',
           targetProfile: removedName,
-          tr069ParamValues: [
-            [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Enable`, false, 'xsd:boolean'],
-            ...(isPpp ? [
-              [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Username`, '', 'xsd:string'],
-              [`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connType}.Password`, '', 'xsd:string'],
-            ] : []),
-          ],
+          targetObjectName: `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`,
+          cpeObjectPath: `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`,
         },
         status: 'queued',
         requestedBy: {
@@ -2500,9 +2495,9 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
 
     return res.json({
       success: true,
-      status: slotExistsOnDevice ? 'QUEUED_FOR_DISABLE' : 'DELETED_LOCALLY',
+      status: slotExistsOnDevice ? 'QUEUED_FOR_DELETE' : 'DELETED_LOCALLY',
       message: slotExistsOnDevice
-        ? `Customer WAN [${removedName}] removed and disable command queued for physical ONT.`
+        ? `Customer WAN [${removedName}] removed and DeleteObject command queued for physical ONT.`
         : `Customer WAN [${removedName}] was already absent on physical ONT. Removed from database immediately.`,
       commandId: deleteCmd?._id,
       profiles: device.wanProfiles,

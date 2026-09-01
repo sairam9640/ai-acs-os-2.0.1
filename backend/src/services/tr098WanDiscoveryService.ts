@@ -542,14 +542,22 @@ export async function buildDynamicTr098WanParams(
     const pUpper = String(p || '').toUpperCase().trim();
     if (pUpper === 'FE' || pUpper === 'LAN1' || pUpper === 'LAN 1' || pUpper === 'ETH1') {
       lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
+      if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.3'))) {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
+      }
     } else if (pUpper === 'GE' || pUpper === 'LAN2' || pUpper === 'LAN 2' || pUpper === 'ETH2') {
       lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
+      if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.4'))) {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
+      }
     } else if (pUpper === 'LAN3' || pUpper === 'LAN 3' || pUpper === 'ETH3') {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
+      if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.3'))) {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
+      }
     } else if (pUpper === 'LAN4' || pUpper === 'LAN 4' || pUpper === 'ETH4') {
-      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
+      if (rawParams && Object.keys(rawParams).some(k => k.includes('LANEthernetInterfaceConfig.4'))) {
+        lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
+      }
     } else {
       lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
       lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
