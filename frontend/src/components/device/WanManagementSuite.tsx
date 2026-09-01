@@ -46,7 +46,7 @@ export interface WanProfileData {
   transMode?: 'PON' | 'Ethernet';
   mode?: 'Route' | 'Bridge';
   enableWan?: boolean;
-  bearerService?: 'INTERNET' | 'TR069' | 'VOIP' | 'OTHER';
+  bearerService?: 'INTERNET' | 'TR069' | 'VOIP' | 'VOICE' | 'OTHER';
   linkMode?: 'PPP' | 'IP';
   ipProtocol?: 'IPv4' | 'IPv6' | 'IPv4/IPv6';
   ipAssignment?: 'DHCP' | 'Static';
@@ -485,9 +485,9 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
   };
 
   const isBridgeMode = activeForm?.mode === 'Bridge';
-  const isTr069Service = activeForm?.bearerService === 'TR069';
-  const isVoipService = activeForm?.bearerService === 'VOIP';
-  const isInternetService = activeForm?.bearerService === 'INTERNET' || !activeForm?.bearerService;
+  const isTr069Service = activeForm?.bearerService === 'TR069' || activeForm?.serviceType === 'TR069';
+  const isVoipService = activeForm?.bearerService === 'VOIP' || activeForm?.bearerService === 'VOICE' || activeForm?.serviceType === 'VOIP' || activeForm?.serviceType === 'VOICE';
+  const isInternetService = !isTr069Service && !isVoipService;
   const isPppMode = activeForm?.linkMode === 'PPP';
   const isIpMode = activeForm?.linkMode === 'IP';
   const isStaticIp = isIpMode && activeForm?.ipAssignment === 'Static';
