@@ -260,7 +260,24 @@ describe('AI ISP OS — Genexis Platinum GX 4410 Comprehensive End-to-End Test S
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-    const spvResponseXml = await CwmpService.handleParameterValuesResponse(addObjectResXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    const step2AddObjectXml = await CwmpService.handleParameterValuesResponse(addObjectResXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    expect(step2AddObjectXml).toBeDefined();
+    expect(step2AddObjectXml).toContain('<cwmp:AddObject>');
+    expect(step2AddObjectXml).toContain('<ObjectName>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.</ObjectName>');
+
+    // Step 2: CPE acknowledges WANPPPConnection creation with InstanceNumber 1
+    const pppAddObjectResXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:AddObjectResponse>
+      <InstanceNumber>1</InstanceNumber>
+      <Status>0</Status>
+    </cwmp:AddObjectResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const spvResponseXml = await CwmpService.handleParameterValuesResponse(pppAddObjectResXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
     expect(spvResponseXml).toBeDefined();
     expect(spvResponseXml).toContain('<cwmp:SetParameterValues>');
 

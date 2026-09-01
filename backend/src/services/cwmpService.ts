@@ -2208,17 +2208,53 @@ ${stringElements}
         const connObj = isPpp ? 'WANPPPConnection' : 'WANIPConnection';
 
         const targetObjectName = String((pendingCmd.parameters as any)?.targetObjectName || '');
-        let resolvedCpePath: string;
+
+        // Step 1 check: If AddObject was dispatched for the parent WANConnectionDevice.,
+        // the CPE allocated a new WAN slot (e.g. WANConnectionDevice.8.).
+        // Now dispatch Step 2 AddObject to create the child WANPPPConnection or WANIPConnection instance inside it!
         if (targetObjectName.endsWith('WANConnectionDevice.')) {
-          // AddObject was on WANConnectionDevice. -> InstanceNumber is the new slot index
-          resolvedCpePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${instanceNum}.${connObj}.1.`;
-        } else if (targetObjectName.includes('WANConnectionDevice.')) {
-          // AddObject was on WANConnectionDevice.{slot}.{connObj}. -> InstanceNumber is connection instance
+          const nextTargetObjectName = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${instanceNum}.${connObj}.`;
+          console.log(`[Native CWMP IN] Step 1 AddObject allocated slot ${instanceNum}. Now dispatching Step 2 AddObject for ${nextTargetObjectName} on ${device.serialNumber}`);
+          (pendingCmd.parameters as any).targetObjectName = nextTargetObjectName;
+          (pendingCmd.parameters as any).allocatedSlot = instanceNum;
+          pendingCmd.markModified('parameters');
+          await pendingCmd.save();
+
+          const addConnObjectXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:AddObject>
+      <ObjectName>${nextTargetObjectName}</ObjectName>
+      <ParameterKey>${pendingCmd._id}</ParameterKey>
+    </cwmp:AddObject>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+          CwmpSessionLog.create({
+            tenantId: tenant?._id,
+            deviceId: device?._id,
+            serialNumber: device.serialNumber,
+            sessionId: session?.sessionId || incomingSessionId || 'unknown',
+            cwmpId: '3',
+            direction: 'ACS_TO_CPE',
+            rpcMethod: 'AddObject',
+            httpStatus: 200,
+            rawXml: addConnObjectXml,
+            timestamp: new Date(),
+          }).catch(() => {});
+
+          session.stage = 'ADD_OBJECT_SENT';
+          return addConnObjectXml;
+        }
+
+        // Step 2 completed: AddObject was on WANConnectionDevice.{slot}.{connObj}.
+        let resolvedCpePath: string;
+        if (targetObjectName.includes('WANConnectionDevice.')) {
           const slotMatch = targetObjectName.match(/WANConnectionDevice\.(\d+)\./);
-          const slot = slotMatch ? slotMatch[1] : instanceNum;
+          const slot = slotMatch ? slotMatch[1] : ((pendingCmd.parameters as any)?.allocatedSlot || instanceNum);
           resolvedCpePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.${connObj}.${instanceNum}.`;
         } else {
-          // Default: InstanceNumber is the dynamically allocated slot index
           resolvedCpePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${instanceNum}.${connObj}.1.`;
         }
 
