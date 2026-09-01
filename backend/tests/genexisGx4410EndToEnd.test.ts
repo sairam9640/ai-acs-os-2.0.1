@@ -208,4 +208,130 @@ describe('AI ISP OS — Genexis Platinum GX 4410 Comprehensive End-to-End Test S
     expect(fullResult.wifi5gSsid).toBe('Genexis_4410_5G_VIP');
     expect(fullResult.wanPppoeUser).toBe('gx4410_user@isp.in');
   });
+
+  it('12. Should execute AddObject-based WAN creation on Genexis GX4410 with strict TR-069 ordering and SetParameterAttributes in a single session', async () => {
+    const dev = await Device.findOne({ serialNumber: testSerial });
+    expect(dev).toBeDefined();
+
+    // Queue a SET_WAN_CONFIG command requiring AddObject (e.g. Slot 3)
+    const wanCmd = await DeviceCommand.create({
+      tenantId: testTenant._id,
+      deviceId: dev!._id,
+      action: 'SET_WAN_CONFIG',
+      parameters: {
+        profile: {
+          name: 'Genexis_Fiber_Internet',
+          connectionType: 'PPPoE',
+          pppoeUsername: 'gx4410_strict@isp.in',
+          pppoePassword: 'SecretGenexis2026',
+          vlanId: 300,
+          enableWan: true,
+        },
+        tr069ParamValues: [
+          ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Username', 'gx4410_strict@isp.in', 'xsd:string'],
+          ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Password', 'SecretGenexis2026', 'xsd:string'],
+          ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Enable', true, 'xsd:boolean'],
+          ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.X_CT-COM_WANEponLinkConfig.Mode', 2, 'xsd:int'],
+          ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.X_CT-COM_WANEponLinkConfig.VLANIDMark', 300, 'xsd:int'],
+        ],
+      },
+      status: 'queued',
+      requestedBy: { email: 'test-agent@genexis.com', role: 'operator_admin' },
+      queuedAt: new Date(),
+    });
+
+    expect(wanCmd).toBeDefined();
+
+    // Step 1: Empty POST from CPE -> ACS dispatches AddObject
+    const addObjectXml = await CwmpService.checkPendingRpcOrPoll('192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    expect(addObjectXml).toBeDefined();
+    expect(addObjectXml).toContain('<cwmp:AddObject>');
+    expect(addObjectXml).toContain('WANConnectionDevice');
+
+    // Step 2: CPE replies with AddObjectResponse (InstanceNumber: 3) -> ACS replies with strict ordered SPV
+    const addObjectResXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:AddObjectResponse>
+      <InstanceNumber>3</InstanceNumber>
+      <Status>0</Status>
+    </cwmp:AddObjectResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const spvResponseXml = await CwmpService.handleParameterValuesResponse(addObjectResXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    expect(spvResponseXml).toBeDefined();
+    expect(spvResponseXml).toContain('<cwmp:SetParameterValues>');
+
+    // Verify strict TR-069 ordering: ConnectionType first, then Enable, then Username/Password, then VLAN
+    const connTypeIdx = spvResponseXml!.indexOf('ConnectionType');
+    const enableIdx = spvResponseXml!.indexOf('Enable');
+    const userIdx = spvResponseXml!.indexOf('Username');
+    const passIdx = spvResponseXml!.indexOf('Password');
+    const vlanIdx = spvResponseXml!.indexOf('WANEponLinkConfig');
+
+    expect(connTypeIdx).toBeGreaterThan(0);
+    expect(enableIdx).toBeGreaterThan(connTypeIdx);
+    expect(userIdx).toBeGreaterThan(enableIdx);
+    expect(passIdx).toBeGreaterThan(userIdx);
+    expect(vlanIdx).toBeGreaterThan(passIdx);
+
+    // Step 3: CPE acknowledges SetParameterValues with SetParameterValuesResponse -> ACS returns SetParameterAttributes (SPA)
+    const spvAckXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValuesResponse>
+      <Status>0</Status>
+    </cwmp:SetParameterValuesResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const spaResponseXml = await CwmpService.handleParameterValuesResponse(spvAckXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    expect(spaResponseXml).toBeDefined();
+    expect(spaResponseXml).toContain('<cwmp:SetParameterAttributes>');
+    expect(spaResponseXml).toContain('ConnectionStatus');
+    expect(spaResponseXml).toContain('ExternalIPAddress');
+    expect(spaResponseXml).toContain('<Notification>1</Notification>');
+
+    // Step 4: CPE acknowledges SetParameterAttributes with SetParameterAttributesResponse -> ACS returns verification GPV
+    const spaAckXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">5</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterAttributesResponse/>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const verifyGpvXml = await CwmpService.handleParameterValuesResponse(spaAckXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    expect(verifyGpvXml).toBeDefined();
+    expect(verifyGpvXml).toContain('<cwmp:GetParameterValues>');
+
+    // Step 5: Verification GPV response completes the sequence
+    const verifyGpvAckXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">4</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValuesResponse>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[2]">
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Username</Name>
+          <Value xsi:type="xsd:string">gx4410_strict@isp.in</Value>
+        </ParameterValueStruct>
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.ConnectionStatus</Name>
+          <Value xsi:type="xsd:string">Connected</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const finalRes = await CwmpService.handleParameterValuesResponse(verifyGpvAckXml, '192.168.1.1', activeSessionId, undefined, 'genexis_test_tenant');
+    expect(finalRes).toBeNull(); // Session closes cleanly with HTTP 204
+
+    const updatedCmd = await DeviceCommand.findById(wanCmd._id);
+    expect(['success', 'verified']).toContain(updatedCmd?.status);
+  });
 });

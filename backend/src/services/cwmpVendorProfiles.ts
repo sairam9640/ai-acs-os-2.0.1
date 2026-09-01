@@ -66,8 +66,8 @@ export class CwmpVendorProfiles {
     else if (/vsol|v-sol|v280|x_vsol/i.test(text) || oui === '000C43' || oui === '5422F8') {
       detected = 'VSOL';
     }
-    // 7. RicherLink (RL821, RH821, etc.)
-    else if (/richerlink|rh821|rl801|rl804|rl821/i.test(text) || oui === 'E84D8E') {
+    // 7. RicherLink / RL Tech (RL821, RH821, RL-Tech, etc.)
+    else if (/richerlink|rh821|rl801|rl804|rl821|rl[-_ ]?tech|rltech/i.test(text) || oui === 'E84D8E') {
       detected = 'RICHERLINK';
     }
     // 8. TP-Link (Archer, XC220, etc.)
@@ -264,6 +264,7 @@ export class CwmpVendorProfiles {
 
       case 'GENEXIS':
         return [
+          'InternetGatewayDevice.WANDevice.1.WANEponInterfaceConfig.RxPower',
           'InternetGatewayDevice.WANDevice.1.X_CT-COM_EponInterfaceConfig.RXPower',
           'InternetGatewayDevice.WANDevice.1.X_CT-COM_GponInterfaceConfig.RXPower',
           'InternetGatewayDevice.WANDevice.1.WANGponInterfaceConfig.RXPower',

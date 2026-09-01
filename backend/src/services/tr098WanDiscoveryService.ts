@@ -355,6 +355,11 @@ export function validateWanParameters(
       continue;
     }
 
+    if (optionalRegex.test(path) && paramMap.size > 0 && !paramMap.has(path)) {
+      omittedOptional.push(path);
+      continue;
+    }
+
     // Keep candidate parameter for the target slot
     validParams.push([path, val, type]);
   }
@@ -395,54 +400,41 @@ export async function buildDynamicTr098WanParams(
   payloadHash: string;
   basePath: string;
   isPppoe: boolean;
+  requiresAddObject: boolean;
 }> {
   const isPppoe = profile.connectionType === 'PPPoE' || profile.mode === 'Route' || profile.linkMode === 'PPP';
   const isInternet = isPppoe || profile.serviceType === 'INTERNET' || profile.bearerService === 'INTERNET';
   const rawParams = discoveredTree || device?.rawParameters || {};
   const topology = discoverLiveTr098WanTree(rawParams);
 
-  // If profile already has an assigned cpeObjectPath (e.g. editing existing profile), prioritize it
+  // 1. If profile already has an assigned cpeObjectPath, prioritize it
   let basePath: string = profile.cpeObjectPath ? profile.cpeObjectPath.replace(/\.$/, '') : '';
-
-  // Prevent routing PPPoE onto Slot 1 (Management TR069) or unallocated high slots
-  if (isInternet && basePath.includes('WANConnectionDevice.1.')) {
-    basePath = basePath.replace('WANConnectionDevice.1.', 'WANConnectionDevice.2.');
-  }
+  let requiresAddObject = false;
 
   if (!basePath) {
-    const rawKeys = typeof rawParams === 'object' && !Array.isArray(rawParams) && !(rawParams instanceof Map)
-      ? Object.keys(rawParams)
-      : Array.from(normalizeParameterMap(rawParams).keys());
-
-    const otherProfiles = (device?.wanProfiles || []).filter((p: any) => p._id && String(p._id) !== String(profile._id));
-    
-    // Find all slots already occupied by other WAN profiles
-    const usedSlots = new Set<number>();
-    for (const p of otherProfiles) {
-      if (p.cpeObjectPath) {
-        const m = p.cpeObjectPath.match(/WANConnectionDevice\.(\d+)\./i);
-        if (m) usedSlots.add(parseInt(m[1], 10));
-      }
+    // 2. Discover best customer slot using live topology from the physical ONT
+    const discoveredCustomerSlot = selectCustomerWanSlot(topology, isPppoe);
+    if (discoveredCustomerSlot) {
+      basePath = discoveredCustomerSlot.basePath;
+      profile.cpeObjectPath = `${basePath}.`;
+    } else {
+      // 3. No customer slot found in live parameter tree — require dynamic slot creation via AddObject RPC
+      requiresAddObject = true;
+      basePath = '';
+      profile.cpeObjectPath = '';
+      return {
+        params: [],
+        errors: [],
+        omittedOptional: [],
+        payloadHash: '',
+        basePath: '',
+        isPppoe,
+        requiresAddObject: true,
+      };
     }
-    
-    // Reserve slot 1 for TR-069 Management
-    usedSlots.add(1);
-
-    // If customer Internet profile, default to hardware Slot 2
-    let targetSlot = isInternet ? 2 : 2;
-    if (!isInternet) {
-      while (usedSlots.has(targetSlot)) {
-        targetSlot++;
-        if (targetSlot > 8) break;
-      }
-    }
-
-    const connName = isPppoe ? 'WANPPPConnection.1' : 'WANIPConnection.1';
-    basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.${connName}`;
+  } else {
+    profile.cpeObjectPath = `${basePath}.`;
   }
-
-  // Bind the allocated physical CPE path to the profile
-  profile.cpeObjectPath = `${basePath}.`;
 
   const rawCandidateParams: Array<[string, any, string]> = [];
 

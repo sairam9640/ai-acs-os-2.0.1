@@ -64,13 +64,20 @@ async function handleCwmpPost(req: Request, res: Response) {
       return res.status(204).end();
     }
 
-    // 2. If GetParameterValuesResponse / SetParameterValuesResponse / Fault from CPE
+    // 2. If GetParameterValuesResponse / SetParameterValuesResponse / AddObjectResponse / SetParameterAttributesResponse / Fault from CPE
     if (
       rawBody.includes('GetParameterValuesResponse') ||
       rawBody.includes('SetParameterValuesResponse') ||
+      rawBody.includes('AddObjectResponse') ||
+      rawBody.includes('SetParameterAttributesResponse') ||
       (rawBody.includes('Fault') && !rawBody.includes('<cwmp:Inform>'))
     ) {
-      await CwmpService.handleParameterValuesResponse(rawBody, clientIp, incomingSessionId, hostHeader, pathOrQuerySlug, connectionKey);
+      const nextRpc = await CwmpService.handleParameterValuesResponse(rawBody, clientIp, incomingSessionId, hostHeader, pathOrQuerySlug, connectionKey);
+      if (nextRpc) {
+        console.log(`[Native CWMP OUT] Chained Next RPC to ${connectionKey} | Status: 200 | Length: ${nextRpc.length}`);
+        res.setHeader('Content-Type', 'text/xml; charset=utf-8');
+        return res.status(200).send(nextRpc);
+      }
       return res.status(204).end();
     }
 

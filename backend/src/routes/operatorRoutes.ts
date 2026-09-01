@@ -1873,9 +1873,22 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
 
     const savedProfile = device.wanProfiles[device.wanProfiles.length - 1];
 
+    // Freshness check: Check if device rawParameters is stale or un-polled (> 60s)
+    const lastActive = device.lastInform || (device as any).lastGpvTimestamp || device.updatedAt;
+    const isStale = !device.rawParameters || Object.keys(device.rawParameters).length === 0 ||
+      (lastActive && (Date.now() - new Date(lastActive).getTime()) > 60_000);
+
+    if (isStale) {
+      console.log(`[CWMP ACS] ⚠️ Device ${device.serialNumber} rawParameters are stale (>60s old or missing). Triggering connection request for fresh discovery.`);
+      triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+    }
+
+    const dynamicResult = await buildDynamicTr098WanParams(savedProfile, device, isStale ? {} : device.rawParameters);
+    const tr069Params = dynamicResult.params;
+    const requiresAddObject = dynamicResult.requiresAddObject || !savedProfile.cpeObjectPath;
+
     let createdCmd: any = null;
-    const tr069Params = await buildTr069WanParams(savedProfile, device);
-    if (tr069Params.length > 0) {
+    if (requiresAddObject || tr069Params.length > 0) {
       createdCmd = await DeviceCommand.create({
         tenantId: device.tenantId,
         deviceId: device._id,
@@ -1884,6 +1897,8 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
         parameters: {
           profile: savedProfile,
           tr069ParamValues: tr069Params,
+          requiresAddObject,
+          targetObjectName: 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.',
         },
         status: 'queued',
         requestedBy: {
@@ -2076,10 +2091,22 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
       }
     );
 
-    // Queue TR-069 parameters
-    const tr069Params = await buildTr069WanParams(currentProfile, device);
+    // Freshness check: Check if device rawParameters is stale or un-polled (> 60s)
+    const lastActive = device.lastInform || (device as any).lastGpvTimestamp || device.updatedAt;
+    const isStale = !device.rawParameters || Object.keys(device.rawParameters).length === 0 ||
+      (lastActive && (Date.now() - new Date(lastActive).getTime()) > 60_000);
+
+    if (isStale) {
+      console.log(`[CWMP ACS] ⚠️ Device ${device.serialNumber} rawParameters are stale (>60s old or missing). Triggering connection request for fresh discovery.`);
+      triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+    }
+
+    const dynamicResult = await buildDynamicTr098WanParams(currentProfile, device, isStale ? {} : device.rawParameters);
+    const tr069Params = dynamicResult.params;
+    const requiresAddObject = dynamicResult.requiresAddObject || !currentProfile.cpeObjectPath;
+
     let commandId: any = null;
-    if (tr069Params.length > 0) {
+    if (requiresAddObject || tr069Params.length > 0) {
       const cmd = await DeviceCommand.create({
         tenantId: device.tenantId,
         deviceId: device._id,
@@ -2088,6 +2115,8 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
         parameters: {
           profile: currentProfile,
           tr069ParamValues: tr069Params,
+          requiresAddObject,
+          targetObjectName: requiresAddObject ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.' : undefined,
         },
         status: 'queued',
         requestedBy: {

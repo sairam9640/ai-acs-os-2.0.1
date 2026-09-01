@@ -11,6 +11,7 @@ import {
   computePayloadHash,
   buildDynamicTr098WanParams,
 } from '../src/services/tr098WanDiscoveryService.js';
+import { CwmpService } from '../src/services/cwmpService.js';
 
 describe('TR-098 Dynamic WAN Path Validation & Fault 9005 Remediation Suite', () => {
   let tenant: any;
@@ -419,5 +420,225 @@ describe('TR-098 Dynamic WAN Path Validation & Fault 9005 Remediation Suite', ()
     expect(cmdC.status).toBe('failed');
     expect(cmdC.faultCode).toBe(9005);
     expect(cmdC.retryable).toBe(false);
+  });
+
+  // 16. (a) Partial GPV response confirms untouched paths outside query scope survive pruning
+  it('16. should preserve untouched paths outside the queried scope during scoped prefix pruning', async () => {
+    // Populate test device with Wi-Fi, optical, and WAN parameters
+    testDevice.rawParameters = {
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID': 'MyHomeWifi_2.4G',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.Enable': true,
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name': '1_TR069_R_VID_100',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username': 'old_user@isp.in',
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Enable': true,
+    };
+    await testDevice.save();
+
+    // Start a simulated CWMP session for testDevice
+    const informXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>GENEXIS</Manufacturer>
+        <OUI>00259E</OUI>
+        <ProductClass>HGU</ProductClass>
+        <SerialNumber>${testDevice.serialNumber}</SerialNumber>
+      </DeviceId>
+      <Event soapenv:arrayType="cwmp:EventStruct[1]">
+        <EventStruct><EventCode>2 PERIODIC</EventCode><CommandKey></CommandKey></EventStruct>
+      </Event>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-09-01T22:00:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[0]"></ParameterList>
+    </cwmp:Inform>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const informRes = await CwmpService.handleInform(informXml, '10.0.0.1', undefined, tenant.slug);
+    const sessionId = informRes.sessionId;
+
+    // Queue a GPV query for ONLY the WANConnectionDevice.2 slot username
+    const gpvQueryCmd = await DeviceCommand.create({
+      tenantId: tenant._id,
+      deviceId: testDevice._id,
+      action: 'GetParameterValues',
+      parameters: {
+        parameterNames: ['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username']
+      },
+      status: 'queued',
+      requestedBy: { email: 'admin@isp.in', role: 'operator_admin' }
+    });
+
+    await CwmpService.checkPendingRpcOrPoll('10.0.0.1', sessionId, undefined, tenant.slug);
+
+    // Simulated CPE response: Returns empty parameter list for that query (slot 2 was deleted on physical CPE)
+    const gpvResponseXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValuesResponse>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[0]">
+      </ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    await CwmpService.handleParameterValuesResponse(gpvResponseXml, '10.0.0.1', sessionId, undefined, tenant.slug);
+
+    const refreshedDev = await Device.findById(testDevice._id);
+    expect(refreshedDev).toBeDefined();
+    // Untouched Wi-Fi & Slot 1 parameters SURVIVED pruning
+    expect(refreshedDev!.rawParameters['InternetGatewayDevice.LANDevice.1.WLANConfiguration.1.SSID']).toBe('MyHomeWifi_2.4G');
+    expect(refreshedDev!.rawParameters['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name']).toBe('1_TR069_R_VID_100');
+    // The queried path that was absent in CPE response was successfully PRUNED
+    expect(refreshedDev!.rawParameters['InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username']).toBeUndefined();
+  });
+
+  // 17. (b) Deleted WAN slot no longer shows up as 'detected' on the next session
+  it('17. should prune deleted WAN slot and correctly report requiresAddObject on next session', async () => {
+    // Device now only has Slot 1 (Management TR069)
+    testDevice.rawParameters = {
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.Name': '1_TR069_R_VID_100',
+    };
+    await testDevice.save();
+
+    // Call dynamic WAN discovery for a new PPPoE profile
+    const result = await buildDynamicTr098WanParams(
+      { connectionType: 'PPPoE', username: 'new_customer@isp.in' },
+      testDevice
+    );
+
+    // Must NOT guess slot 2, must require AddObject
+    expect(result.requiresAddObject).toBe(true);
+    expect(result.basePath).toBe('');
+    expect(result.params.length).toBe(0);
+  });
+
+  // 18. (c) Fail-loud path in waiting_for_wan_slot correctly halts instead of defaulting to slot 2
+  it('18. should fail loudly on unresolvable WAN slot in waiting_for_wan_slot without guessing slot 2', async () => {
+    testDevice.addObjectNotSupported = true;
+    await testDevice.save();
+
+    // Create a simulated CWMP session
+    const informXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">1</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:Inform>
+      <DeviceId>
+        <Manufacturer>GENEXIS</Manufacturer>
+        <OUI>00259E</OUI>
+        <ProductClass>HGU</ProductClass>
+        <SerialNumber>${testDevice.serialNumber}</SerialNumber>
+      </DeviceId>
+      <Event soapenv:arrayType="cwmp:EventStruct[1]">
+        <EventStruct><EventCode>2 PERIODIC</EventCode><CommandKey></CommandKey></EventStruct>
+      </Event>
+      <MaxEnvelopes>1</MaxEnvelopes>
+      <CurrentTime>2026-09-01T22:00:00Z</CurrentTime>
+      <RetryCount>0</RetryCount>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[0]"></ParameterList>
+    </cwmp:Inform>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    const informRes = await CwmpService.handleInform(informXml, '10.0.0.1', undefined, tenant.slug);
+    const sessionId = informRes.sessionId;
+
+    // Create a waiting_for_wan_slot command with missing/unparseable slot in tr069ParamValues
+    const malformedWaitCmd = await DeviceCommand.create({
+      tenantId: tenant._id,
+      deviceId: testDevice._id,
+      action: 'SET_WAN_CONFIG',
+      status: 'waiting_for_wan_slot',
+      parameters: {
+        tr069ParamValues: [
+          ['Invalid.Parameter.Path.Without.Slot', 'some_val', 'xsd:string']
+        ]
+      }
+    });
+
+    const gpvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">2</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:GetParameterValuesResponse>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[1]">
+        <ParameterValueStruct>
+          <Name>InternetGatewayDevice.DeviceInfo.ModelName</Name>
+          <Value>Platinum-4410</Value>
+        </ParameterValueStruct>
+      </ParameterList>
+    </cwmp:GetParameterValuesResponse>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    // Execute handleParameterValuesResponse
+    await CwmpService.handleParameterValuesResponse(gpvXml, '10.0.0.1', sessionId, undefined, tenant.slug);
+
+    const updatedCmd = await DeviceCommand.findById(malformedWaitCmd._id);
+    expect(updatedCmd?.status).toBe('failed');
+    expect(updatedCmd?.errorMessage).toContain('UNRESOLVABLE_WAN_SLOT');
+  });
+
+  // 19. (c) Fail-loud path in Fault 9003 handler correctly halts instead of defaulting to slot 2
+  it('19. should fail loudly on Fault 9003 when target slot cannot be extracted without guessing slot 2', async () => {
+    const sessionContext = {
+      sessionId: 'session_9003_test',
+      serialNumber: testDevice.serialNumber,
+      serialAliases: [testDevice.serialNumber],
+      vendor: 'GENEXIS' as any,
+      manufacturer: 'GENEXIS',
+      modelName: 'Platinum-4410',
+      firmwareVersion: '1.44',
+      hardwareVersion: 'V2',
+      clientIp: '10.0.0.1',
+      tenantId: tenant._id.toString(),
+      tenantSlug: tenant.slug,
+      stage: 'ADD_OBJECT_SENT' as any,
+      timestamp: Date.now(),
+    };
+
+    // Store in CwmpService sessions map
+    (CwmpService as any).sessionsById.set('session_9003_test', sessionContext);
+
+    // Queue command with unparseable slot parameter
+    const malformedCmd = await DeviceCommand.create({
+      tenantId: tenant._id,
+      deviceId: testDevice._id,
+      action: 'SET_WAN_CONFIG',
+      status: 'sending',
+      parameters: {
+        tr069ParamValues: [
+          ['NoSlotPathHere', 'val', 'xsd:string']
+        ]
+      }
+    });
+
+    const faultXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <soapenv:Fault>
+      <faultcode>Client</faultcode>
+      <faultstring>CWMP fault</faultstring>
+      <detail>
+        <cwmp:Fault>
+          <FaultCode>9003</FaultCode>
+          <FaultString>Invalid arguments</FaultString>
+        </cwmp:Fault>
+      </detail>
+    </soapenv:Fault>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+    await CwmpService.handleParameterValuesResponse(faultXml, '10.0.0.1', 'session_9003_test', undefined, tenant.slug);
+
+    const updatedFaultCmd = await DeviceCommand.findById(malformedCmd._id);
+    expect(updatedFaultCmd?.status).toBe('failed');
+    expect(updatedFaultCmd?.errorMessage).toContain('FAILED_UNKNOWN_WAN_SLOT');
   });
 });
