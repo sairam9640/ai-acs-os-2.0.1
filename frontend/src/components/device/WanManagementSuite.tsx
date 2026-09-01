@@ -775,20 +775,26 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                   <label className="text-xs font-bold text-slate-700 pt-1.5">Bearer Service:</label>
                   <div className="sm:col-span-2 space-y-1">
                     <select
-                      value={activeForm.bearerService || 'INTERNET'}
+                      value={activeForm.bearerService === 'VOIP' ? 'VOICE' : (activeForm.bearerService || 'INTERNET')}
                       onChange={(e: any) => {
                         const s = e.target.value;
+                        const isV = s === 'VOICE' || s === 'VOIP';
+                        const isT = s === 'TR069';
                         setActiveForm({
                           ...activeForm,
-                          bearerService: s,
-                          serviceType: s,
+                          bearerService: s === 'VOIP' ? 'VOICE' : s,
+                          serviceType: s === 'VOIP' ? 'VOICE' : s,
+                          linkMode: isV || isT ? 'IP' : 'PPP',
+                          connectionType: isV || isT ? 'IPoE_DHCP' : 'PPPoE',
+                          lanPortBindings: isV || isT ? [] : (is2PortModel ? ['FE', 'GE'] : ['LAN1', 'LAN2']),
+                          ssidBindings: isV || isT ? [] : ['SSID1'],
                         });
                       }}
                       className="w-full sm:w-64 px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#7928CA]"
                     >
                       <option value="INTERNET">INTERNET</option>
                       <option value="TR069">TR069</option>
-                      <option value="VOIP">VOIP</option>
+                      <option value="VOICE">VOICE</option>
                       <option value="OTHER">OTHER</option>
                     </select>
                     <p className="text-[10px] text-slate-500 italic">
