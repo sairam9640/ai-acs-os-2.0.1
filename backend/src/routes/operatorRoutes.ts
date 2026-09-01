@@ -1821,16 +1821,24 @@ const handleAddWanProfile = async (req: AuthenticatedRequest, res: Response) => 
     const isVlanOn = Boolean(vlanEnabled);
     const parsedVlanId = isVlanOn && vlanId !== undefined && vlanId !== '' && !isNaN(Number(vlanId)) ? Number(vlanId) : undefined;
 
+    const resolvedServiceType = serviceType || req.body.bearerService || 'INTERNET';
+    const isVoip = resolvedServiceType === 'VOIP' || resolvedServiceType === 'VOICE' || req.body.bearerService === 'VOIP';
+    const isTr069 = resolvedServiceType === 'TR069' || req.body.bearerService === 'TR069';
+
     const newWanProfile: any = {
-      name: name || `${serviceType}_${connectionType}_${device.wanProfiles.length + 1}`,
+      name: name || `${resolvedServiceType}_${connectionType}_${device.wanProfiles.length + 1}`,
       enableWan: Boolean(enableWan),
-      connectionType,
-      serviceType,
+      connectionType: isVoip && connectionType === 'PPPoE' ? 'DHCP' : (connectionType || (isVoip ? 'DHCP' : 'PPPoE')),
+      serviceType: isVoip ? 'VOIP' : resolvedServiceType,
+      bearerService: isVoip ? 'VOICE' : (req.body.bearerService || (isTr069 ? 'TR069' : 'INTERNET')),
+      mode: req.body.mode || (connectionType === 'Bridge' ? 'Bridge' : 'Route'),
+      linkMode: req.body.linkMode || (isVoip || isTr069 ? 'IP' : (connectionType === 'PPPoE' ? 'PPP' : 'IP')),
+      ipAssignment: req.body.ipAssignment || (connectionType === 'Static' ? 'Static' : 'DHCP'),
       serviceUsage: serviceUsage || {
-        internet: serviceType === 'INTERNET' || !serviceType,
-        voip: serviceType === 'VOIP',
-        tr069: serviceType === 'TR069',
-        iptvDhcp: serviceType === 'IPTV',
+        internet: !isVoip && !isTr069,
+        voip: isVoip,
+        tr069: isTr069,
+        iptvDhcp: resolvedServiceType === 'IPTV',
         iptvBridge: false,
         other: false,
       },
@@ -2009,6 +2017,10 @@ const handleEditWanProfile = async (req: AuthenticatedRequest, res: Response) =>
     if (enableWan !== undefined) currentProfile.enableWan = Boolean(enableWan);
     if (connectionType !== undefined) currentProfile.connectionType = connectionType;
     if (serviceType !== undefined) currentProfile.serviceType = serviceType;
+    if (req.body.bearerService !== undefined) currentProfile.bearerService = req.body.bearerService;
+    if (req.body.mode !== undefined) currentProfile.mode = req.body.mode;
+    if (req.body.linkMode !== undefined) currentProfile.linkMode = req.body.linkMode;
+    if (req.body.ipAssignment !== undefined) currentProfile.ipAssignment = req.body.ipAssignment;
     if (serviceUsage !== undefined) currentProfile.serviceUsage = serviceUsage;
     if (vlanEnabled !== undefined) {
       currentProfile.vlanEnabled = Boolean(vlanEnabled);
