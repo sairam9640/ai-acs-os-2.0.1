@@ -10,11 +10,8 @@ const mongoose = require("mongoose");
 async function run() {
   await mongoose.connect("mongodb://127.0.0.1:27017/ai_isp_os_prod");
   const dev = await mongoose.connection.db.collection("devices").findOne({ serialNumber: "BC62D21470F0" });
-  console.log("=== LANDEVICE KEYS IN RAWPARAMETERS ===");
-  const keys = Object.keys(dev.rawParameters || {});
-  const lanKeys = keys.filter(k => k.startsWith("InternetGatewayDevice.LANDevice.1."));
-  console.log("Total LANDevice.1 keys:", lanKeys.length);
-  lanKeys.forEach(k => console.log(\` - \${k} = \${JSON.stringify(dev.rawParameters[k])}\`));
+  console.log("=== WAN PROFILES ON BC62D21470F0 ===");
+  console.log(JSON.stringify(dev.wanProfiles, null, 2));
   await mongoose.disconnect();
 }
 run().catch(console.error);

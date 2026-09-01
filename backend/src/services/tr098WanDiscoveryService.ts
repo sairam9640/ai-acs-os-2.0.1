@@ -423,7 +423,7 @@ export async function buildDynamicTr098WanParams(
   isPppoe: boolean;
   requiresAddObject: boolean;
 }> {
-  const isPppoe = profile.connectionType === 'PPPoE' || profile.mode === 'Route' || profile.linkMode === 'PPP';
+  const isPppoe = profile.connectionType === 'PPPoE' || profile.linkMode === 'PPP';
   const isInternet = isPppoe || profile.serviceType === 'INTERNET' || profile.bearerService === 'INTERNET';
   const rawParams = discoveredTree || device?.rawParameters || {};
   const topology = discoverLiveTr098WanTree(rawParams);
@@ -480,12 +480,19 @@ export async function buildDynamicTr098WanParams(
     rawCandidateParams.push([`${basePath}.Enable`, true, 'xsd:boolean']);
   }
 
-  // Service List (only valid on WANIPConnection, omit on WANPPPConnection to prevent Fault 9005)
+  // Service List & IP Connection Parameters (only valid on WANIPConnection, omit on WANPPPConnection to prevent Fault 9005)
   if (!isPppoe) {
-    const resolvedServiceList = (profile.serviceType === 'VOIP' || profile.serviceUsage?.voip) ? 'VOICE' :
-      (profile.serviceType === 'TR069' || profile.serviceUsage?.tr069) ? 'TR069' :
-      (profile.serviceType === 'IPTV' || profile.serviceUsage?.iptvDhcp) ? 'IPTV' : 'INTERNET';
+    const sType = String(profile.serviceType || profile.bearerService || '').toUpperCase();
+    const resolvedServiceList = (sType === 'VOIP' || sType === 'VOICE' || profile.serviceUsage?.voip) ? 'VOICE' :
+      (sType === 'TR069' || sType === 'MANAGEMENT' || profile.serviceUsage?.tr069) ? 'TR069' :
+      (sType === 'IPTV' || profile.serviceUsage?.iptvDhcp) ? 'IPTV' : 'INTERNET';
     rawCandidateParams.push([`${basePath}.X_CT-COM_ServiceList`, resolvedServiceList, 'xsd:string']);
+    rawCandidateParams.push([`${basePath}.ConnectionType`, profile.connectionType === 'Bridge' || profile.bridgeMode ? 'IP_Bridged' : 'IP_Routed', 'xsd:string']);
+    if (profile.connectionType === 'Static' || profile.ipAssignment === 'Static') {
+      rawCandidateParams.push([`${basePath}.AddressingType`, 'Static', 'xsd:string']);
+    } else {
+      rawCandidateParams.push([`${basePath}.AddressingType`, 'DHCP', 'xsd:string']);
+    }
   }
 
   if (isPppoe) {
@@ -535,12 +542,17 @@ export async function buildDynamicTr098WanParams(
     const pUpper = String(p || '').toUpperCase().trim();
     if (pUpper === 'FE' || pUpper === 'LAN1' || pUpper === 'LAN 1' || pUpper === 'ETH1') {
       lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
     } else if (pUpper === 'GE' || pUpper === 'LAN2' || pUpper === 'LAN 2' || pUpper === 'ETH2') {
       lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
     } else if (pUpper === 'LAN3' || pUpper === 'LAN 3' || pUpper === 'ETH3') {
       lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.3');
     } else if (pUpper === 'LAN4' || pUpper === 'LAN 4' || pUpper === 'ETH4') {
       lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.4');
+    } else {
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1');
+      lanInterfaces.push('InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.2');
     }
   }
 

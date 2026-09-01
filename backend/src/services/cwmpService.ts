@@ -2201,7 +2201,8 @@ ${stringElements}
       if (pendingCmd && session) {
         const rawParams = (pendingCmd as any).parameters?.tr069ParamValues || (pendingCmd as any).payload?.parameterValues || [];
         const profile = (pendingCmd.parameters as any)?.profile;
-        const isPpp = profile?.connectionType === 'PPPoE' || profile?.mode === 'Route' || profile?.linkMode === 'PPP' || rawParams.some((p: any) => {
+        const connType = String(profile?.connectionType || '').toUpperCase();
+        const isPpp = connType === 'PPPOE' || connType === 'PPP' || profile?.linkMode === 'PPP' || rawParams.some((p: any) => {
           const name = Array.isArray(p) ? p[0] : (p?.name || p?.path || '');
           return name.includes('WANPPPConnection');
         });
