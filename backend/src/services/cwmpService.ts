@@ -2500,9 +2500,14 @@ ${orderedParams.map((p: any) => `        <ParameterValueStruct>
         { $set: { status: spvStatus === 1 ? 'applied_pending_verification' : 'success', completedAt: new Date() } }
       );
 
+      const recentCutoff = new Date(Date.now() - 120_000);
       const inFlightCommands = await DeviceCommand.find({
         deviceId: device._id,
-        status: { $in: ['sent', 'sending', 'queued', 'pending', 'applied_pending_verification', 'success', 'applied'] },
+        $or: [
+          { cwmpRequestId: cwmpId },
+          { queuedAt: { $gte: recentCutoff }, status: { $in: ['sent', 'sending', 'applied_pending_verification', 'applied', 'success'] } },
+        ],
+        action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY', 'GetParameterNames', 'GetParameterValues', 'CUSTOM_RPC'] },
       });
 
       for (const cmd of inFlightCommands) {
@@ -2647,9 +2652,12 @@ ${stringElements}
         { $set: { status: 'success', completedAt: new Date() } }
       );
 
+      const recentCutoffSpa = new Date(Date.now() - 120_000);
       const inFlightCommands = await DeviceCommand.find({
         deviceId: device._id,
-        status: { $in: ['sent', 'sending', 'queued', 'pending', 'applied_pending_verification', 'success', 'applied'] },
+        queuedAt: { $gte: recentCutoffSpa },
+        status: { $in: ['sent', 'sending', 'applied_pending_verification', 'applied', 'success'] },
+        action: { $nin: ['SUMMON_LIVE_POLL', 'GET_PARAMETERS', 'REFRESH_TELEMETRY', 'GetParameterNames', 'GetParameterValues', 'CUSTOM_RPC'] },
       });
 
       const pathsToVerify: string[] = [];
@@ -3697,7 +3705,7 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
 
     // Mark SUMMON_LIVE_POLL and any telemetry polling commands as success
     await DeviceCommand.updateMany(
-      { deviceId: device._id, action: 'SUMMON_LIVE_POLL', status: { $in: ['sent', 'sending', 'queued', 'pending'] } },
+      { deviceId: device._id, action: 'SUMMON_LIVE_POLL', status: { $in: ['sent', 'sending', 'queued', 'pending', 'verifying'] } },
       { $set: { status: 'success', completedAt: new Date() } }
     ).catch(() => {});
 

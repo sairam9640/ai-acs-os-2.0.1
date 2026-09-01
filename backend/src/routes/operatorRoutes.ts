@@ -4129,6 +4129,21 @@ operatorRouter.get('/devices/:id/workspace', async (req: AuthenticatedRequest, r
               },
             }
           );
+
+          // Reconcile any read-only/telemetry commands (e.g. SUMMON_LIVE_POLL) stuck in verifying
+          await DeviceCommand.updateMany(
+            {
+              deviceId: device._id,
+              action: { $in: ['SUMMON_LIVE_POLL', 'GetParameterValues', 'GetParameterNames', 'REFRESH_TELEMETRY'] },
+              status: 'verifying',
+            },
+            {
+              $set: {
+                status: 'success',
+                completedAt: new Date(),
+              },
+            }
+          );
           return DeviceCommand.find({ deviceId: device._id, tenantId }).sort({ queuedAt: -1 }).limit(30);
         })()).map((cmd) => {
           let normalizedStatus: string = cmd.status;
