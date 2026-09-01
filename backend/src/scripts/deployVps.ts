@@ -48,8 +48,9 @@ conn.on('ready', () => {
       // 3. Check git status in likely project paths
       await runRemoteCommand('cd /root/ai-isp-os || cd /var/www/ai-isp-os || cd /root/ai-acs-os-2.0.1; pwd; git status; git pull origin master || git pull isp-origin master');
 
-      // 4. Build backend
+      // 4. Build backend and frontend
       await runRemoteCommand('cd /root/ai-isp-os/backend || cd /var/www/ai-isp-os/backend || cd /root/ai-acs-os-2.0.1/backend; pwd; npm install; npm run build; pm2 restart all || systemctl restart ai-isp-backend || true');
+      await runRemoteCommand('cd /root/ai-isp-os/frontend || cd /var/www/ai-isp-os/frontend || cd /root/ai-acs-os-2.0.1/frontend; pwd; npm install; npm run build || true');
 
       // 5. Final check
       await runRemoteCommand('pm2 list || true');

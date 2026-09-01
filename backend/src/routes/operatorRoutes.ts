@@ -1607,9 +1607,10 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
     const profiles = (device.wanProfiles || []).map((p: any, idx: number) => {
       const slotMatch = (p.cpeObjectPath || '').match(/WANConnectionDevice\.(\d+)\./i);
       const slotNum = slotMatch ? slotMatch[1] : (idx === 0 ? '1' : (idx === 1 ? '2' : '3'));
-      const isManagement = p.serviceType === 'TR069' || p.bearerService === 'TR069' || (p.name && /TR069/i.test(p.name)) || Boolean(p.isProtected) || slotNum === '1';
-      const isPppoe = p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || Boolean(p.pppoeUsername) || slotNum === '2';
-      const resolvedBearer = isManagement ? 'TR069' : (isPppoe ? 'INTERNET' : (p.bearerService || p.serviceType || 'INTERNET'));
+      const isManagement = p.serviceType === 'TR069' || p.bearerService === 'TR069' || (p.name && /TR069/i.test(p.name)) || Boolean(p.isProtected) || (slotNum === '1' && (p.serviceUsage?.tr069 || !p.serviceType));
+      const isVoice = p.bearerService === 'VOICE' || p.bearerService === 'VOIP' || p.serviceType === 'VOIP' || p.serviceType === 'VOICE' || p.serviceUsage?.voip;
+      const isPppoe = !isManagement && !isVoice && (p.connectionType === 'PPPoE' || p.linkMode === 'PPP' || Boolean(p.pppoeUsername));
+      const resolvedBearer = isManagement ? 'TR069' : (isVoice ? 'VOICE' : (isPppoe ? 'INTERNET' : (p.bearerService || p.serviceType || 'INTERNET')));
       
       const liveCpeName = raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.WANPPPConnection.1.Name`] ||
                           raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.WANIPConnection.1.Name`];
@@ -2486,6 +2487,17 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       }).catch(() => null);
 
       triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
+    }
+
+    // Purge deleted slot keys from rawParameters so GET /devices/:id/wan/profiles never resurrects it
+    if (device.rawParameters) {
+      const slotPrefix = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`;
+      for (const k of Object.keys(device.rawParameters)) {
+        if (k.startsWith(slotPrefix)) {
+          delete device.rawParameters[k];
+        }
+      }
+      device.markModified('rawParameters');
     }
 
     // Always remove from local device.wanProfiles
