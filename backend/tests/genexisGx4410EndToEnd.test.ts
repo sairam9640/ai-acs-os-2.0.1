@@ -264,15 +264,13 @@ describe('AI ISP OS — Genexis Platinum GX 4410 Comprehensive End-to-End Test S
     expect(spvResponseXml).toBeDefined();
     expect(spvResponseXml).toContain('<cwmp:SetParameterValues>');
 
-    // Verify strict TR-069 ordering: ConnectionType first, then Enable, then Username/Password, then VLAN
-    const connTypeIdx = spvResponseXml!.indexOf('ConnectionType');
+    // Verify strict TR-069 ordering: Enable first, then Username/Password, then VLAN
     const enableIdx = spvResponseXml!.indexOf('Enable');
     const userIdx = spvResponseXml!.indexOf('Username');
     const passIdx = spvResponseXml!.indexOf('Password');
     const vlanIdx = spvResponseXml!.indexOf('WANEponLinkConfig');
 
-    expect(connTypeIdx).toBeGreaterThan(0);
-    expect(enableIdx).toBeGreaterThan(connTypeIdx);
+    expect(enableIdx).toBeGreaterThan(0);
     expect(userIdx).toBeGreaterThan(enableIdx);
     expect(passIdx).toBeGreaterThan(userIdx);
     expect(vlanIdx).toBeGreaterThan(passIdx);

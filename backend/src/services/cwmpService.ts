@@ -2113,8 +2113,12 @@ ${stringElements}
       session.lastQueriedPaths = undefined;
     }
 
-    Object.assign(device.rawParameters, rawMap);
-    device.markModified('rawParameters');
+    if (device.rawParameters) {
+      Object.assign(device.rawParameters, rawMap);
+    }
+    if (typeof (device as any).markModified === 'function') {
+      (device as any).markModified('rawParameters');
+    }
 
     // --- POLL-THEN-PROVISION: WAN Slot Activation Check ---
     // After every GPV response, check if any waiting_for_wan_slot commands can now be fulfilled.
@@ -2263,16 +2267,18 @@ ${stringElements}
         // 5. Remaining attributes (NATEnabled, DNSServers, etc.)
         const orderedParams: Array<{ name: string; value: any; type: string }> = [];
 
-        // 1. ConnectionType (ensure present immediately after AddObject)
-        const connTypeExisting = normalizedParams.find((p: any) => p.name.endsWith('.ConnectionType'));
-        if (connTypeExisting) {
-          orderedParams.push(connTypeExisting);
-        } else if (isPpp) {
-          orderedParams.push({
-            name: `${resolvedCpePath}ConnectionType`,
-            value: 'IP_Routed',
-            type: 'xsd:string',
-          });
+        // 1. ConnectionType (only valid on WANIPConnection, omitted on WANPPPConnection to prevent Fault 9005)
+        if (!isPpp) {
+          const connTypeExisting = normalizedParams.find((p: any) => p.name.endsWith('.ConnectionType'));
+          if (connTypeExisting) {
+            orderedParams.push(connTypeExisting);
+          } else {
+            orderedParams.push({
+              name: `${resolvedCpePath}ConnectionType`,
+              value: 'IP_Routed',
+              type: 'xsd:string',
+            });
+          }
         }
 
         // 2. Enable
