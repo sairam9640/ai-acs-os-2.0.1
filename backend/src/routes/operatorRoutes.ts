@@ -2231,26 +2231,12 @@ operatorRouter.post('/devices/:id/wan/sync-live', async (req: AuthenticatedReque
     const device = await Device.findOne({ $or: [{ _id: Types.ObjectId.isValid(id) ? id : undefined }, { serialNumber: id }] });
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
-    // Queue GetParameterValues on all potential WANDevice slots (1..8) to discover every live WAN connection
-    const liveTargetParams: string[] = [];
-    for (let slot = 1; slot <= 8; slot++) {
-      liveTargetParams.push(
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.Name`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.X_CT-COM_ServiceList`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.ConnectionType`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.AddressingType`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.ConnectionStatus`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANIPConnection.1.ExternalIPAddress`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.Name`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.Username`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.Enable`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.NATEnabled`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.ConnectionType`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.ConnectionStatus`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.ExternalIPAddress`,
-        `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slot}.WANPPPConnection.1.X_CT-COM_ServiceList`
-      );
-    }
+    // In TR-069, querying the branch object paths returns all existing instances without Fault 9005
+    const liveTargetParams: string[] = [
+      'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.',
+      'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.',
+      'InternetGatewayDevice.LANDevice.1.WLANConfiguration.',
+    ];
 
     await DeviceCommand.create({
       tenantId: device.tenantId,
