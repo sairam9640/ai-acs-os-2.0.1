@@ -742,6 +742,21 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                     >
                       New
                     </button>
+
+                    {!isTr069Service && !activeForm.isProtected && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const currentProf = profiles.find((p) => (p._id || String(p.name)) === selectedProfileId) || activeForm;
+                          setDeleteConfirmProfile(currentProf);
+                        }}
+                        className="px-3 py-1 text-xs font-bold border border-rose-300 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 flex items-center space-x-1"
+                        title="Delete this WAN Connection from ONT"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-0.5" />
+                        <span>Delete</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -1293,6 +1308,20 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-3">
+                  {!isTr069Service && !activeForm.isProtected && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        const currentProf = profiles.find((p) => (p._id || String(p.name)) === selectedProfileId) || activeForm;
+                        setDeleteConfirmProfile(currentProf);
+                      }}
+                      className="border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold"
+                    >
+                      <Trash2 className="w-4 h-4 mr-1.5" />
+                      Delete WAN
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="secondary"
@@ -1389,11 +1418,11 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
             <p className="font-bold text-sm text-rose-900">Are you sure you want to delete this Customer WAN?</p>
             <div className="font-mono text-[11px] bg-white/70 p-2.5 rounded-lg border border-rose-200/80 space-y-1">
               <div>Profile Name: <strong>{deleteConfirmProfile?.name}</strong></div>
-              <div>CPE Object: <strong>InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.</strong></div>
-              <div>Service: <strong>{deleteConfirmProfile?.bearerService || 'INTERNET'} (VLAN: {deleteConfirmProfile?.vlanId})</strong></div>
+              <div>CPE Object: <strong>{deleteConfirmProfile?.cpeObjectPath || 'Allocated Slot on ONT'}</strong></div>
+              <div>Service: <strong>{deleteConfirmProfile?.bearerService || deleteConfirmProfile?.serviceType || 'INTERNET'} (VLAN: {deleteConfirmProfile?.vlanId})</strong></div>
             </div>
             <p className="text-[11px] text-rose-700 pt-1">
-              This will disable and reset the customer Internet interface on the physical ONT. Management WAN1 (TR-069, VLAN 100) is permanently protected and will remain 100% active.
+              This will remove this connection instance from the physical ONT via TR-069 DeleteObject. Management WAN1 (TR-069, VLAN 100) is permanently protected.
             </p>
           </div>
           <div className="flex justify-end space-x-3 pt-3 border-t border-slate-100">
