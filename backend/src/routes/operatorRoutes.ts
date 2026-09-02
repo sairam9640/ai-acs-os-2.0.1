@@ -2550,7 +2550,7 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
         operation: 'DELETE_OBJECT',
         targetProfile: removedName,
         targetSlot: targetSlot,
-        targetObjectName: targetSlotObject,
+        targetObjectName: targetConnObject,
         cpeObjectPath: targetConnObject,
       },
       status: 'queued',

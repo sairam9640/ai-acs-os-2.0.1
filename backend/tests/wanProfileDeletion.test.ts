@@ -142,7 +142,7 @@ describe('WAN Profile Deletion & TR-069 Command Queueing Suite', () => {
     expect(cmd?.action).toBe('DELETE_WAN_CONFIG');
     expect(cmd?.status).toBe('queued');
     expect((cmd?.parameters as any).targetSlot).toBe('13');
-    expect((cmd?.parameters as any).targetObjectName).toBe('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.13.');
+    expect((cmd?.parameters as any).targetObjectName).toBe('InternetGatewayDevice.WANDevice.1.WANConnectionDevice.13.WANPPPConnection.1.');
 
     // Verify DB device rawParameters purged slot 13 keys
     const updatedDevice = await Device.findById(testDevice._id);

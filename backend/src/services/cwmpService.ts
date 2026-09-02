@@ -1503,7 +1503,7 @@ ${stringElements}
           // Dispatch DeleteObject if action is SET_WAN_CONFIG with operation DELETE_OBJECT or DELETE_WAN_CONFIG
           const requiresDeleteObject = (pendingCmd.parameters as any)?.operation === 'DELETE_OBJECT' || (pendingCmd as any).action === 'DELETE_WAN_CONFIG';
           if (requiresDeleteObject && (session as any).stage !== 'CUSTOM_RPC_SENT') {
-            let deleteTarget = (pendingCmd.parameters as any)?.targetObjectName || (pendingCmd.parameters as any)?.cpeObjectPath;
+            let deleteTarget = (pendingCmd.parameters as any)?.cpeObjectPath || (pendingCmd.parameters as any)?.targetObjectName;
             if (deleteTarget) {
               if (!deleteTarget.endsWith('.')) deleteTarget = `${deleteTarget}.`;
               pendingCmd.status = 'sending';
@@ -2929,6 +2929,79 @@ ${validParams.map((p: any) => `        <ParameterValueStruct>
 
       // Only mark configuration commands as failed if the fault occurred during SetParameterValues (SPV) or Custom RPC
       if ((session?.stage === 'SPV_SENT' || session?.stage === 'CUSTOM_RPC_SENT') && incomingCwmpId !== '2') {
+        // Fallback for DeleteObject (CUSTOM_RPC_SENT): Many CPE firmwares (e.g. Genexis GX4410, TP-Link) restrict DeleteObject
+        // and return Fault 9003/9005. Gracefully fallback to disabling WAN and clearing credentials on the ONT via SetParameterValues.
+        if (session?.stage === 'CUSTOM_RPC_SENT') {
+          const deleteCmd = await DeviceCommand.findOne({
+            deviceId: device._id,
+            action: { $in: ['DELETE_WAN_CONFIG', 'DeleteObject', 'SET_WAN_CONFIG'] },
+            status: { $in: ['sending', 'sent', 'queued', 'pending'] },
+          }).sort({ sentAt: -1, createdAt: -1 });
+
+          if (deleteCmd && ((deleteCmd.parameters as any)?.operation === 'DELETE_OBJECT' || deleteCmd.action === 'DELETE_WAN_CONFIG')) {
+            console.log(`[CWMP ACS] ⚠️ CPE returned Fault ${fault.faultCode} for DeleteObject on ${session?.serialNumber || device.serialNumber}. Executing graceful WAN disable fallback via SetParameterValues.`);
+            
+            const targetSlot = (deleteCmd.parameters as any)?.targetSlot || '2';
+            const targetConn = (deleteCmd.parameters as any)?.cpeObjectPath || (deleteCmd.parameters as any)?.targetObjectName || '';
+            const slotNum = targetConn.match(/WANConnectionDevice\.(\d+)\./i)?.[1] || targetSlot;
+            const basePath = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.`;
+            const isIpTarget = targetConn.includes('WANIPConnection');
+            const connSubPath = isIpTarget ? `${basePath}WANIPConnection.1.` : `${basePath}WANPPPConnection.1.`;
+
+            const fallbackParams: { name: string; value: any; type: string }[] = [
+              { name: `${connSubPath}Enable`, value: false, type: 'xsd:boolean' },
+              { name: `${connSubPath}X_CT-COM_LanInterface`, value: '', type: 'xsd:string' },
+              { name: `${connSubPath}X_CT-COM_ServiceList`, value: '', type: 'xsd:string' },
+              { name: `${basePath}X_CT-COM_WANEponLinkConfig.VLANIDMark`, value: 0, type: 'xsd:int' },
+            ];
+            if (!isIpTarget) {
+              fallbackParams.push({ name: `${connSubPath}Username`, value: '', type: 'xsd:string' });
+              fallbackParams.push({ name: `${connSubPath}Password`, value: '', type: 'xsd:string' });
+            }
+
+            session.stage = 'SPV_SENT';
+            const spvXml = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:cwmp="urn:dslforum-org:cwmp-1-0" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <soapenv:Header><cwmp:ID soapenv:mustUnderstand="1">3</cwmp:ID></soapenv:Header>
+  <soapenv:Body>
+    <cwmp:SetParameterValues>
+      <ParameterList soapenv:arrayType="cwmp:ParameterValueStruct[${fallbackParams.length}]">
+${fallbackParams.map((p) => `        <ParameterValueStruct>
+          <Name>${p.name}</Name>
+          <Value xsi:type="${p.type}">${p.value}</Value>
+        </ParameterValueStruct>`).join('\n')}
+      </ParameterList>
+      <ParameterKey>${deleteCmd._id}</ParameterKey>
+    </cwmp:SetParameterValues>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+            deleteCmd.cwmpRequestId = '3';
+            deleteCmd.status = 'sending';
+            deleteCmd.affectedParameterPaths = fallbackParams.map((p) => p.name);
+            deleteCmd.verificationTargetValues = fallbackParams.reduce((acc: any, p) => {
+              acc[p.name] = p.value;
+              return acc;
+            }, {});
+            await deleteCmd.save();
+
+            CwmpSessionLog.create({
+              tenantId: session?.tenantId,
+              deviceId: device._id,
+              serialNumber: session?.serialNumber || device.serialNumber,
+              sessionId: session?.sessionId || incomingSessionId || 'unknown',
+              cwmpId: '3',
+              direction: 'ACS_TO_CPE',
+              rpcMethod: 'SetParameterValues',
+              httpStatus: 200,
+              rawXml: spvXml,
+              timestamp: new Date(),
+            }).catch(() => {});
+
+            console.log(`[Native CWMP OUT] Dispatched Graceful Disable SPV for Slot ${slotNum} on ${session.serialNumber}`);
+            return spvXml;
+          }
+        }
 
         console.log(`[CWMP_STRUCTURED_LOG] ${JSON.stringify({
           event: 'CWMP_FAULT',
