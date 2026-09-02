@@ -104,12 +104,14 @@ interface WanManagementSuiteProps {
   deviceId: string;
   device: any;
   onRefreshTelemetry?: () => void;
+  onCommandQueued?: (commandId: string, title?: string) => void;
 }
 
 export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
   deviceId,
   device,
   onRefreshTelemetry,
+  onCommandQueued,
 }) => {
   const [profiles, setProfiles] = useState<WanProfileData[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
@@ -332,16 +334,42 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
       setDeleteConfirmProfile(null);
       return;
     }
+    const profileToDelete = { ...deleteConfirmProfile };
     try {
       setIsSaving(true);
       setErrorMsg(null);
       setSuccessMsg(null);
       const res = await api.deleteWanProfile(deviceId, targetKey);
       if (res.success) {
-        setSuccessMsg(`Profile "${deleteConfirmProfile.name}" deleted successfully and disabled on ONT.`);
+        setSuccessMsg(`Profile "${profileToDelete.name}" deleted successfully and disable command queued for ONT.`);
         setDeleteConfirmProfile(null);
-        await fetchProfiles();
-        onRefreshTelemetry?.();
+
+        // Optimistically remove from local state immediately
+        const deletedId = profileToDelete._id || profileToDelete.cpeObjectPath || profileToDelete.name;
+        setProfiles((prev) => {
+          const filtered = prev.filter(
+            (p) =>
+              p._id !== deletedId &&
+              p.cpeObjectPath !== deletedId &&
+              p.name !== profileToDelete.name &&
+              (!profileToDelete.cpeObjectPath || p.cpeObjectPath !== profileToDelete.cpeObjectPath)
+          );
+          if (filtered.length > 0) {
+            const nextSelect = filtered.find(p => p.bearerService === 'INTERNET' || p.serviceType === 'INTERNET') || filtered[0];
+            setSelectedProfileId(nextSelect._id || '0');
+            setActiveForm(JSON.parse(JSON.stringify(nextSelect)));
+          } else {
+            initDefaultProfile();
+          }
+          return filtered;
+        });
+
+        if (res.commandId && onCommandQueued) {
+          onCommandQueued(res.commandId, `Deleting WAN Profile [${profileToDelete.name}] on physical ONT...`);
+        } else {
+          await fetchProfiles();
+          if (onRefreshTelemetry) onRefreshTelemetry();
+        }
       } else {
         setErrorMsg((res as any).error || 'Failed to delete WAN profile');
       }
@@ -472,8 +500,12 @@ export const WanManagementSuite: React.FC<WanManagementSuiteProps> = ({
             `WAN Configuration [${activeForm.name}] staged & queued for TR-069 dispatch to ONT.`
         );
         setIsDiffModalOpen(false);
-        await fetchProfiles();
-        if (onRefreshTelemetry) onRefreshTelemetry();
+        if (res.commandId && onCommandQueued) {
+          onCommandQueued(res.commandId, `Staging WAN Configuration [${activeForm.name}] to physical ONT...`);
+        } else {
+          await fetchProfiles();
+          if (onRefreshTelemetry) onRefreshTelemetry();
+        }
       } else {
         setErrorMsg(res.error || 'Failed to dispatch WAN configuration');
       }

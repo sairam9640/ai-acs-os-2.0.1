@@ -2517,6 +2517,10 @@ export const DeviceDetail: React.FC = () => {
                   manufacturer: workspace?.device?.manufacturer || workspace?.header?.vendor
                 }}
                 onRefreshTelemetry={handleRefreshTelemetry}
+                onCommandQueued={(cmdId, title) => {
+                  start30sCommandTracking(cmdId, title);
+                  if (id) fetchWorkspace(id);
+                }}
               />
             )}
 

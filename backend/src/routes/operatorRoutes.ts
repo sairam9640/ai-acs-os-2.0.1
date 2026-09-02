@@ -1652,8 +1652,13 @@ operatorRouter.get('/devices/:id/wan/profiles', async (req: AuthenticatedRequest
         ? 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.'
         : dynamicCustomerPath);
 
+      const stableId = p._id ? String(p._id) : new Types.ObjectId().toString();
+      if (!p._id || p.name !== canonicalName || p.cpeObjectPath !== cpePath) {
+        hasModifications = true;
+      }
+
       return {
-        _id: p._id ? String(p._id) : String(idx),
+        _id: stableId,
         index: idx,
         name: canonicalName,
         transMode: p.transMode || 'PON',
@@ -2339,67 +2344,164 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     const device = await Device.findOne({ $or: [{ _id: Types.ObjectId.isValid(id) ? id : undefined }, { serialNumber: id }] });
     if (!device) return res.status(404).json({ success: false, error: 'Device not found' });
 
+    // If device.wanProfiles is empty, discover dynamically from rawParameters
     if (!device.wanProfiles || device.wanProfiles.length === 0) {
-      return res.status(404).json({ success: false, error: 'No WAN profiles exist to delete.' });
+      const raw = device.rawParameters || {};
+      const connPrefixes = Array.from(new Set(
+        Object.keys(raw).map(k => {
+          const m = k.match(/(InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.(?:WANPPPConnection|WANIPConnection)\.\d+)\./i);
+          return m ? m[1] : null;
+        }).filter((v): v is string => v !== null)
+      ));
+      if (connPrefixes.length > 0) {
+        device.wanProfiles = connPrefixes.map((prefix, idx) => {
+          const isPpp = prefix.includes('WANPPPConnection');
+          const slotM = prefix.match(/WANConnectionDevice\.(\d+)\./i);
+          const slotNum = slotM ? slotM[1] : String(idx + 1);
+          const name = raw[`${prefix}.Name`] || `${slotNum}_${isPpp ? 'INTERNET_R' : 'MGMT_IP'}`;
+          const serviceList = raw[`${prefix}.X_CT-COM_ServiceList`] || raw[`${prefix}.X_CT_COM_ServiceList`] || raw[`${prefix}.ServiceList`] || '';
+          const isTr069 = (/TR069/i.test(name) || /TR069/i.test(serviceList)) && !/INTERNET|VOIP/i.test(name + serviceList);
+          const isVoip = /VOIP|VOICE/i.test(name) || /VOIP|VOICE/i.test(serviceList);
+          const serviceType = isTr069 ? 'TR069' : (isVoip ? 'VOIP' : 'INTERNET');
+          const vlanRaw = raw[`${prefix}.X_CT-COM_VlanID`] || raw[`${prefix}.X_CT_COM_VlanID`] || raw[`${prefix}.X_HW_VLAN`] || raw[`${prefix}.VLANID`] || raw[`InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${slotNum}.X_CT-COM_WANEponLinkConfig.VLANIDMark`];
+          const vlan = vlanRaw ? parseInt(String(vlanRaw), 10) : (isTr069 ? 100 : 480);
+          return {
+            _id: new Types.ObjectId(),
+            name,
+            connectionType: isPpp ? 'PPPoE' : 'IP_Routed',
+            serviceType,
+            bearerService: serviceType,
+            cpeObjectPath: `${prefix}.`,
+            status: raw[`${prefix}.ConnectionStatus`] || 'Connected',
+            pppoeUsername: raw[`${prefix}.Username`] || '',
+            ipAddress: raw[`${prefix}.ExternalIPAddress`] || null,
+            vlanId: vlan,
+            vlanEnabled: Boolean(vlanRaw),
+            isDefault: idx === 0,
+            isProtected: isTr069,
+          };
+        }) as any;
+      }
     }
 
     const cleanProfId = decodeURIComponent(String(profileId || '').trim());
     
-    let targetIdx = device.wanProfiles.findIndex((p: any) => p._id && String(p._id) === cleanProfId);
+    // 1. Match by MongoDB _id (exact ObjectId string or ObjectId instance)
+    let targetIdx = (device.wanProfiles || []).findIndex((p: any) => p._id && String(p._id) === cleanProfId);
     
+    // 2. Match by exact or partial CPE Object Path (e.g. InternetGatewayDevice.WANDevice.1.WANConnectionDevice.13... or WANConnectionDevice.13)
     if (targetIdx === -1) {
-      targetIdx = device.wanProfiles.findIndex((p: any) => p.cpeObjectPath && (p.cpeObjectPath.trim() === cleanProfId || p.cpeObjectPath.trim() === `${cleanProfId}.`));
-    }
-    
-    if (targetIdx === -1 && !isNaN(parseInt(cleanProfId, 10)) && parseInt(cleanProfId, 10) >= 0 && parseInt(cleanProfId, 10) < device.wanProfiles.length) {
-      targetIdx = parseInt(cleanProfId, 10);
+      targetIdx = (device.wanProfiles || []).findIndex((p: any) => {
+        if (!p.cpeObjectPath) return false;
+        const normP = p.cpeObjectPath.replace(/\.$/, '').toLowerCase();
+        const normTarget = cleanProfId.replace(/\.$/, '').toLowerCase();
+        return normP === normTarget || normP.includes(normTarget) || normTarget.includes(normP);
+      });
     }
 
+    // 3. Match by exact Profile Name (case-insensitive)
     if (targetIdx === -1) {
-      targetIdx = device.wanProfiles.findIndex((p: any) => p.name && p.name.trim().toLowerCase() === cleanProfId.toLowerCase());
+      targetIdx = (device.wanProfiles || []).findIndex((p: any) => p.name && p.name.trim().toLowerCase() === cleanProfId.toLowerCase());
     }
 
-    // Match by loose keyword if client sent old identifier like WAN_PPP_1, INTERNET, or 488
-    if (targetIdx === -1 && (/ppp|internet|488|wan_2|wan2|wan_ppp_1/i.test(cleanProfId))) {
-      targetIdx = device.wanProfiles.findIndex((p: any) => 
-        (p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || p.name?.includes('INTERNET') || p.name?.includes('488') || p.name === 'WAN_PPP_1') &&
-        !p.name?.includes('TR069') && p.serviceType !== 'TR069' && p.vlanId !== 100
-      );
+    // 4. Match by Slot Number from cleanProfId (e.g. '13_INTERNET...', '13', 'WANConnectionDevice.13')
+    const cleanSlotMatch = cleanProfId.match(/(?:WANConnectionDevice\.|^)(\d+)(?:[_\.]|$)/i);
+    if (targetIdx === -1 && cleanSlotMatch) {
+      const explicitSlot = cleanSlotMatch[1];
+      targetIdx = (device.wanProfiles || []).findIndex((p: any) => {
+        if (p.cpeObjectPath && p.cpeObjectPath.includes(`WANConnectionDevice.${explicitSlot}.`)) return true;
+        if (p.name && new RegExp(`^${explicitSlot}_`, 'i').test(p.name)) return true;
+        return false;
+      });
     }
 
-    // Fallback: If only 1 deletable (non-management) profile exists in device.wanProfiles, target it safely
-    if (targetIdx === -1) {
-      const nonMgmtIndices = device.wanProfiles
-        .map((p: any, idx: number) => ({ p, idx }))
-        .filter(({ p }: any) => p.serviceType !== 'TR069' && !p.name?.includes('TR069') && p.vlanId !== 100 && !p.isProtected);
-      
-      if (nonMgmtIndices.length === 1) {
-        targetIdx = nonMgmtIndices[0].idx;
+    // 5. Match by pure numeric index if within bounds (e.g. '0' or '1')
+    if (targetIdx === -1 && /^\d+$/.test(cleanProfId)) {
+      const idxNum = parseInt(cleanProfId, 10);
+      if (idxNum >= 0 && idxNum < (device.wanProfiles || []).length) {
+        targetIdx = idxNum;
       }
     }
 
-    if (targetIdx === -1 || targetIdx >= device.wanProfiles.length) {
-      await DeviceCommand.updateMany(
-        { deviceId: device._id, action: 'SET_WAN_CONFIG', status: { $in: ['queued', 'pending', 'sending'] } },
-        { $set: { status: 'cancelled', completedAt: new Date() } }
-      );
-      return res.json({
-        success: true,
-        message: 'Customer WAN Profile removed successfully.',
-        profiles: device.wanProfiles,
-        wanProfiles: device.wanProfiles,
-      });
+    // 6. Match by loose keyword (e.g. VID / VLAN number, '488', '480', 'internet', 'ppp', etc.)
+    if (targetIdx === -1) {
+      const vidMatch = cleanProfId.match(/(?:VID_?|VLAN_?)(\d+)/i) || cleanProfId.match(/\b(\d{3,4})\b/);
+      if (vidMatch) {
+        const vlanNum = parseInt(vidMatch[1], 10);
+        targetIdx = (device.wanProfiles || []).findIndex((p: any) => p.vlanId === vlanNum && p.serviceType !== 'TR069' && !p.isProtected);
+      }
     }
 
-    const targetProfile = device.wanProfiles[targetIdx];
-    const isManagement = targetProfile.serviceType === 'TR069' || targetProfile.serviceType === 'VOIP/TR069' || targetProfile.name?.includes('TR069') || (targetProfile as any).isProtected;
+    if (targetIdx === -1 && /ppp|internet|wan_2|wan2|customer/i.test(cleanProfId)) {
+      targetIdx = (device.wanProfiles || []).findIndex((p: any) => 
+        (p.serviceType === 'INTERNET' || p.connectionType === 'PPPoE' || p.name?.includes('INTERNET') || p.name?.includes('488') || p.name?.includes('480')) &&
+        !p.name?.includes('TR069') && p.serviceType !== 'TR069' && p.vlanId !== 100 && !p.isProtected
+      );
+    }
 
-    // Permanently prevent deleting the TR-069 Management interface
-    if (isManagement) {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot delete protected TR-069 Management WAN connection. Management WAN is required for remote ACS operations.',
-      });
+    // 7. Fallback: If only 1 non-management profile exists in device.wanProfiles, target it safely
+    if (targetIdx === -1 && device.wanProfiles && device.wanProfiles.length > 0) {
+      const nonMgmt = device.wanProfiles
+        .map((p: any, idx: number) => ({ p, idx }))
+        .filter(({ p }: any) => p.serviceType !== 'TR069' && !p.name?.includes('TR069') && p.vlanId !== 100 && !p.isProtected);
+      if (nonMgmt.length === 1) {
+        targetIdx = nonMgmt[0].idx;
+      }
+    }
+
+    let targetProfile: any = null;
+    let targetSlot = '';
+    let removedName = '';
+
+    if (targetIdx !== -1 && device.wanProfiles && device.wanProfiles[targetIdx]) {
+      targetProfile = device.wanProfiles[targetIdx];
+      const isManagement = targetProfile.serviceType === 'TR069' || targetProfile.serviceType === 'VOIP/TR069' || targetProfile.name?.includes('TR069') || Boolean(targetProfile.isProtected);
+      if (isManagement) {
+        return res.status(400).json({
+          success: false,
+          error: 'Cannot delete protected TR-069 Management WAN connection. Management WAN is required for remote ACS operations.',
+        });
+      }
+      removedName = targetProfile.name || `WAN_Profile_${targetIdx + 1}`;
+      const slotMatch = targetProfile.cpeObjectPath?.match(/WANConnectionDevice\.(\d+)\./i) || targetProfile.name?.match(/^(\d+)_/);
+      targetSlot = slotMatch ? slotMatch[1] : '';
+    } else {
+      // Look directly in rawParameters for candidate non-management slot
+      const raw = device.rawParameters || {};
+      const slotCandidates = Array.from(new Set(
+        Object.keys(raw).map(k => {
+          const m = k.match(/InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.(\d+)\./i);
+          return m ? m[1] : null;
+        }).filter((v): v is string => v !== null && v !== '1')
+      ));
+
+      if (slotCandidates.length > 0) {
+        targetSlot = (cleanSlotMatch && slotCandidates.includes(cleanSlotMatch[1])) ? cleanSlotMatch[1] : slotCandidates[0];
+        removedName = cleanProfId || `Slot_${targetSlot}_WAN`;
+      }
+    }
+
+    if (!targetSlot) {
+      const raw = device.rawParameters || {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (typeof v === 'string' && (v === cleanProfId || (targetProfile?.vlanId && k.includes('VLANIDMark') && String(v) === String(targetProfile.vlanId)))) {
+          const m = k.match(/WANConnectionDevice\.(\d+)\./i);
+          if (m && m[1] !== '1') {
+            targetSlot = m[1];
+            break;
+          }
+        }
+      }
+    }
+
+    if (!targetSlot && cleanSlotMatch) {
+      targetSlot = cleanSlotMatch[1];
+    }
+    if (!targetSlot) {
+      targetSlot = '2';
+    }
+    if (!removedName) {
+      removedName = cleanProfId || `WAN_Slot_${targetSlot}`;
     }
 
     // COMMAND LOCK: If a high-priority command is actively sending/verifying, block delete
@@ -2420,8 +2522,6 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       }
     }
 
-    const removedName = targetProfile.name;
-
     // DEDUP: Cancel any existing queued/pending SET_WAN_CONFIG for this device
     await DeviceCommand.updateMany(
       {
@@ -2438,28 +2538,8 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       }
     );
 
-    // Resolve target WAN Connection slot on physical ONT
-    const slotMatch = targetProfile.cpeObjectPath?.match(/WANConnectionDevice\.(\d+)\./i);
-    let targetSlot = slotMatch ? slotMatch[1] : '';
-
-    if (!targetSlot) {
-      const raw = device.rawParameters || {};
-      for (const [k, v] of Object.entries(raw)) {
-        if (typeof v === 'string' && (v === targetProfile.name || (targetProfile.vlanId && k.includes('VLANIDMark') && String(v) === String(targetProfile.vlanId)))) {
-          const m = k.match(/WANConnectionDevice\.(\d+)\./i);
-          if (m) {
-            targetSlot = m[1];
-            break;
-          }
-        }
-      }
-    }
-
-    if (!targetSlot) {
-      targetSlot = '2';
-    }
-
-    const targetObjectName = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`;
+    const targetSlotObject = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`;
+    const targetConnObject = targetProfile?.cpeObjectPath || `${targetSlotObject}WANPPPConnection.1.`;
 
     // ALWAYS create and queue DELETE_WAN_CONFIG DeviceCommand so it appears in Pending Updates and triggers DeleteObject RPC
     const deleteCmd = await DeviceCommand.create({
@@ -2469,8 +2549,9 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       parameters: {
         operation: 'DELETE_OBJECT',
         targetProfile: removedName,
-        targetObjectName: targetObjectName,
-        cpeObjectPath: targetObjectName,
+        targetSlot: targetSlot,
+        targetObjectName: targetSlotObject,
+        cpeObjectPath: targetConnObject,
       },
       status: 'queued',
       requestedBy: {
@@ -2480,15 +2561,17 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
       },
       queuedAt: new Date(),
       correlationId: `wan_delete_${Date.now()}`,
-    }).catch(() => null);
+    }).catch((err) => {
+      console.error('[Delete WAN Profile] Failed to create DeviceCommand:', err);
+      return null;
+    });
 
     triggerGenieAcsConnectionRequest(device.serialNumber).catch(() => {});
 
     // Purge deleted slot keys from rawParameters so GET /devices/:id/wan/profiles never resurrects it
     if (device.rawParameters) {
-      const slotPrefix = `InternetGatewayDevice.WANDevice.1.WANConnectionDevice.${targetSlot}.`;
       for (const k of Object.keys(device.rawParameters)) {
-        if (k.startsWith(slotPrefix)) {
+        if (k.startsWith(targetSlotObject) || (removedName && typeof device.rawParameters[k] === 'string' && device.rawParameters[k] === removedName)) {
           delete device.rawParameters[k];
         }
       }
@@ -2496,7 +2579,15 @@ operatorRouter.delete('/devices/:id/wan/profiles/:profileId', async (req: Authen
     }
 
     // Always remove from local device.wanProfiles
-    device.wanProfiles.splice(targetIdx, 1);
+    if (targetIdx !== -1 && device.wanProfiles) {
+      device.wanProfiles.splice(targetIdx, 1);
+    } else if (device.wanProfiles) {
+      device.wanProfiles = device.wanProfiles.filter((p: any) => {
+        if (p.cpeObjectPath && p.cpeObjectPath.includes(`WANConnectionDevice.${targetSlot}.`)) return false;
+        if (p.name && (p.name === removedName || new RegExp(`^${targetSlot}_`, 'i').test(p.name))) return false;
+        return true;
+      }) as any;
+    }
     device.markModified('wanProfiles');
     await device.save();
 

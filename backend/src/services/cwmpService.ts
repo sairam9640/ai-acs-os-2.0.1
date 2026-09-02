@@ -1500,11 +1500,12 @@ ${stringElements}
           const requiresAddObject = !!(pendingCmd as any).parameters?.requiresAddObject;
           const addObjectAttempted = !!(pendingCmd as any).parameters?.addObjectAttempted;
 
-          // Dispatch DeleteObject if action is SET_WAN_CONFIG with operation DELETE_OBJECT
+          // Dispatch DeleteObject if action is SET_WAN_CONFIG with operation DELETE_OBJECT or DELETE_WAN_CONFIG
           const requiresDeleteObject = (pendingCmd.parameters as any)?.operation === 'DELETE_OBJECT' || (pendingCmd as any).action === 'DELETE_WAN_CONFIG';
           if (requiresDeleteObject && (session as any).stage !== 'CUSTOM_RPC_SENT') {
-            const deleteTarget = (pendingCmd.parameters as any)?.targetObjectName || (pendingCmd.parameters as any)?.cpeObjectPath;
+            let deleteTarget = (pendingCmd.parameters as any)?.targetObjectName || (pendingCmd.parameters as any)?.cpeObjectPath;
             if (deleteTarget) {
+              if (!deleteTarget.endsWith('.')) deleteTarget = `${deleteTarget}.`;
               pendingCmd.status = 'sending';
               pendingCmd.sentAt = new Date();
               (session as any).stage = 'CUSTOM_RPC_SENT';

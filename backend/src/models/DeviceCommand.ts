@@ -11,6 +11,9 @@ export type CommandActionType =
   | 'REFRESH_TELEMETRY'
   | 'SET_WIFI_CONFIG'
   | 'SET_WAN_CONFIG'
+  | 'DELETE_WAN_CONFIG'
+  | 'DeleteObject'
+  | 'AddObject'
   | 'BLOCK_CLIENT'
   | 'UNBLOCK_CLIENT'
   | 'REBOOT_DEVICE'
@@ -103,6 +106,9 @@ const DeviceCommandSchema = new Schema<IDeviceCommand>(
         'REFRESH_TELEMETRY',
         'SET_WIFI_CONFIG',
         'SET_WAN_CONFIG',
+        'DELETE_WAN_CONFIG',
+        'DeleteObject',
+        'AddObject',
         'BLOCK_CLIENT',
         'UNBLOCK_CLIENT',
         'REBOOT_DEVICE',
